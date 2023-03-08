@@ -1,21 +1,21 @@
 CREATE TABLE contact (
     id bigserial PRIMARY KEY,
-    full_name text,
+    full_name text NOT NULL,
     username text -- reference to web user
 );
 
 CREATE TABLE contact_address (
     id bigserial PRIMARY KEY,
     contact_id bigint REFERENCES contact(id),
-    type text, -- 'phone', 'email', ...
-    address text, -- phone number, email address, ...
+    type text NOT NULL, -- 'phone', 'email', ...
+    address text NOT NULL, -- phone number, email address, ...
 
     UNIQUE (contact_id, type) -- constraint may be relaxed in the future to support multiple addresses per type
 );
 
 CREATE TABLE contactgroup (
     id bigserial PRIMARY KEY,
-    name text
+    name text NOT NULL
 );
 
 CREATE TABLE contactgroup_member (
@@ -32,17 +32,17 @@ CREATE TABLE timeperiod (
 
 CREATE TABLE timeperiod_entry (
     id bigserial PRIMARY KEY,
-    timeperiod_id bigint REFERENCES timeperiod(id),
-    start_time bigint,
-    end_time bigint,
-    timezone text, -- e.g. 'Europe/Berlin', relevant for evaluating rrule (DST changes differ between zones)
+    timeperiod_id bigint NOT NULL REFERENCES timeperiod(id),
+    start_time bigint NOT NULL,
+    end_time bigint NOT NULL,
+    timezone text NOT NULL, -- e.g. 'Europe/Berlin', relevant for evaluating rrule (DST changes differ between zones)
     rrule text, -- recurrence rule (RFC5545)
     description text
 );
 
 CREATE TABLE schedule (
     id bigserial PRIMARY KEY,
-    name text
+    name text NOT NULL
 );
 
 CREATE TABLE schedule_member (
