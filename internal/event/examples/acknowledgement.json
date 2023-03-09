@@ -1,0 +1,14 @@
+{
+	"name": "Database Read Mirror 1",
+	"url": "https://example.com/icingaweb2/icingadb/host?name=db-read1",
+	"tags": {
+		"host": "db-read1"
+	},
+	"extra_tags": {
+		"hostgroup/database": null,
+		"hostgroup/linux": null
+	},
+	"type": "acknowledgement",
+	"username": "john.doe",
+	"message": "hardware fault, on my way to replace it"
+}

@@ -1,0 +1,15 @@
+{
+	"name": "httpd on www1",
+	"url": "https://example.com/icingaweb2/icingadb/service?name=httpd&host.name=www1",
+	"tags": {
+		"host": "www1",
+		"service": "httpd"
+	},
+	"extra_tags": {
+		"hostgroup/webserver": null,
+		"hostgroup/linux": null,
+		"servicegroup/httpcheck": null
+	},
+	"message": "cannot connect on port 80: connection refused",
+	"severity": "crit"
+}
