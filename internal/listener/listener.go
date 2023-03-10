@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/icinga/noma/internal/event"
+	"github.com/icinga/noma/internal/object"
 	"log"
 	"net/http"
 	"time"
@@ -41,10 +42,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	ev.Time = time.Now()
 
-	log.Printf("received:\n%s", ev.String())
+	obj := object.FromTags(ev.Tags)
+	obj.UpdateMetadata(ev.Source, ev.Name, ev.URL, ev.ExtraTags)
+
+	log.Printf("received:\n\n%s\n%s", obj.String(), ev.String())
 
 	w.WriteHeader(http.StatusTeapot)
 	_, _ = fmt.Fprintln(w, "received event")
 	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, obj.String())
 	_, _ = fmt.Fprintln(w, ev.String())
 }
