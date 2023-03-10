@@ -10,10 +10,10 @@ type Event struct {
 	Time   time.Time
 	Source int64
 
-	Name      string             `json:"name"`
-	URL       string             `json:"url"`
-	IdTags    map[string]*string `json:"tags"`
-	ExtraTags map[string]*string `json:"extra_tags"`
+	Name      string            `json:"name"`
+	URL       string            `json:"url"`
+	Tags      map[string]string `json:"tags"`
+	ExtraTags map[string]string `json:"extra_tags"`
 
 	Type     string   `json:"type"`
 	Severity Severity `json:"severity"`
@@ -27,18 +27,18 @@ func (e *Event) String() string {
 	_, _ = fmt.Fprintf(&b, "  Name: %q\n", e.Name)
 	_, _ = fmt.Fprintf(&b, "  URL: %q\n", e.URL)
 	_, _ = fmt.Fprintf(&b, "  ID Tags:\n")
-	for tag, value := range e.IdTags {
+	for tag, value := range e.Tags {
 		_, _ = fmt.Fprintf(&b, "    %q", tag)
-		if value != nil {
-			_, _ = fmt.Fprintf(&b, " = %q", *value)
+		if value != "" {
+			_, _ = fmt.Fprintf(&b, " = %q", value)
 		}
 		_, _ = fmt.Fprintf(&b, "\n")
 	}
 	_, _ = fmt.Fprintf(&b, "  Extra Tags:\n")
 	for tag, value := range e.ExtraTags {
 		_, _ = fmt.Fprintf(&b, "    %q", tag)
-		if value != nil {
-			_, _ = fmt.Fprintf(&b, " = %q", *value)
+		if value != "" {
+			_, _ = fmt.Fprintf(&b, " = %q", value)
 		}
 		_, _ = fmt.Fprintf(&b, "\n")
 	}
