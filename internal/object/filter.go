@@ -31,5 +31,5 @@ func (f *Filter) Matches(object *Object) bool {
 		}
 	}
 
-	return true
+	return false
 }
