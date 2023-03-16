@@ -4,6 +4,7 @@ import (
 	"github.com/icinga/noma/internal/contact"
 	"github.com/icinga/noma/internal/schedule"
 	"strings"
+	"time"
 )
 
 type Escalation struct {
@@ -39,4 +40,20 @@ func (e *Escalation) DisplayName() string {
 	}
 
 	return strings.Join(recipients, ", ")
+}
+
+func (e *Escalation) GetContactsAt(t time.Time) []*contact.Contact {
+	var contacts []*contact.Contact
+
+	contacts = append(contacts, e.Contacts...)
+
+	for _, g := range e.ContactGroups {
+		contacts = append(contacts, g.Members...)
+	}
+
+	for _, s := range e.Schedules {
+		contacts = append(contacts, s.GetContactsAt(t)...)
+	}
+
+	return contacts
 }
