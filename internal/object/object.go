@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
@@ -36,6 +37,20 @@ func FromTags(tags map[string]string) *Object {
 	object = &Object{ID: id, Tags: tags}
 	cache[id] = object
 	return object
+}
+
+func (o *Object) DisplayName() string {
+	for _, metadata := range o.Metadata {
+		if metadata.Name != "" {
+			return metadata.Name
+		}
+	}
+
+	j, err := json.Marshal(o.Tags)
+	if err != nil {
+		panic(err)
+	}
+	return string(j)
 }
 
 func (o *Object) String() string {
