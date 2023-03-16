@@ -9,4 +9,5 @@ type Rule struct {
 	Name         string
 	TimePeriod   *timeperiod.TimePeriod
 	ObjectFilter *object.Filter
+	Escalations  []*Escalation
 }
