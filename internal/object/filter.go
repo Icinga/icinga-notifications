@@ -12,6 +12,14 @@ func ParseFilter(expression string) (*Filter, error) {
 	return &Filter{tag: expression}, nil
 }
 
+func MustParseFilter(expression string) *Filter {
+	f, err := ParseFilter(expression)
+	if err != nil {
+		panic(err)
+	}
+	return f
+}
+
 func (f *Filter) Matches(object *Object) bool {
 	if _, ok := object.Tags[f.tag]; ok {
 		return true
