@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/icinga/noma/internal/event"
+	"github.com/icinga/noma/internal/incident"
 	"github.com/icinga/noma/internal/object"
+	"github.com/icinga/noma/internal/rule"
 	"log"
 	"net/http"
 	"time"
@@ -26,15 +28,15 @@ func (l *Listener) Run() error {
 	return http.ListenAndServe(l.address, &l.mux)
 }
 
-func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		_, _ = fmt.Fprintln(w, "POST required")
 		return
 	}
 
 	var ev event.Event
-	err := json.NewDecoder(r.Body).Decode(&ev)
+	err := json.NewDecoder(req.Body).Decode(&ev)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = fmt.Fprintf(w, "cannot parse JSON body: %v\n", err)
@@ -45,11 +47,120 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	obj := object.FromTags(ev.Tags)
 	obj.UpdateMetadata(ev.Source, ev.Name, ev.URL, ev.ExtraTags)
 
-	log.Printf("received:\n\n%s\n%s", obj.String(), ev.String())
-
 	w.WriteHeader(http.StatusTeapot)
 	_, _ = fmt.Fprintln(w, "received event")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, obj.String())
 	_, _ = fmt.Fprintln(w, ev.String())
+
+	if ev.Severity == event.Severity(0) {
+		// not a state event
+		_, _ = fmt.Fprintf(w, "not a state event, ignoring for now\n")
+		return
+	}
+
+	currentIncident, created := incident.GetCurrent(obj, ev.Severity != event.SeverityOK)
+
+	if currentIncident == nil {
+		if ev.Severity != event.SeverityOK {
+			panic("non-OK state but no incident was created")
+		}
+
+		log.Printf("%s: ignoring superfluous OK state event from source %d", obj.DisplayName(), ev.Source)
+		return
+	}
+
+	// TODO: better move all this logic somewhere into incident.go
+	currentIncident.Lock()
+	defer currentIncident.Unlock()
+
+	if created {
+		currentIncident.StartedAt = ev.Time
+		currentIncident.AddHistory(ev.Time, "opened incident")
+	}
+
+	currentIncident.AddHistory(ev.Time, "processing event")
+
+	oldIncidentSeverity := currentIncident.Severity()
+
+	if currentIncident.SeverityBySource == nil {
+		currentIncident.SeverityBySource = make(map[int64]event.Severity)
+	}
+
+	oldSourceSeverity := currentIncident.SeverityBySource[ev.Source]
+	if oldSourceSeverity == event.Severity(0) {
+		oldSourceSeverity = event.SeverityOK
+	}
+	if oldSourceSeverity != ev.Severity {
+		currentIncident.AddHistory(ev.Time, "source %d severity changed from %s to %s", ev.Source, oldSourceSeverity.String(), ev.Severity.String())
+
+		if ev.Severity != event.SeverityOK {
+			currentIncident.SeverityBySource[ev.Source] = ev.Severity
+		} else {
+			delete(currentIncident.SeverityBySource, ev.Source)
+		}
+	}
+
+	newIncidentSeverity := currentIncident.Severity()
+
+	if newIncidentSeverity != oldIncidentSeverity {
+		currentIncident.AddHistory(ev.Time, "incident severity changed from %s to %s", oldIncidentSeverity.String(), newIncidentSeverity.String())
+	}
+
+	if newIncidentSeverity == event.SeverityOK {
+		currentIncident.AddHistory(ev.Time, "all sources recovered, closing incident")
+		currentIncident.RecoveredAt = ev.Time
+		incident.RemoveCurrent(obj)
+	}
+
+	if currentIncident.State == nil {
+		currentIncident.State = make(map[*rule.Rule]map[*rule.Escalation]*incident.EscalationState)
+	}
+
+	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
+	// to be checked again, these rules already matched and stay effective for the ongoing incident.
+	for _, r := range rule.Rules {
+		if _, ok := currentIncident.State[r]; !ok && r.ObjectFilter.Matches(obj) {
+			currentIncident.AddHistory(ev.Time, "rule %q matches", r.Name)
+			currentIncident.State[r] = make(map[*rule.Escalation]*incident.EscalationState)
+		}
+	}
+
+	for r, states := range currentIncident.State {
+		// Check if new escalation stages are reached
+		for _, escalation := range r.Escalations {
+			if _, ok := states[escalation]; !ok {
+				cond := escalation.Condition
+				match := false
+
+				if cond == nil {
+					match = true
+				} else if cond.MinDuration > 0 && ev.Time.Sub(currentIncident.StartedAt) > cond.MinDuration {
+					match = true
+				} else if cond.MinSeverity > 0 && currentIncident.Severity() >= cond.MinSeverity {
+					match = true
+				}
+
+				if match {
+					states[escalation] = new(incident.EscalationState)
+				}
+			}
+		}
+
+		for escalation, state := range states {
+			contacts := escalation.GetContactsAt(ev.Time)
+
+			if state.TriggeredAt.IsZero() {
+				state.TriggeredAt = ev.Time
+				currentIncident.AddHistory(ev.Time, "rule %q reached escalation %q", r.Name, escalation.DisplayName())
+			}
+
+			// TODO: properly track of contacts (subscriber/manager)
+			for _, contact := range contacts {
+				currentIncident.AddHistory(ev.Time, "might notify %q", contact.FullName)
+			}
+		}
+	}
+
+	_, _ = fmt.Fprintln(w)
 }
