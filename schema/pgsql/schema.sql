@@ -51,7 +51,13 @@ CREATE TABLE schedule_member (
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),
 
-    PRIMARY KEY (schedule_id, timeperiod_id, contact_id, contactgroup_id),
+    -- There is no PRIMARY KEY in that table as either contact_id or contactgroup_id should be allowed to be NULL.
+    -- Instead, there are two UNIQUE constraints that prevent duplicate entries. Multiple NULLs are not considered to
+    -- be duplicates, so rows with a contact_id but no contactgroup_id are basically ignored in the UNIQUE constraint
+    -- over contactgroup_id and vice versa. The CHECK constraint below ensures that each row has only non-NULL values
+    -- in one of these constraints.
+    UNIQUE (schedule_id, timeperiod_id, contact_id),
+    UNIQUE (schedule_id, timeperiod_id, contactgroup_id),
     CHECK (num_nonnulls(contact_id, contactgroup_id) = 1)
 );
 
