@@ -17,10 +17,10 @@ type Incident struct {
 	RecoveredAt      time.Time
 	SeverityBySource map[int64]event.Severity
 
-	State    map[*rule.Rule]map[*rule.Escalation]*EscalationState
-	Events   []*event.Event
-	Contacts map[*contact.Contact]ContactRole
-	History  []*HistoryEntry
+	State      map[*rule.Rule]map[*rule.Escalation]*EscalationState
+	Events     []*event.Event
+	Recipients map[contact.Recipient]*RecipientState
+	History    []*HistoryEntry
 
 	sync.Mutex
 }
@@ -33,6 +33,16 @@ func (i *Incident) Severity() event.Severity {
 		}
 	}
 	return maxSeverity
+}
+
+func (i *Incident) HasManager() bool {
+	for _, state := range i.Recipients {
+		if state.Role == RoleManager {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (i *Incident) AddHistory(t time.Time, m string, args ...any) {
@@ -59,6 +69,11 @@ const (
 	RoleSubscriber
 	RoleManager
 )
+
+type RecipientState struct {
+	Role     ContactRole
+	Channels map[string]struct{}
+}
 
 func GetCurrent(obj *object.Object, create bool) (*Incident, bool) {
 	currentIncidentsMu.Lock()

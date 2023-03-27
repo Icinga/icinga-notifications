@@ -24,16 +24,24 @@ var (
 		TimePeriod:   timeperiod.OfficeHours,
 		ObjectFilter: object.MustParseFilter("hostgroup/linux"),
 		Escalations: []*Escalation{{
-			Contacts: []*contact.Contact{contact.John},
+			Name:        "Level 1",
+			Contacts:    []*contact.Contact{contact.John},
+			ChannelType: "email",
 		}, {
-			Condition: &Condition{MinDuration: 1 * time.Minute},
-			Contacts:  []*contact.Contact{contact.Jane},
+			Name:        "Level 2",
+			Condition:   &Condition{MinDuration: 1 * time.Second},
+			Contacts:    []*contact.Contact{contact.Jane},
+			ChannelType: "email",
 		}, {
-			Condition: &Condition{MinDuration: 2 * time.Minute},
-			Contacts:  []*contact.Contact{contact.John},
+			Name:        "Level 3",
+			Condition:   &Condition{MinDuration: 2 * time.Second},
+			Contacts:    []*contact.Contact{contact.John},
+			ChannelType: "sms",
 		}, {
-			Condition: &Condition{MinDuration: 3 * time.Minute},
-			Contacts:  []*contact.Contact{contact.Jane},
+			Name:        "Level 4",
+			Condition:   &Condition{MinDuration: 3 * time.Second},
+			Contacts:    []*contact.Contact{contact.Jane},
+			ChannelType: "sms",
 		}},
 	}
 
@@ -42,11 +50,13 @@ var (
 		TimePeriod:   timeperiod.OfficeHours,
 		ObjectFilter: object.MustParseFilter("hostgroup/windows"),
 		Escalations: []*Escalation{{
-			Condition: &Condition{MinSeverity: event.SeverityWarning},
-			Contacts:  []*contact.Contact{contact.John},
+			Condition:   &Condition{MinSeverity: event.SeverityWarning},
+			Contacts:    []*contact.Contact{contact.John},
+			ChannelType: "rocketchat",
 		}, {
 			Condition:     &Condition{MinSeverity: event.SeverityCrit},
 			ContactGroups: []*contact.Group{contact.TeamOps},
+			ChannelType:   "rocketchat",
 		}},
 	}
 

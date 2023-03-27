@@ -35,3 +35,5 @@ func (s *Schedule) GetContactsAt(t time.Time) []*contact.Contact {
 
 	return contacts
 }
+
+var _ contact.Recipient = (*Schedule)(nil)

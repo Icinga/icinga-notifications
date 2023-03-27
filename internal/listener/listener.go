@@ -3,6 +3,7 @@ package listener
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/noma/internal/contact"
 	"github.com/icinga/noma/internal/event"
 	"github.com/icinga/noma/internal/incident"
 	"github.com/icinga/noma/internal/object"
@@ -147,17 +148,71 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 
-		for escalation, state := range states {
-			contacts := escalation.GetContactsAt(ev.Time)
+		if currentIncident.Recipients == nil {
+			currentIncident.Recipients = make(map[contact.Recipient]*incident.RecipientState)
+		}
 
+		newRole := incident.RoleRecipient
+		if currentIncident.HasManager() {
+			newRole = incident.RoleSubscriber
+		}
+
+		for escalation, state := range states {
 			if state.TriggeredAt.IsZero() {
 				state.TriggeredAt = ev.Time
 				currentIncident.AddHistory(ev.Time, "rule %q reached escalation %q", r.Name, escalation.DisplayName())
-			}
 
-			// TODO: properly track of contacts (subscriber/manager)
-			for _, contact := range contacts {
-				currentIncident.AddHistory(ev.Time, "might notify %q", contact.FullName)
+				addRecipient := func(r contact.Recipient) {
+					state, ok := currentIncident.Recipients[r]
+					if !ok {
+						currentIncident.Recipients[r] = &incident.RecipientState{
+							Role:     newRole,
+							Channels: map[string]struct{}{escalation.ChannelType: {}},
+						}
+					} else {
+						if state.Role < newRole {
+							state.Role = newRole
+						}
+						state.Channels[escalation.ChannelType] = struct{}{}
+					}
+				}
+
+				for _, c := range escalation.Contacts {
+					addRecipient(c)
+				}
+
+				for _, g := range escalation.ContactGroups {
+					addRecipient(g)
+				}
+
+				for _, s := range escalation.Schedules {
+					addRecipient(s)
+				}
+			}
+		}
+
+		managed := currentIncident.HasManager()
+
+		contactChannels := make(map[*contact.Contact]map[string]struct{})
+
+		for r, state := range currentIncident.Recipients {
+			if !managed || state.Role > incident.RoleRecipient {
+				for _, c := range r.GetContactsAt(ev.Time) {
+					channels := contactChannels[c]
+					if channels == nil {
+						channels = make(map[string]struct{})
+						contactChannels[c] = channels
+					}
+					for channel := range state.Channels {
+						channels[channel] = struct{}{}
+					}
+				}
+			}
+		}
+
+		for contact, channels := range contactChannels {
+			for channel := range channels {
+				currentIncident.AddHistory(ev.Time, "notify %q via %q", contact.FullName, channel)
 			}
 		}
 	}
