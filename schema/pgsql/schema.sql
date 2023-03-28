@@ -6,7 +6,7 @@ CREATE TABLE contact (
 
 CREATE TABLE contact_address (
     id bigserial PRIMARY KEY,
-    contact_id bigint REFERENCES contact(id),
+    contact_id bigint NOT NULL REFERENCES contact(id),
     type text NOT NULL, -- 'phone', 'email', ...
     address text NOT NULL, -- phone number, email address, ...
 
