@@ -1,7 +1,6 @@
-package schedule
+package recipient
 
 import (
-	"github.com/icinga/noma/internal/contact"
 	"github.com/icinga/noma/internal/timeperiod"
 	"time"
 )
@@ -13,13 +12,13 @@ type Schedule struct {
 
 type Member struct {
 	TimePeriod   *timeperiod.TimePeriod
-	Contact      *contact.Contact
-	ContactGroup *contact.Group
+	Contact      *Contact
+	ContactGroup *Group
 }
 
 // GetContactsAt returns the contacts that are active in the schedule at the given time.
-func (s *Schedule) GetContactsAt(t time.Time) []*contact.Contact {
-	var contacts []*contact.Contact
+func (s *Schedule) GetContactsAt(t time.Time) []*Contact {
+	var contacts []*Contact
 
 	for _, m := range s.Members {
 		if m.TimePeriod.Contains(t) {
@@ -36,4 +35,4 @@ func (s *Schedule) GetContactsAt(t time.Time) []*contact.Contact {
 	return contacts
 }
 
-var _ contact.Recipient = (*Schedule)(nil)
+var _ Recipient = (*Schedule)(nil)

@@ -1,10 +1,9 @@
 package rule
 
 import (
-	"github.com/icinga/noma/internal/contact"
 	"github.com/icinga/noma/internal/event"
 	"github.com/icinga/noma/internal/object"
-	"github.com/icinga/noma/internal/schedule"
+	"github.com/icinga/noma/internal/recipient"
 	"github.com/icinga/noma/internal/timeperiod"
 	"time"
 )
@@ -15,7 +14,7 @@ var (
 		ObjectFilter: object.MustParseFilter("hostgroup/production"),
 		Escalations: []*Escalation{{
 			ChannelType: "email",
-			Schedules:   []*schedule.Schedule{schedule.OnCall},
+			Schedules:   []*recipient.Schedule{recipient.OnCall},
 		}},
 	}
 
@@ -25,22 +24,22 @@ var (
 		ObjectFilter: object.MustParseFilter("hostgroup/linux"),
 		Escalations: []*Escalation{{
 			Name:        "Level 1",
-			Contacts:    []*contact.Contact{contact.John},
+			Contacts:    []*recipient.Contact{recipient.John},
 			ChannelType: "email",
 		}, {
 			Name:        "Level 2",
 			Condition:   &Condition{MinDuration: 1 * time.Second},
-			Contacts:    []*contact.Contact{contact.Jane},
+			Contacts:    []*recipient.Contact{recipient.Jane},
 			ChannelType: "email",
 		}, {
 			Name:        "Level 3",
 			Condition:   &Condition{MinDuration: 2 * time.Second},
-			Contacts:    []*contact.Contact{contact.John},
+			Contacts:    []*recipient.Contact{recipient.John},
 			ChannelType: "sms",
 		}, {
 			Name:        "Level 4",
 			Condition:   &Condition{MinDuration: 3 * time.Second},
-			Contacts:    []*contact.Contact{contact.Jane},
+			Contacts:    []*recipient.Contact{recipient.Jane},
 			ChannelType: "sms",
 		}},
 	}
@@ -51,11 +50,11 @@ var (
 		ObjectFilter: object.MustParseFilter("hostgroup/windows"),
 		Escalations: []*Escalation{{
 			Condition:   &Condition{MinSeverity: event.SeverityWarning},
-			Contacts:    []*contact.Contact{contact.John},
+			Contacts:    []*recipient.Contact{recipient.John},
 			ChannelType: "rocketchat",
 		}, {
 			Condition:     &Condition{MinSeverity: event.SeverityCrit},
-			ContactGroups: []*contact.Group{contact.TeamOps},
+			ContactGroups: []*recipient.Group{recipient.TeamOps},
 			ChannelType:   "rocketchat",
 		}},
 	}

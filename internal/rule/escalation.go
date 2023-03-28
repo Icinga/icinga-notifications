@@ -1,8 +1,7 @@
 package rule
 
 import (
-	"github.com/icinga/noma/internal/contact"
-	"github.com/icinga/noma/internal/schedule"
+	"github.com/icinga/noma/internal/recipient"
 	"strings"
 	"time"
 )
@@ -13,9 +12,9 @@ type Escalation struct {
 	Fallbacks []*Escalation
 
 	ChannelType   string
-	Contacts      []*contact.Contact
-	ContactGroups []*contact.Group
-	Schedules     []*schedule.Schedule
+	Contacts      []*recipient.Contact
+	ContactGroups []*recipient.Group
+	Schedules     []*recipient.Schedule
 }
 
 func (e *Escalation) DisplayName() string {
@@ -42,8 +41,8 @@ func (e *Escalation) DisplayName() string {
 	return strings.Join(recipients, ", ")
 }
 
-func (e *Escalation) GetContactsAt(t time.Time) []*contact.Contact {
-	var contacts []*contact.Contact
+func (e *Escalation) GetContactsAt(t time.Time) []*recipient.Contact {
+	var contacts []*recipient.Contact
 
 	contacts = append(contacts, e.Contacts...)
 

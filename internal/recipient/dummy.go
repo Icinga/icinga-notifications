@@ -1,4 +1,6 @@
-package contact
+package recipient
+
+import "github.com/icinga/noma/internal/timeperiod"
 
 var (
 	John = &Contact{
@@ -20,5 +22,16 @@ var (
 	TeamOps = &Group{
 		Name:    "Team Ops",
 		Members: []*Contact{John, Jane},
+	}
+
+	OnCall = &Schedule{
+		Name: "On Call",
+		Members: []*Member{{
+			TimePeriod: timeperiod.EveryEvenHour,
+			Contact:    John,
+		}, {
+			TimePeriod: timeperiod.EveryOddHour,
+			Contact:    Jane,
+		}},
 	}
 )

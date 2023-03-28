@@ -3,10 +3,10 @@ package listener
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/icinga/noma/internal/contact"
 	"github.com/icinga/noma/internal/event"
 	"github.com/icinga/noma/internal/incident"
 	"github.com/icinga/noma/internal/object"
+	"github.com/icinga/noma/internal/recipient"
 	"github.com/icinga/noma/internal/rule"
 	"log"
 	"net/http"
@@ -149,7 +149,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		}
 
 		if currentIncident.Recipients == nil {
-			currentIncident.Recipients = make(map[contact.Recipient]*incident.RecipientState)
+			currentIncident.Recipients = make(map[recipient.Recipient]*incident.RecipientState)
 		}
 
 		newRole := incident.RoleRecipient
@@ -162,7 +162,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				state.TriggeredAt = ev.Time
 				currentIncident.AddHistory(ev.Time, "rule %q reached escalation %q", r.Name, escalation.DisplayName())
 
-				addRecipient := func(r contact.Recipient) {
+				addRecipient := func(r recipient.Recipient) {
 					state, ok := currentIncident.Recipients[r]
 					if !ok {
 						currentIncident.Recipients[r] = &incident.RecipientState{
@@ -193,7 +193,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 		managed := currentIncident.HasManager()
 
-		contactChannels := make(map[*contact.Contact]map[string]struct{})
+		contactChannels := make(map[*recipient.Contact]map[string]struct{})
 
 		for r, state := range currentIncident.Recipients {
 			if !managed || state.Role > incident.RoleRecipient {

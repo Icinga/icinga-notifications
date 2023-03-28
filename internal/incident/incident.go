@@ -2,9 +2,9 @@ package incident
 
 import (
 	"fmt"
-	"github.com/icinga/noma/internal/contact"
 	"github.com/icinga/noma/internal/event"
 	"github.com/icinga/noma/internal/object"
+	"github.com/icinga/noma/internal/recipient"
 	"github.com/icinga/noma/internal/rule"
 	"log"
 	"sync"
@@ -19,7 +19,7 @@ type Incident struct {
 
 	State      map[*rule.Rule]map[*rule.Escalation]*EscalationState
 	Events     []*event.Event
-	Recipients map[contact.Recipient]*RecipientState
+	Recipients map[recipient.Recipient]*RecipientState
 	History    []*HistoryEntry
 
 	sync.Mutex
