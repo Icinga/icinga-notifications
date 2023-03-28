@@ -25,9 +25,14 @@ CREATE TABLE contactgroup_member (
     PRIMARY KEY (contactgroup_id, contact_id)
 );
 
+CREATE TABLE schedule (
+    id bigserial PRIMARY KEY,
+    name text NOT NULL
+);
+
 CREATE TABLE timeperiod (
     id bigserial PRIMARY KEY,
-    owned_by_schedule_id bigint REFERENCES timeperiod(id) -- nullable for future standalone timeperiods
+    owned_by_schedule_id bigint REFERENCES schedule(id) -- nullable for future standalone timeperiods
 );
 
 CREATE TABLE timeperiod_entry (
@@ -38,11 +43,6 @@ CREATE TABLE timeperiod_entry (
     timezone text NOT NULL, -- e.g. 'Europe/Berlin', relevant for evaluating rrule (DST changes differ between zones)
     rrule text, -- recurrence rule (RFC5545)
     description text
-);
-
-CREATE TABLE schedule (
-    id bigserial PRIMARY KEY,
-    name text NOT NULL
 );
 
 CREATE TABLE schedule_member (
