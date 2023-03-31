@@ -59,9 +59,21 @@ var (
 		}},
 	}
 
+	Everything = &Rule{
+		Name: "Just Send Everything",
+		Escalations: []*Escalation{{
+			Contacts:    []*recipient.Contact{recipient.John},
+			ChannelType: "email",
+		}, {
+			Contacts:    []*recipient.Contact{recipient.Jane},
+			ChannelType: "rocketchat",
+		}},
+	}
+
 	Rules = []*Rule{
 		ProductionOnCall,
 		LinuxOfficeHours,
 		WindowsSeverity,
+		Everything,
 	}
 )
