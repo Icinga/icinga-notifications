@@ -22,6 +22,10 @@ type Event struct {
 }
 
 func (e *Event) String() string {
+	return fmt.Sprintf("[time=%s type=%q severity=%s]", e.Time, e.Type, e.Severity.String())
+}
+
+func (e *Event) FullString() string {
 	var b bytes.Buffer
 	_, _ = fmt.Fprintf(&b, "Event:\n")
 	_, _ = fmt.Fprintf(&b, "  Name: %q\n", e.Name)

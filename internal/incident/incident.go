@@ -49,8 +49,12 @@ func (i *Incident) AddHistory(t time.Time, m string, args ...any) {
 	if len(args) > 0 {
 		m = fmt.Sprintf(m, args...)
 	}
-	log.Printf("[%s|%p] %s", i.Object.DisplayName(), i, m)
+	log.Printf("[%s %s] %s", i.Object.DisplayName(), i.String(), m)
 	i.History = append(i.History, &HistoryEntry{Time: t, Message: m})
+}
+
+func (i *Incident) String() string {
+	return fmt.Sprintf("#%#p", i)
 }
 
 type EscalationState struct {

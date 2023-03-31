@@ -3,6 +3,7 @@ package listener
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/noma/internal/channel"
 	"github.com/icinga/noma/internal/event"
 	"github.com/icinga/noma/internal/incident"
 	"github.com/icinga/noma/internal/object"
@@ -211,8 +212,33 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		}
 
 		for contact, channels := range contactChannels {
-			for channel := range channels {
-				currentIncident.AddHistory(ev.Time, "notify %q via %q", contact.FullName, channel)
+			for chType := range channels {
+				currentIncident.AddHistory(ev.Time, "notify %q via %q", contact.FullName, chType)
+
+				var chConf *channel.Channel
+				for _, c := range channel.DummyChannels {
+					if c.Type == chType {
+						chConf = c
+						break
+					}
+				}
+
+				if chConf == nil {
+					log.Printf("ERROR: could not find config for channel type %q", chType)
+					continue
+				}
+
+				plugin, err := chConf.GetPlugin()
+				if err != nil {
+					log.Printf("ERROR: could initialize channel type %q: %v", chType, err)
+					continue
+				}
+
+				err = plugin.Send(contact, currentIncident, &ev)
+				if err != nil {
+					log.Printf("ERROR: failed to send via channel type %q: %v", chType, err)
+					continue
+				}
 			}
 		}
 	}

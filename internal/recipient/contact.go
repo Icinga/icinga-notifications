@@ -10,6 +10,10 @@ type Contact struct {
 	Addresses []*Address
 }
 
+func (c *Contact) String() string {
+	return c.FullName
+}
+
 func (c *Contact) GetContactsAt(t time.Time) []*Contact {
 	return []*Contact{c}
 }
