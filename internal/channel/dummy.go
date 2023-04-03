@@ -3,7 +3,7 @@ package channel
 var DummyChannels = []*Channel{{
 	Name:   "E-Mail",
 	Type:   "email",
-	Config: "",
+	Config: `{"host": "localhost", "port": 25}`,
 }, {
 	Name:   "RocketChat",
 	Type:   "rocketchat",
