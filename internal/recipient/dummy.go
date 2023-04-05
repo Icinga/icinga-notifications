@@ -16,6 +16,7 @@ var (
 		Username: "jane.smith",
 		Addresses: []*Address{
 			{Type: "email", Address: "jane.smith@example.com"},
+			{Type: "rocketchat", Address: "@jsmith"},
 		},
 	}
 
