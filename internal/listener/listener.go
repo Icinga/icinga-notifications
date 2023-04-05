@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/noma/internal/channel"
+	"github.com/icinga/noma/internal/config"
 	"github.com/icinga/noma/internal/event"
 	"github.com/icinga/noma/internal/incident"
 	"github.com/icinga/noma/internal/object"
@@ -16,13 +16,18 @@ import (
 )
 
 type Listener struct {
-	address string
-	db      *icingadb.DB
-	mux     http.ServeMux
+	address       string
+	db            *icingadb.DB
+	runtimeConfig *config.RuntimeConfig
+	mux           http.ServeMux
 }
 
-func NewListener(db *icingadb.DB, address string) *Listener {
-	l := &Listener{address: address, db: db}
+func NewListener(db *icingadb.DB, address string, runtimeConfig *config.RuntimeConfig) *Listener {
+	l := &Listener{
+		address:       address,
+		db:            db,
+		runtimeConfig: runtimeConfig,
+	}
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
 	return l
 }
@@ -232,14 +237,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			for chType := range channels {
 				currentIncident.AddHistory(ev.Time, "notify %q via %q", contact.FullName, chType)
 
-				var chConf *channel.Channel
-				for _, c := range channel.DummyChannels {
-					if c.Type == chType {
-						chConf = c
-						break
-					}
-				}
-
+				chConf := l.runtimeConfig.ChannelByType[chType]
 				if chConf == nil {
 					log.Printf("ERROR: could not find config for channel type %q", chType)
 					continue
