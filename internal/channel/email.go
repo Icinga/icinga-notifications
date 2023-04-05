@@ -33,6 +33,14 @@ func NewEMail(config string) (Plugin, error) {
 		return nil, err
 	}
 
+	if e.config.Host == "" {
+		e.config.Host = "localhost"
+	}
+
+	if e.config.Port == 0 {
+		e.config.Port = 25
+	}
+
 	if e.config.Sender == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
