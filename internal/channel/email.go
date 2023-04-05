@@ -3,7 +3,6 @@ package channel
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/icinga/noma/internal/event"
 	"github.com/icinga/noma/internal/incident"
@@ -69,24 +68,16 @@ func (e *EMail) Send(contact *recipient.Contact, incident *incident.Incident, ev
 	}
 
 	if len(to) == 0 {
-		return errors.New(fmt.Sprintf("Contact user %s doesn't have an e-mail address", contact.Username))
+		return fmt.Errorf("contact user %s doesn't have an e-mail address", contact.Username)
 	}
 
 	var msg bytes.Buffer
+	_, _ = fmt.Fprintf(&msg, "To: %s\n", strings.Join(to, ","))
+	_, _ = fmt.Fprintf(&msg, "Subject: %s %s is %s\n\n", event.Type, incident.Object.DisplayName(), event.Severity.String())
 
-	_, _ = fmt.Fprintf(&msg, "To: %s\r\n", strings.Join(to, ","))
-	_, _ = fmt.Fprintf(&msg, "Subject: %s %s is %s\r\n\r\n", event.Type, incident.Object.DisplayName(), event.Severity.String())
-	_, _ = fmt.Fprintf(&msg, "%s is %s\r\n\r\n", incident.Object.DisplayName(), event.Severity.String())
-	_, _ = fmt.Fprintf(&msg, "Info: %s\r\n\r\n", event.Message)
-	_, _ = fmt.Fprintf(&msg, "When: %s\r\n", event.Time.Format("2006-01-02 15:04:05 MST"))
+	FormatMessage(&msg, incident, event)
 
-	if event.Username != "" {
-		_, _ = fmt.Fprintf(&msg, "\r\nCommented by %s\r\n\r\n", event.Username)
-	}
-
-	msg.WriteString(event.URL)
-
-	err := smtp.SendMail(e.GetServer(), nil, e.config.Sender, to, msg.Bytes())
+	err := smtp.SendMail(e.GetServer(), nil, e.config.Sender, to, bytes.ReplaceAll(msg.Bytes(), []byte("\n"), []byte("\r\n")))
 	if err != nil {
 		return err
 	}
