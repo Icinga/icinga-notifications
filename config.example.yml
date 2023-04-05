@@ -1,0 +1,13 @@
+#listen: "localhost:5680" # default
+#listen: ":5680" # any interface
+#listen: "192.0.2.1:5680"
+#listen: "[2001:db8::1]:5680"
+
+database:
+  type: pgsql
+  host: /run/postgresql
+  #host: localhost
+  #port: 5432
+  user: noma
+  database: noma
+  #password: noma
