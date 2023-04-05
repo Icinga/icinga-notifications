@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"github.com/icinga/icingadb/pkg/logging"
@@ -45,7 +46,12 @@ func main() {
 	logger.Debugw("pinged database", zap.Error(db.Ping()))
 	defer db.Close()
 
-	if err := listener.NewListener(db, conf.Listen).Run(); err != nil {
+	var runtimeConfig config.RuntimeConfig
+	if err := runtimeConfig.UpdateFromDatabase(context.TODO(), db, logger); err != nil {
+		logger.Fatalw("failed to load config from database", zap.Error(err))
+	}
+
+	if err := listener.NewListener(db, conf.Listen, &runtimeConfig).Run(); err != nil {
 		panic(err)
 	}
 }
