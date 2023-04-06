@@ -1,11 +1,14 @@
 package recipient
 
-import "github.com/icinga/noma/internal/timeperiod"
+import (
+	"database/sql"
+	"github.com/icinga/noma/internal/timeperiod"
+)
 
 var (
 	John = &Contact{
 		FullName: "John Doe",
-		Username: "john.doe",
+		Username: sql.NullString{String: "john.doe", Valid: true},
 		Addresses: []*Address{
 			{Type: "email", Address: "john.doe@example.com"},
 		},
@@ -13,7 +16,7 @@ var (
 
 	Jane = &Contact{
 		FullName: "Jane Smith",
-		Username: "jane.smith",
+		Username: sql.NullString{String: "jane.smith", Valid: true},
 		Addresses: []*Address{
 			{Type: "email", Address: "jane.smith@example.com"},
 			{Type: "rocketchat", Address: "@jsmith"},
