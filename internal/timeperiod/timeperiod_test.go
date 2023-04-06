@@ -21,7 +21,7 @@ func TestEntry(t *testing.T) {
 		e := &timeperiod.Entry{
 			Start:          start,
 			End:            end,
-			RecurrenceRule: fmt.Sprintf("FREQ=DAILY;UNTIL=%s", until.Format(rrule.DateTimeFormat)),
+			RecurrenceRule: fmt.Sprintf("FREQ=DAILY;UNTIL=%s", until.UTC().Format(rrule.DateTimeFormat)),
 		}
 
 		t.Run("TimeAtFirstRecurrenceStart", func(t *testing.T) {
