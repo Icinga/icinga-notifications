@@ -68,7 +68,7 @@ func (e *EMail) Send(contact *recipient.Contact, incident *incident.Incident, ev
 	}
 
 	if len(to) == 0 {
-		return fmt.Errorf("contact user %s doesn't have an e-mail address", contact.Username)
+		return fmt.Errorf("contact user %s doesn't have an e-mail address", contact.FullName)
 	}
 
 	var msg bytes.Buffer
