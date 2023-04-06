@@ -1,12 +1,14 @@
 package recipient
 
 import (
+	"database/sql"
 	"time"
 )
 
 type Contact struct {
-	FullName  string
-	Username  string
+	ID        int64          `db:"id"`
+	FullName  string         `db:"full_name"`
+	Username  sql.NullString `db:"username"`
 	Addresses []*Address
 }
 
@@ -21,6 +23,12 @@ func (c *Contact) GetContactsAt(t time.Time) []*Contact {
 var _ Recipient = (*Contact)(nil)
 
 type Address struct {
-	Type    string
-	Address string
+	ID        int64  `db:"id"`
+	ContactID int64  `db:"contact_id"`
+	Type      string `db:"type"`
+	Address   string `db:"address"`
+}
+
+func (a *Address) TableName() string {
+	return "contact_address"
 }
