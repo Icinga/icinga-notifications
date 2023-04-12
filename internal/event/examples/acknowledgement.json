@@ -1,6 +1,7 @@
 {
 	"name": "Database Read Mirror 1",
 	"url": "https://example.com/icingaweb2/icingadb/host?name=db-read1",
+	"source_id":  1,
 	"tags": {
 		"host": "db-read1"
 	},

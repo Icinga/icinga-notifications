@@ -43,8 +43,9 @@ func main() {
 		os.Exit(1)
 	}
 	logger.Debugw("pinged database", zap.Error(db.Ping()))
+	defer db.Close()
 
-	if err := listener.NewListener(conf.Listen).Run(); err != nil {
+	if err := listener.NewListener(db, conf.Listen).Run(); err != nil {
 		panic(err)
 	}
 }

@@ -7,8 +7,8 @@ import (
 )
 
 type Event struct {
-	Time   time.Time
-	Source int64
+	Time     time.Time
+	SourceId int64 `json:"source_id"`
 
 	Name      string            `json:"name"`
 	URL       string            `json:"url"`
@@ -47,7 +47,7 @@ func (e *Event) FullString() string {
 		_, _ = fmt.Fprintf(&b, "\n")
 	}
 	_, _ = fmt.Fprintf(&b, "  Time: %s\n", e.Time)
-	_, _ = fmt.Fprintf(&b, "  Source: %d\n", e.Source)
+	_, _ = fmt.Fprintf(&b, "  SourceId: %d\n", e.SourceId)
 	if e.Type != "" {
 		_, _ = fmt.Fprintf(&b, "  Type: %q\n", e.Type)
 	}

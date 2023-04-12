@@ -3,6 +3,7 @@ package listener
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/noma/internal/channel"
 	"github.com/icinga/noma/internal/event"
 	"github.com/icinga/noma/internal/incident"
@@ -16,11 +17,12 @@ import (
 
 type Listener struct {
 	address string
+	db      *icingadb.DB
 	mux     http.ServeMux
 }
 
-func NewListener(address string) *Listener {
-	l := &Listener{address: address}
+func NewListener(db *icingadb.DB, address string) *Listener {
+	l := &Listener{address: address, db: db}
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
 	return l
 }
@@ -46,8 +48,23 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 	ev.Time = time.Now()
 
-	obj := object.FromTags(ev.Tags)
-	obj.UpdateMetadata(ev.Source, ev.Name, ev.URL, ev.ExtraTags)
+	obj, err := object.FromTags(l.db, ev.Tags)
+	if err != nil {
+		log.Println(err)
+
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprintln(w, err.Error())
+		return
+	}
+
+	err = obj.UpdateMetadata(ev.SourceId, ev.Name, object.ToDBString(ev.URL), ev.ExtraTags)
+	if err != nil {
+		log.Println(err)
+
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprintln(w, err.Error())
+		return
+	}
 
 	w.WriteHeader(http.StatusTeapot)
 	_, _ = fmt.Fprintln(w, "received event")
@@ -68,7 +85,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			panic("non-OK state but no incident was created")
 		}
 
-		log.Printf("%s: ignoring superfluous OK state event from source %d", obj.DisplayName(), ev.Source)
+		log.Printf("%s: ignoring superfluous OK state event from source %d", obj.DisplayName(), ev.SourceId)
 		return
 	}
 
@@ -89,17 +106,17 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		currentIncident.SeverityBySource = make(map[int64]event.Severity)
 	}
 
-	oldSourceSeverity := currentIncident.SeverityBySource[ev.Source]
+	oldSourceSeverity := currentIncident.SeverityBySource[ev.SourceId]
 	if oldSourceSeverity == event.Severity(0) {
 		oldSourceSeverity = event.SeverityOK
 	}
 	if oldSourceSeverity != ev.Severity {
-		currentIncident.AddHistory(ev.Time, "source %d severity changed from %s to %s", ev.Source, oldSourceSeverity.String(), ev.Severity.String())
+		currentIncident.AddHistory(ev.Time, "source %d severity changed from %s to %s", ev.SourceId, oldSourceSeverity.String(), ev.Severity.String())
 
 		if ev.Severity != event.SeverityOK {
-			currentIncident.SeverityBySource[ev.Source] = ev.Severity
+			currentIncident.SeverityBySource[ev.SourceId] = ev.Severity
 		} else {
-			delete(currentIncident.SeverityBySource, ev.Source)
+			delete(currentIncident.SeverityBySource, ev.SourceId)
 		}
 	}
 

@@ -2,41 +2,62 @@ package object
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/icingadb/pkg/icingadb"
+	"github.com/icinga/icingadb/pkg/types"
 	"sort"
 	"sync"
 )
 
 type Object struct {
-	ID       [sha256.Size]byte
+	ID       types.Binary
 	Tags     map[string]string
 	Metadata map[int64]*SourceMetadata
+
+	db *icingadb.DB
 
 	mu sync.Mutex
 }
 
 var (
-	cache   = make(map[[sha256.Size]byte]*Object)
+	cache   = make(map[string]*Object)
 	cacheMu sync.Mutex
 )
 
-func FromTags(tags map[string]string) *Object {
+func FromTags(db *icingadb.DB, tags map[string]string) (*Object, error) {
 	id := ID(tags)
 
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 
-	object, ok := cache[id]
+	object, ok := cache[id.String()]
 	if ok {
-		return object
+		return object, nil
 	}
 
-	object = &Object{ID: id, Tags: tags}
-	cache[id] = object
-	return object
+	object = &Object{ID: id, Tags: tags, db: db}
+	cache[id.String()] = object
+
+	stmt, _ := object.db.BuildInsertIgnoreStmt(&ObjectRow{})
+	dbObj := &ObjectRow{
+		ID:   object.ID,
+		Host: object.Tags["host"],
+	}
+
+	if service, ok := object.Tags["service"]; ok {
+		dbObj.Service = ToDBString(service)
+	}
+
+	_, err := object.db.NamedExec(stmt, dbObj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to insert object: %s", err)
+	}
+
+	return object, nil
 }
 
 func (o *Object) DisplayName() string {
@@ -67,7 +88,7 @@ func (o *Object) String() string {
 	for source, metadata := range o.Metadata {
 		_, _ = fmt.Fprintf(&b, "    Source %d:\n", source)
 		_, _ = fmt.Fprintf(&b, "      Name: %q\n", metadata.Name)
-		_, _ = fmt.Fprintf(&b, "      URL: %q\n", metadata.URL)
+		_, _ = fmt.Fprintf(&b, "      URL: %q\n", metadata.URL.String)
 		_, _ = fmt.Fprintf(&b, "      Extra Tags:\n")
 		for tag, value := range metadata.ExtraTags {
 			_, _ = fmt.Fprintf(&b, "        %q", tag)
@@ -80,9 +101,47 @@ func (o *Object) String() string {
 	return b.String()
 }
 
-func (o *Object) UpdateMetadata(source int64, name string, url string, extraTags map[string]string) {
+func (o *Object) UpdateMetadata(source int64, name string, url types.String, extraTags map[string]string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+
+	sourceMetadata := &SourceMetadata{
+		ObjectId:  o.ID,
+		SourceId:  source,
+		Name:      name,
+		URL:       url,
+		ExtraTags: extraTags,
+	}
+
+	stmt, _ := o.db.BuildUpsertStmt(&SourceMetadata{})
+	_, err := o.db.NamedExec(stmt, sourceMetadata)
+	if err != nil {
+		return fmt.Errorf("failed to upsert object metadata: %s", err)
+	}
+
+	tx, err := o.db.BeginTxx(context.TODO(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction for object extra tags: %s", err)
+	}
+	defer tx.Rollback()
+
+	extraTag := &ExtraTagRow{ObjectId: o.ID, SourceId: source}
+	_, err = tx.NamedExec(`DELETE FROM "object_extra_tag" WHERE "object_id" = :object_id AND "source_id" = :source_id`, extraTag)
+	if err != nil {
+		return fmt.Errorf("failed to delete object extra tags: %s", err)
+	}
+
+	if len(extraTags) > 0 {
+		stmt, _ = o.db.BuildInsertStmt(extraTag)
+		_, err = tx.NamedExec(stmt, sourceMetadata.mapToExtraTags())
+		if err != nil {
+			return fmt.Errorf("failed to insert object extra tags: %s", err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit object extrag tags transaction: %s", err)
+	}
 
 	if o.Metadata == nil {
 		o.Metadata = make(map[int64]*SourceMetadata)
@@ -92,18 +151,15 @@ func (o *Object) UpdateMetadata(source int64, name string, url string, extraTags
 		m.Name = name
 		m.URL = url
 		m.ExtraTags = extraTags
-		return
+	} else {
+		o.Metadata[source] = sourceMetadata
 	}
 
-	o.Metadata[source] = &SourceMetadata{
-		Name:      name,
-		URL:       url,
-		ExtraTags: extraTags,
-	}
+	return nil
 }
 
 // TODO: the return value of this function must be stable like forever
-func ID(tags map[string]string) [sha256.Size]byte {
+func ID(tags map[string]string) types.Binary {
 	h := sha256.New()
 
 	type KV struct {
@@ -123,11 +179,33 @@ func ID(tags map[string]string) [sha256.Size]byte {
 		h.Write([]byte{0})
 	}
 
-	return [32]byte(h.Sum(nil))
+	return h.Sum(nil)
 }
 
 type SourceMetadata struct {
-	Name      string
-	URL       string
-	ExtraTags map[string]string
+	ObjectId  types.Binary      `db:"object_id"`
+	SourceId  int64             `db:"source_id"`
+	Name      string            `db:"name"`
+	URL       types.String      `db:"url"`
+	ExtraTags map[string]string `db:"-"`
+}
+
+// TableName implements the contracts.TableNamer interface.
+func (s *SourceMetadata) TableName() string {
+	return "source_object"
+}
+
+// mapToExtraTags transforms the source metadata extra tags map to a slice of ExtraTagRow struct.
+func (s *SourceMetadata) mapToExtraTags() []*ExtraTagRow {
+	var extraTags []*ExtraTagRow
+	for key, val := range s.ExtraTags {
+		extraTags = append(extraTags, &ExtraTagRow{
+			ObjectId: s.ObjectId,
+			SourceId: s.SourceId,
+			Tag:      key,
+			Value:    val,
+		})
+	}
+
+	return extraTags
 }
