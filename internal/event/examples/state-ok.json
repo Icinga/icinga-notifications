@@ -1,6 +1,7 @@
 {
 	"name": "httpd on www1",
 	"url": "https://example.com/icingaweb2/icingadb/service?name=httpd&host.name=www1",
+	"source_id":  1,
 	"tags": {
 		"host": "www1",
 		"service": "httpd"
