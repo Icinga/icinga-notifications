@@ -1,3 +1,5 @@
+CREATE TYPE boolenum AS ENUM ( 'n', 'y' );
+
 CREATE TABLE contact (
     id bigserial,
     full_name text NOT NULL,
@@ -146,6 +148,7 @@ CREATE TABLE rule (
     name text NOT NULL,
     timeperiod_id bigint REFERENCES timeperiod(id),
     object_filter text,
+    is_active boolenum NOT NULL DEFAULT 'y',
 
     CONSTRAINT pk_rule PRIMARY KEY (id)
 );
