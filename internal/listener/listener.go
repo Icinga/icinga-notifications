@@ -77,13 +77,21 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if err = ev.Sync(l.db, obj.ID); err != nil {
+		log.Println(err)
+
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprintln(w, err.Error())
+		return
+	}
+
 	w.WriteHeader(http.StatusTeapot)
 	_, _ = fmt.Fprintln(w, "received event")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, obj.String())
 	_, _ = fmt.Fprintln(w, ev.String())
 
-	if ev.Severity == event.Severity(0) {
+	if ev.Severity == event.SeverityNone {
 		// not a state event
 		_, _ = fmt.Fprintf(w, "not a state event, ignoring for now\n")
 		return
@@ -118,7 +126,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	oldSourceSeverity := currentIncident.SeverityBySource[ev.SourceId]
-	if oldSourceSeverity == event.Severity(0) {
+	if oldSourceSeverity == event.SeverityNone {
 		oldSourceSeverity = event.SeverityOK
 	}
 	if oldSourceSeverity != ev.Severity {

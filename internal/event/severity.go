@@ -1,6 +1,7 @@
 package event
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 )
@@ -8,7 +9,8 @@ import (
 type Severity int
 
 const (
-	SeverityOK Severity = 1 + iota
+	SeverityNone Severity = iota
+	SeverityOK
 	SeverityDebug
 	SeverityInfo
 	SeverityNotice
@@ -49,6 +51,7 @@ func (s *Severity) MarshalJSON() ([]byte, error) {
 
 func (s *Severity) UnmarshalJSON(data []byte) error {
 	if string(data) == "null" {
+		*s = SeverityNone
 		return nil
 	}
 
@@ -65,6 +68,39 @@ func (s *Severity) UnmarshalJSON(data []byte) error {
 
 	*s = severity
 	return nil
+}
+
+// Scan implements the sql.Scanner interface.
+// Supports SQL NULL.
+func (s *Severity) Scan(src any) error {
+	if src == nil {
+		*s = SeverityNone
+		return nil
+	}
+
+	name, ok := src.(string)
+	if !ok {
+		return fmt.Errorf("unable to scan type %T into Severity", src)
+	}
+
+	severity, ok := severityByName[name]
+	if !ok {
+		return fmt.Errorf("unknown severity %q", name)
+	}
+
+	*s = severity
+
+	return nil
+}
+
+// Value implements the driver.Valuer interface.
+// Supports SQL NULL.
+func (s Severity) Value() (driver.Value, error) {
+	if s == SeverityNone {
+		return nil, nil
+	}
+
+	return s.String(), nil
 }
 
 func (s *Severity) String() string {
