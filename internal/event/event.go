@@ -3,6 +3,10 @@ package event
 import (
 	"bytes"
 	"fmt"
+	"github.com/icinga/icingadb/pkg/icingadb"
+	"github.com/icinga/icingadb/pkg/types"
+	"github.com/icinga/noma/internal/object"
+	"github.com/icinga/noma/internal/utils"
 	"time"
 )
 
@@ -19,6 +23,8 @@ type Event struct {
 	Severity Severity `json:"severity"`
 	Username string   `json:"username"`
 	Message  string   `json:"message"`
+
+	ID int64
 }
 
 func (e *Event) String() string {
@@ -61,4 +67,58 @@ func (e *Event) FullString() string {
 		_, _ = fmt.Fprintf(&b, "  Message: %q\n", e.Message)
 	}
 	return b.String()
+}
+
+// Sync transforms this event to *event.EventRow and calls its sync method.
+func (e *Event) Sync(db *icingadb.DB, objectId types.Binary) error {
+	if e.ID != 0 {
+		return nil
+	}
+
+	eventRow := &EventRow{
+		Time:     types.UnixMilli(e.Time),
+		SourceID: e.SourceId,
+		ObjectID: objectId,
+		Type:     object.ToDBString(e.Type),
+		Severity: e.Severity,
+		Username: object.ToDBString(e.Username),
+		Message:  object.ToDBString(e.Message),
+	}
+
+	err := eventRow.Sync(db)
+	if err == nil {
+		e.ID = eventRow.ID
+	}
+
+	return err
+}
+
+// EventRow represents a single event database row and isn't an in-memory representation of an event.
+type EventRow struct {
+	ID       int64           `db:"id"`
+	Time     types.UnixMilli `db:"time"`
+	SourceID int64           `db:"source_id"`
+	ObjectID types.Binary    `db:"object_id"`
+	Type     types.String    `db:"type"`
+	Severity Severity        `db:"severity"`
+	Username types.String    `db:"username"`
+	Message  types.String    `db:"message"`
+}
+
+// TableName implements the contracts.TableNamer interface.
+func (er *EventRow) TableName() string {
+	return "event"
+}
+
+// Sync synchronizes this types data to the database.
+// Returns an error when any of the database operation fails.
+func (er *EventRow) Sync(db *icingadb.DB) error {
+	eventId, err := utils.InsertAndFetchId(db, utils.BuildInsertStmtWithout(db, er, "id"), er)
+	if err != nil {
+		return err
+	}
+
+	er.ID = eventId
+
+	return nil
 }
