@@ -1,15 +1,18 @@
 package listener
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/icinga/icingadb/pkg/icingadb"
+	"github.com/icinga/icingadb/pkg/types"
 	"github.com/icinga/noma/internal/config"
 	"github.com/icinga/noma/internal/event"
 	"github.com/icinga/noma/internal/incident"
 	"github.com/icinga/noma/internal/object"
 	"github.com/icinga/noma/internal/recipient"
 	"github.com/icinga/noma/internal/rule"
+	"github.com/icinga/noma/internal/utils"
 	"log"
 	"net/http"
 	"time"
@@ -68,7 +71,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	err = obj.UpdateMetadata(ev.SourceId, ev.Name, object.ToDBString(ev.URL), ev.ExtraTags)
+	err = obj.UpdateMetadata(ev.SourceId, ev.Name, utils.ToDBString(ev.URL), ev.ExtraTags)
 	if err != nil {
 		log.Println(err)
 
@@ -97,7 +100,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	currentIncident, created := incident.GetCurrent(obj, ev.Severity != event.SeverityOK)
+	currentIncident, created := incident.GetCurrent(l.db, obj, ev.Severity != event.SeverityOK)
 
 	if currentIncident == nil {
 		if ev.Severity != event.SeverityOK {
@@ -114,10 +117,20 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	if created {
 		currentIncident.StartedAt = ev.Time
-		currentIncident.AddHistory(ev.Time, "opened incident")
+		err = currentIncident.Sync(incident.NewHistoryEntry(ev.Time, "opened incident"))
+		if err != nil {
+			log.Println(err)
+			return
+		}
 	}
 
-	currentIncident.AddHistory(ev.Time, "processing event")
+	err = currentIncident.AddEvent(l.db, &ev)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	//currentIncident.AddHistory(incident.NewHistoryEntry(ev.Time, "processing event"))
 
 	oldIncidentSeverity := currentIncident.Severity()
 
@@ -130,7 +143,19 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		oldSourceSeverity = event.SeverityOK
 	}
 	if oldSourceSeverity != ev.Severity {
-		currentIncident.AddHistory(ev.Time, "source %d severity changed from %s to %s", ev.SourceId, oldSourceSeverity.String(), ev.Severity.String())
+		hr := &incident.HistoryRow{
+			EventID:     types.Int{NullInt64: sql.NullInt64{Int64: ev.ID, Valid: true}},
+			Type:        incident.SourceSeverityChanged,
+			NewSeverity: ev.Severity,
+			OldSeverity: oldSourceSeverity,
+		}
+		err = currentIncident.AddHistory(
+			incident.NewHistoryEntry(ev.Time, "source %d severity changed from %s to %s", ev.SourceId, oldSourceSeverity.String(), ev.Severity.String()),
+			hr,
+		)
+		if err != nil {
+			log.Println(err)
+		}
 
 		if ev.Severity != event.SeverityOK {
 			currentIncident.SeverityBySource[ev.SourceId] = ev.Severity
@@ -142,13 +167,26 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	newIncidentSeverity := currentIncident.Severity()
 
 	if newIncidentSeverity != oldIncidentSeverity {
-		currentIncident.AddHistory(ev.Time, "incident severity changed from %s to %s", oldIncidentSeverity.String(), newIncidentSeverity.String())
+		hr := &incident.HistoryRow{
+			Type:        incident.SeverityChanged,
+			NewSeverity: newIncidentSeverity,
+			OldSeverity: oldIncidentSeverity,
+		}
+		err = currentIncident.AddHistory(
+			incident.NewHistoryEntry(ev.Time, "incident severity changed from %s to %s", oldIncidentSeverity.String(), newIncidentSeverity.String()),
+			hr,
+		)
+		if err != nil {
+			log.Println(err)
+		}
 	}
 
 	if newIncidentSeverity == event.SeverityOK {
-		currentIncident.AddHistory(ev.Time, "all sources recovered, closing incident")
 		currentIncident.RecoveredAt = ev.Time
-		incident.RemoveCurrent(obj)
+		err = incident.RemoveCurrent(obj, incident.NewHistoryEntry(ev.Time, "all sources recovered, closing incident"))
+		if err != nil {
+			log.Println(err)
+		}
 	}
 
 	if currentIncident.State == nil {
@@ -163,8 +201,11 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		}
 
 		if _, ok := currentIncident.State[r]; !ok && (r.ObjectFilter == nil || r.ObjectFilter.Matches(obj)) {
-			currentIncident.AddHistory(ev.Time, "rule %q matches", r.Name)
 			currentIncident.State[r] = make(map[*rule.Escalation]*incident.EscalationState)
+			err = currentIncident.AddRuleMatchedHistory(r, incident.NewHistoryEntry(ev.Time, "rule %q matches", r.Name))
+			if err != nil {
+				log.Println(err)
+			}
 		}
 	}
 
@@ -197,31 +238,19 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			currentIncident.Recipients = make(map[recipient.Recipient]*incident.RecipientState)
 		}
 
-		newRole := incident.RoleRecipient
-		if currentIncident.HasManager() {
-			newRole = incident.RoleSubscriber
-		}
-
 		for escalation, state := range states {
-			if state.TriggeredAt.IsZero() {
-				state.TriggeredAt = ev.Time
-				currentIncident.AddHistory(ev.Time, "rule %q reached escalation %q", r.Name, escalation.DisplayName())
+			if state.TriggeredAt.Time().IsZero() {
+				state.RuleEscalationID = escalation.ID
+				state.TriggeredAt = types.UnixMilli(ev.Time)
 
-				for _, escalationRecipient := range escalation.Recipients {
-					r := escalationRecipient.Recipient
+				err = currentIncident.AddEscalationTriggeredHistory(state, incident.NewHistoryEntry(ev.Time, "rule %q reached escalation %q", r.Name, escalation.DisplayName()))
+				if err != nil {
+					log.Println(err)
+				}
 
-					state, ok := currentIncident.Recipients[r]
-					if !ok {
-						currentIncident.Recipients[r] = &incident.RecipientState{
-							Role:     newRole,
-							Channels: map[string]struct{}{escalationRecipient.ChannelType: {}},
-						}
-					} else {
-						if state.Role < newRole {
-							state.Role = newRole
-						}
-						state.Channels[escalationRecipient.ChannelType] = struct{}{}
-					}
+				err = currentIncident.AddRecipient(escalation, ev.Time)
+				if err != nil {
+					log.Println(err)
 				}
 			}
 		}
@@ -247,7 +276,18 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 		for contact, channels := range contactChannels {
 			for chType := range channels {
-				currentIncident.AddHistory(ev.Time, "notify %q via %q", contact.FullName, chType)
+				hr := &incident.HistoryRow{
+					ContactID:   types.Int{NullInt64: sql.NullInt64{Int64: contact.ID, Valid: true}},
+					Type:        incident.Notified,
+					ChannelType: utils.ToDBString(chType),
+				}
+				err = currentIncident.AddHistory(
+					incident.NewHistoryEntry(ev.Time, "notify %q via %q", contact.FullName, chType),
+					hr,
+				)
+				if err != nil {
+					log.Println(err)
+				}
 
 				chConf := l.runtimeConfig.ChannelByType[chType]
 				if chConf == nil {
