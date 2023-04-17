@@ -6,7 +6,8 @@ import (
 )
 
 type Schedule struct {
-	Name    string
+	ID      int64  `db:"id"`
+	Name    string `db:"name"`
 	Members []*Member
 }
 
