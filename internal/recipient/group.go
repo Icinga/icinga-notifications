@@ -3,12 +3,17 @@ package recipient
 import "time"
 
 type Group struct {
-	Name    string
+	ID      int64  `db:"id"`
+	Name    string `db:"name"`
 	Members []*Contact
 }
 
 func (g *Group) GetContactsAt(t time.Time) []*Contact {
 	return g.Members
+}
+
+func (g *Group) TableName() string {
+	return "contactgroup"
 }
 
 var _ Recipient = (*Group)(nil)
