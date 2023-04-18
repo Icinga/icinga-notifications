@@ -201,10 +201,15 @@ CREATE TYPE incident_contact_role AS ENUM ('recipient', 'subscriber', 'manager')
 
 CREATE TABLE incident_contact (
     incident_id bigint NOT NULL REFERENCES incident(id),
-    contact_id bigint NOT NULL REFERENCES contact(id),
+    contact_id bigint REFERENCES contact(id),
+    contactgroup_id bigint REFERENCES contactgroup(id),
+    schedule_id bigint REFERENCES schedule(id),
     role incident_contact_role NOT NULL,
 
-    CONSTRAINT pk_incident_contact PRIMARY KEY (incident_id, contact_id)
+    CONSTRAINT key_incident_contact_contact UNIQUE (incident_id, contact_id),
+    CONSTRAINT key_incident_contact_contactgroup UNIQUE (incident_id, contactgroup_id),
+    CONSTRAINT key_incident_contact_schedule UNIQUE (incident_id, schedule_id),
+    CONSTRAINT nonnulls_incident_recipients_check CHECK (num_nonnulls(contact_id, contactgroup_id, schedule_id) = 1)
 );
 
 CREATE TABLE incident_rule (
