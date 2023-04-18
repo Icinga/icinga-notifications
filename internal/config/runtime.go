@@ -7,10 +7,13 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/noma/internal/channel"
+	"github.com/icinga/noma/internal/object"
 	"github.com/icinga/noma/internal/recipient"
+	"github.com/icinga/noma/internal/rule"
 	"github.com/icinga/noma/internal/timeperiod"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 	"log"
 	"time"
 )
@@ -27,6 +30,7 @@ type RuntimeConfig struct {
 	TimePeriodsById map[int64]*timeperiod.TimePeriod
 	Schedules       []*recipient.Schedule
 	SchedulesByID   map[int64]*recipient.Schedule
+	Rules           []*rule.Rule
 }
 
 func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
@@ -46,6 +50,7 @@ func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB,
 		r.UpdateGroupsFromDatabase,
 		r.UpdateTimePeriodsFromDatabase,
 		r.UpdateSchedulesFromDatabase,
+		r.UpdateRulesFromDatabase,
 	}
 	for _, f := range updateFuncs {
 		if err := f(ctx, db, tx, logger); err != nil {
@@ -352,6 +357,155 @@ func (r *RuntimeConfig) UpdateSchedulesFromDatabase(ctx context.Context, db *ici
 
 	r.Schedules = schedules
 	r.SchedulesByID = schedulesById
+
+	return nil
+}
+
+func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+	var rulePtr *rule.Rule
+	stmt := db.BuildSelectStmt(rulePtr, rulePtr)
+	log.Println(stmt)
+
+	var rules []*rule.Rule
+	if err := tx.SelectContext(ctx, &rules, stmt); err != nil {
+		log.Println(err)
+		return err
+	}
+
+	rulesByID := make(map[int64]*rule.Rule)
+	for i, rule := range rules {
+		ruleLogger := logger.With(
+			zap.Int64("id", rule.ID),
+			zap.String("name", rule.Name),
+			zap.String("object_filter", rule.ObjectFilterExpr.String),
+			zap.Int64("timeperiod_id", rule.TimePeriodID.Int64),
+		)
+
+		if rule.TimePeriodID.Valid {
+			p := r.TimePeriodsById[rule.TimePeriodID.Int64]
+			if p == nil {
+				ruleLogger.Warnw("ignoring rule with unknown timeperiod_id")
+				rules[i] = nil
+				continue
+			}
+
+			rule.TimePeriod = p
+		}
+
+		if rule.ObjectFilterExpr.Valid {
+			f, err := object.ParseFilter(rule.ObjectFilterExpr.String)
+			if err != nil {
+				ruleLogger.Warnw("ignoring rule as parsing object_filter failed", zap.Error(err))
+				rules[i] = nil
+				continue
+			}
+
+			rule.ObjectFilter = f
+		}
+
+		rulesByID[rule.ID] = rule
+		ruleLogger.Debugw("loaded rule config")
+	}
+
+	if slices.Contains(rules, nil) {
+		filteredRules := make([]*rule.Rule, len(rules))
+		for _, rule := range rules {
+			if rule != nil {
+				filteredRules = append(filteredRules, rule)
+			}
+		}
+		rules = filteredRules
+	}
+
+	var escalationPtr *rule.Escalation
+	stmt = db.BuildSelectStmt(escalationPtr, escalationPtr)
+	log.Println(stmt)
+
+	var escalations []*rule.Escalation
+	if err := tx.SelectContext(ctx, &escalations, stmt); err != nil {
+		log.Println(err)
+		return err
+	}
+
+	escalationsByID := make(map[int64]*rule.Escalation)
+	for _, escalation := range escalations {
+		escalationLogger := logger.With(
+			zap.Int64("id", escalation.ID),
+			zap.Int64("rule_id", escalation.RuleID),
+			zap.String("condition", escalation.ConditionExpr.String),
+			zap.String("name", escalation.NameRaw.String),
+			zap.Int64("fallback_for", escalation.FallbackForID.Int64),
+		)
+
+		rule := rulesByID[escalation.RuleID]
+		if rule == nil {
+			escalationLogger.Warnw("ignoring escalation for unknown rule_id")
+			continue
+		}
+
+		if escalation.ConditionExpr.Valid {
+			// TODO: implement condition parsing
+			escalationLogger.Warnw("ignoring escalation with condition (not yet implemented)")
+			continue
+		}
+
+		if escalation.FallbackForID.Valid {
+			// TODO: implement fallbacks (needs extra validation: mismatching rule_id, cycles)
+			escalationLogger.Warnw("ignoring fallback escalation (not yet implemented)")
+			continue
+		}
+
+		if escalation.NameRaw.Valid {
+			escalation.Name = escalation.NameRaw.String
+		}
+
+		rule.Escalations = append(rule.Escalations, escalation)
+		escalationsByID[escalation.ID] = escalation
+		escalationLogger.Debugw("loaded escalation config")
+	}
+
+	var recipientPtr *rule.EscalationRecipient
+	stmt = db.BuildSelectStmt(recipientPtr, recipientPtr)
+	log.Println(stmt)
+
+	var recipients []*rule.EscalationRecipient
+	if err := tx.SelectContext(ctx, &recipients, stmt); err != nil {
+		log.Println(err)
+		return err
+	}
+
+	for _, recipient := range recipients {
+		recipientLogger := logger.With(
+			zap.Int64("id", recipient.ID),
+			zap.Int64("escalation_id", recipient.EscalationID),
+			zap.String("channel_type", recipient.ChannelType))
+
+		if recipient.ContactID.Valid {
+			id := recipient.ContactID.Int64
+			recipientLogger = recipientLogger.With(zap.Int64("contact_id", id))
+			recipient.Recipient = r.ContactsByID[id]
+		} else if recipient.GroupID.Valid {
+			id := recipient.GroupID.Int64
+			recipientLogger = recipientLogger.With(zap.Int64("contactgroup_id", id))
+			recipient.Recipient = r.GroupsByID[id]
+		} else if recipient.ScheduleID.Valid {
+			id := recipient.ScheduleID.Int64
+			recipientLogger = recipientLogger.With(zap.Int64("schedule_id", id))
+			recipient.Recipient = r.SchedulesByID[id]
+		}
+
+		escalation := escalationsByID[recipient.EscalationID]
+		if escalation == nil {
+			recipientLogger.Warnw("ignoring recipient for unknown escalation")
+		} else if recipient.Recipient == nil {
+			recipientLogger.Warnw("ignoring unknown escalation recipient")
+		} else {
+			escalation.Recipients = append(escalation.Recipients, recipient)
+			recipientLogger.Debugw("loaded escalation recipient config")
+		}
+	}
+
+	r.Rules = rules
 
 	return nil
 }
