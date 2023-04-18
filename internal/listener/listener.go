@@ -143,7 +143,11 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
 	// to be checked again, these rules already matched and stay effective for the ongoing incident.
-	for _, r := range rule.Rules {
+	for _, r := range l.runtimeConfig.Rules {
+		if !r.IsActive.Valid || !r.IsActive.Bool {
+			continue
+		}
+
 		if _, ok := currentIncident.State[r]; !ok && (r.ObjectFilter == nil || r.ObjectFilter.Matches(obj)) {
 			currentIncident.AddHistory(ev.Time, "rule %q matches", r.Name)
 			currentIncident.State[r] = make(map[*rule.Escalation]*incident.EscalationState)
@@ -151,6 +155,10 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	for r, states := range currentIncident.State {
+		if !r.IsActive.Valid || !r.IsActive.Bool {
+			continue
+		}
+
 		// Check if new escalation stages are reached
 		for _, escalation := range r.Escalations {
 			if _, ok := states[escalation]; !ok {
@@ -185,31 +193,21 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				state.TriggeredAt = ev.Time
 				currentIncident.AddHistory(ev.Time, "rule %q reached escalation %q", r.Name, escalation.DisplayName())
 
-				addRecipient := func(r recipient.Recipient) {
+				for _, escalationRecipient := range escalation.Recipients {
+					r := escalationRecipient.Recipient
+
 					state, ok := currentIncident.Recipients[r]
 					if !ok {
 						currentIncident.Recipients[r] = &incident.RecipientState{
 							Role:     newRole,
-							Channels: map[string]struct{}{escalation.ChannelType: {}},
+							Channels: map[string]struct{}{escalationRecipient.ChannelType: {}},
 						}
 					} else {
 						if state.Role < newRole {
 							state.Role = newRole
 						}
-						state.Channels[escalation.ChannelType] = struct{}{}
+						state.Channels[escalationRecipient.ChannelType] = struct{}{}
 					}
-				}
-
-				for _, c := range escalation.Contacts {
-					addRecipient(c)
-				}
-
-				for _, g := range escalation.ContactGroups {
-					addRecipient(g)
-				}
-
-				for _, s := range escalation.Schedules {
-					addRecipient(s)
 				}
 			}
 		}

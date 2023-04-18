@@ -1,20 +1,23 @@
 package rule
 
 import (
+	"database/sql"
 	"github.com/icinga/noma/internal/recipient"
 	"strings"
 	"time"
 )
 
 type Escalation struct {
-	Name      string
-	Condition *Condition
-	Fallbacks []*Escalation
+	ID            int64          `db:"id"`
+	RuleID        int64          `db:"rule_id"`
+	Name          string         `db:"-"`
+	NameRaw       sql.NullString `db:"name"`
+	Condition     *Condition     `db:"-"`
+	ConditionExpr sql.NullString `db:"condition"`
+	FallbackForID sql.NullInt64  `db:"fallback_for"`
+	Fallbacks     []*Escalation
 
-	ChannelType   string
-	Contacts      []*recipient.Contact
-	ContactGroups []*recipient.Group
-	Schedules     []*recipient.Schedule
+	Recipients []*EscalationRecipient
 }
 
 func (e *Escalation) DisplayName() string {
@@ -24,14 +27,15 @@ func (e *Escalation) DisplayName() string {
 
 	var recipients []string
 
-	for _, c := range e.Contacts {
-		recipients = append(recipients, "[C] "+c.FullName)
-	}
-	for _, g := range e.ContactGroups {
-		recipients = append(recipients, "[G] "+g.Name)
-	}
-	for _, s := range e.Schedules {
-		recipients = append(recipients, "[S] "+s.Name)
+	for _, r := range e.Recipients {
+		switch v := r.Recipient.(type) {
+		case *recipient.Contact:
+			recipients = append(recipients, "[C] "+v.FullName)
+		case *recipient.Group:
+			recipients = append(recipients, "[G] "+v.Name)
+		case *recipient.Schedule:
+			recipients = append(recipients, "[S] "+v.Name)
+		}
 	}
 
 	if len(recipients) == 0 {
@@ -41,18 +45,37 @@ func (e *Escalation) DisplayName() string {
 	return strings.Join(recipients, ", ")
 }
 
-func (e *Escalation) GetContactsAt(t time.Time) []*recipient.Contact {
-	var contacts []*recipient.Contact
+func (e *Escalation) GetContactsAt(t time.Time) []ContactChannelPair {
+	var pairs []ContactChannelPair
 
-	contacts = append(contacts, e.Contacts...)
-
-	for _, g := range e.ContactGroups {
-		contacts = append(contacts, g.Members...)
+	for _, r := range e.Recipients {
+		for _, c := range r.Recipient.GetContactsAt(t) {
+			pairs = append(pairs, ContactChannelPair{c, r.ChannelType})
+		}
 	}
 
-	for _, s := range e.Schedules {
-		contacts = append(contacts, s.GetContactsAt(t)...)
-	}
+	return pairs
+}
 
-	return contacts
+func (e *Escalation) TableName() string {
+	return "rule_escalation"
+}
+
+type EscalationRecipient struct {
+	ID           int64         `db:"id"`
+	EscalationID int64         `db:"rule_escalation_id"`
+	ChannelType  string        `db:"channel_type"`
+	ContactID    sql.NullInt64 `db:"contact_id"`
+	GroupID      sql.NullInt64 `db:"contactgroup_id"`
+	ScheduleID   sql.NullInt64 `db:"schedule_id"`
+	Recipient    recipient.Recipient
+}
+
+func (r *EscalationRecipient) TableName() string {
+	return "rule_escalation_recipient"
+}
+
+type ContactChannelPair struct {
+	Contact     *recipient.Contact
+	ChannelType string
 }

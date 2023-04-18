@@ -13,8 +13,10 @@ var (
 		Name:         "Production On-Call",
 		ObjectFilter: object.MustParseFilter("hostgroup/production"),
 		Escalations: []*Escalation{{
-			ChannelType: "email",
-			Schedules:   []*recipient.Schedule{recipient.OnCall},
+			Recipients: []*EscalationRecipient{{
+				ChannelType: "email",
+				Recipient:   recipient.OnCall,
+			}},
 		}},
 	}
 
@@ -23,24 +25,32 @@ var (
 		TimePeriod:   timeperiod.OfficeHours,
 		ObjectFilter: object.MustParseFilter("hostgroup/linux"),
 		Escalations: []*Escalation{{
-			Name:        "Level 1",
-			Contacts:    []*recipient.Contact{recipient.John},
-			ChannelType: "email",
+			Name: "Level 1",
+			Recipients: []*EscalationRecipient{{
+				ChannelType: "email",
+				Recipient:   recipient.John,
+			}},
 		}, {
-			Name:        "Level 2",
-			Condition:   &Condition{MinDuration: 1 * time.Second},
-			Contacts:    []*recipient.Contact{recipient.Jane},
-			ChannelType: "email",
+			Name:      "Level 2",
+			Condition: &Condition{MinDuration: 1 * time.Second},
+			Recipients: []*EscalationRecipient{{
+				ChannelType: "email",
+				Recipient:   recipient.Jane,
+			}},
 		}, {
-			Name:        "Level 3",
-			Condition:   &Condition{MinDuration: 2 * time.Second},
-			Contacts:    []*recipient.Contact{recipient.John},
-			ChannelType: "sms",
+			Name:      "Level 3",
+			Condition: &Condition{MinDuration: 2 * time.Second},
+			Recipients: []*EscalationRecipient{{
+				ChannelType: "sms",
+				Recipient:   recipient.John,
+			}},
 		}, {
-			Name:        "Level 4",
-			Condition:   &Condition{MinDuration: 3 * time.Second},
-			Contacts:    []*recipient.Contact{recipient.Jane},
-			ChannelType: "sms",
+			Name:      "Level 4",
+			Condition: &Condition{MinDuration: 3 * time.Second},
+			Recipients: []*EscalationRecipient{{
+				ChannelType: "sms",
+				Recipient:   recipient.Jane,
+			}},
 		}},
 	}
 
@@ -49,24 +59,32 @@ var (
 		TimePeriod:   timeperiod.OfficeHours,
 		ObjectFilter: object.MustParseFilter("hostgroup/windows"),
 		Escalations: []*Escalation{{
-			Condition:   &Condition{MinSeverity: event.SeverityWarning},
-			Contacts:    []*recipient.Contact{recipient.John},
-			ChannelType: "rocketchat",
+			Condition: &Condition{MinSeverity: event.SeverityWarning},
+			Recipients: []*EscalationRecipient{{
+				ChannelType: "rocketchat",
+				Recipient:   recipient.John,
+			}},
 		}, {
-			Condition:     &Condition{MinSeverity: event.SeverityCrit},
-			ContactGroups: []*recipient.Group{recipient.TeamOps},
-			ChannelType:   "rocketchat",
+			Condition: &Condition{MinSeverity: event.SeverityCrit},
+			Recipients: []*EscalationRecipient{{
+				ChannelType: "rocketchat",
+				Recipient:   recipient.TeamOps,
+			}},
 		}},
 	}
 
 	Everything = &Rule{
 		Name: "Just Send Everything",
 		Escalations: []*Escalation{{
-			Contacts:    []*recipient.Contact{recipient.John},
-			ChannelType: "email",
+			Recipients: []*EscalationRecipient{{
+				ChannelType: "email",
+				Recipient:   recipient.John,
+			}},
 		}, {
-			Contacts:    []*recipient.Contact{recipient.Jane},
-			ChannelType: "rocketchat",
+			Recipients: []*EscalationRecipient{{
+				ChannelType: "rocketchat",
+				Recipient:   recipient.Jane,
+			}},
 		}},
 	}
 
