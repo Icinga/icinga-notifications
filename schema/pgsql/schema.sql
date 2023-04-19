@@ -1,9 +1,12 @@
 CREATE TYPE boolenum AS ENUM ( 'n', 'y' );
+CREATE TYPE incident_history_event_type AS ENUM ( 'source_severity_changed', 'incident_severity_changed', 'recipient_role_changed', 'escalation_triggered', 'rule_matched', 'opened', 'closed', 'notified' );
+CREATE TYPE frequency_type AS ENUM ( 'MINUTELY', 'HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY' );
 
 CREATE TABLE contact (
     id bigserial,
     full_name text NOT NULL,
     username text, -- reference to web user
+    color varchar(7), -- hex color codes e.g #000000
 
     CONSTRAINT pk_contact PRIMARY KEY (id)
 );
@@ -21,6 +24,7 @@ CREATE TABLE contact_address (
 CREATE TABLE contactgroup (
     id bigserial,
     name text NOT NULL,
+    color varchar(7), -- hex color codes e.g #000000
 
     CONSTRAINT pk_contactgroup PRIMARY KEY (id)
 );
@@ -51,8 +55,14 @@ CREATE TABLE timeperiod_entry (
     timeperiod_id bigint NOT NULL REFERENCES timeperiod(id),
     start_time bigint NOT NULL,
     end_time bigint NOT NULL,
+    -- Is needed by noma-web to prefilter entries, which matches until this time and should be ignored by the daemon.
+    until_time bigint,
     timezone text NOT NULL, -- e.g. 'Europe/Berlin', relevant for evaluating rrule (DST changes differ between zones)
     rrule text, -- recurrence rule (RFC5545)
+    -- Contains the same frequency types as in the rrule string except the `QUARTERLY` one, which is only offered
+    -- by web that is represented as `FREQ=MONTHLY;INTERVAL=3` in a RRule string. So, this should be also ignored
+    -- by the daemon.
+    frequency frequency_type,
     description text,
 
     CONSTRAINT pk_timeperiod_entry PRIMARY KEY (id)
@@ -231,9 +241,20 @@ CREATE TABLE incident_history (
     id bigserial,
     incident_id bigint NOT NULL REFERENCES incident(id),
     rule_escalation_id bigint REFERENCES rule_escalation(id),
+    event_id bigint REFERENCES event(id),
+    contact_id bigint REFERENCES contact(id),
+    contactgroup_id bigint REFERENCES contactgroup(id),
+    schedule_id bigint REFERENCES schedule(id),
+    rule_id bigint REFERENCES rule(id),
+    caused_by_incident_history_id bigint REFERENCES incident_history(id),
+    channel_type text,
     time bigint NOT NULL,
-    -- unstructured history log for very early versions, will become more structured in the future
     message text NOT NULL,
+    type incident_history_event_type NOT NULL,
+    new_severity severity,
+    old_severity severity,
+    new_recipient_role incident_contact_role,
+    old_recipient_role incident_contact_role,
 
     CONSTRAINT pk_incident_history PRIMARY KEY (id),
     FOREIGN KEY (incident_id, rule_escalation_id) REFERENCES incident_rule_escalation_state(incident_id, rule_escalation_id)
