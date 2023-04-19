@@ -18,9 +18,9 @@ import (
 
 type EMail struct {
 	config struct {
-		Host   string `json:"host"`
-		Port   uint16 `json:"port"`
-		Sender string `json:"sender"`
+		Host string `json:"host"`
+		Port uint16 `json:"port"`
+		From string `json:"from"`
 	}
 }
 
@@ -40,7 +40,7 @@ func NewEMail(config string) (Plugin, error) {
 		e.config.Port = 25
 	}
 
-	if e.config.Sender == "" {
+	if e.config.From == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
 			return nil, err
@@ -51,7 +51,7 @@ func NewEMail(config string) (Plugin, error) {
 			return nil, err
 		}
 
-		e.config.Sender = usr.Username + "@" + hostname
+		e.config.From = usr.Username + "@" + hostname
 	}
 
 	return e, nil
@@ -77,7 +77,7 @@ func (e *EMail) Send(contact *recipient.Contact, incident *incident.Incident, ev
 
 	FormatMessage(&msg, incident, event)
 
-	err := smtp.SendMail(e.GetServer(), nil, e.config.Sender, to, bytes.ReplaceAll(msg.Bytes(), []byte("\n"), []byte("\r\n")))
+	err := smtp.SendMail(e.GetServer(), nil, e.config.From, to, bytes.ReplaceAll(msg.Bytes(), []byte("\n"), []byte("\r\n")))
 	if err != nil {
 		return err
 	}
