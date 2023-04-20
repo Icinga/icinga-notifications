@@ -13,24 +13,18 @@ import (
 	"github.com/icinga/noma/internal/timeperiod"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"golang.org/x/exp/slices"
 	"log"
 	"time"
 )
 
 // RuntimeConfig stores the runtime representation of the configuration present in the database.
 type RuntimeConfig struct {
-	Channels        []*channel.Channel
 	ChannelByType   map[string]*channel.Channel
-	Contacts        []*recipient.Contact
 	ContactsByID    map[int64]*recipient.Contact
-	Groups          []*recipient.Group
 	GroupsByID      map[int64]*recipient.Group
-	TimePeriods     []*timeperiod.TimePeriod
 	TimePeriodsById map[int64]*timeperiod.TimePeriod
-	Schedules       []*recipient.Schedule
 	SchedulesByID   map[int64]*recipient.Schedule
-	Rules           []*rule.Rule
+	RulesByID       map[int64]*rule.Rule
 }
 
 func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
@@ -88,7 +82,6 @@ func (r *RuntimeConfig) UpdateChannelsFromDatabase(ctx context.Context, db *icin
 		}
 	}
 
-	r.Channels = channels
 	r.ChannelByType = channelsByType
 
 	return nil
@@ -139,7 +132,6 @@ func (r *RuntimeConfig) UpdateContactsFromDatabase(ctx context.Context, db *icin
 		}
 	}
 
-	r.Contacts = contacts
 	r.ContactsByID = contactsByID
 
 	return nil
@@ -198,7 +190,6 @@ func (r *RuntimeConfig) UpdateGroupsFromDatabase(ctx context.Context, db *icinga
 		}
 	}
 
-	r.Groups = groups
 	r.GroupsByID = groupsById
 
 	return nil
@@ -285,7 +276,6 @@ func (r *RuntimeConfig) UpdateTimePeriodsFromDatabase(ctx context.Context, db *i
 		timePeriods = append(timePeriods, p)
 	}
 
-	r.TimePeriods = timePeriods
 	r.TimePeriodsById = timePeriodsById
 
 	return nil
@@ -355,7 +345,6 @@ func (r *RuntimeConfig) UpdateSchedulesFromDatabase(ctx context.Context, db *ici
 		}
 	}
 
-	r.Schedules = schedules
 	r.SchedulesByID = schedulesById
 
 	return nil
@@ -373,7 +362,7 @@ func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingad
 	}
 
 	rulesByID := make(map[int64]*rule.Rule)
-	for i, rule := range rules {
+	for _, rule := range rules {
 		ruleLogger := logger.With(
 			zap.Int64("id", rule.ID),
 			zap.String("name", rule.Name),
@@ -385,7 +374,6 @@ func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingad
 			p := r.TimePeriodsById[rule.TimePeriodID.Int64]
 			if p == nil {
 				ruleLogger.Warnw("ignoring rule with unknown timeperiod_id")
-				rules[i] = nil
 				continue
 			}
 
@@ -396,7 +384,6 @@ func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingad
 			f, err := filter.Parse(rule.ObjectFilterExpr.String)
 			if err != nil {
 				ruleLogger.Warnw("ignoring rule as parsing object_filter failed", zap.Error(err))
-				rules[i] = nil
 				continue
 			}
 
@@ -405,16 +392,6 @@ func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingad
 
 		rulesByID[rule.ID] = rule
 		ruleLogger.Debugw("loaded rule config")
-	}
-
-	if slices.Contains(rules, nil) {
-		filteredRules := make([]*rule.Rule, len(rules))
-		for _, rule := range rules {
-			if rule != nil {
-				filteredRules = append(filteredRules, rule)
-			}
-		}
-		rules = filteredRules
 	}
 
 	var escalationPtr *rule.Escalation
@@ -505,7 +482,7 @@ func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingad
 		}
 	}
 
-	r.Rules = rules
+	r.RulesByID = rulesByID
 
 	return nil
 }
