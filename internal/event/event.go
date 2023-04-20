@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
-	"github.com/icinga/noma/internal/object"
 	"github.com/icinga/noma/internal/utils"
 	"time"
 )
@@ -79,10 +78,10 @@ func (e *Event) Sync(db *icingadb.DB, objectId types.Binary) error {
 		Time:     types.UnixMilli(e.Time),
 		SourceID: e.SourceId,
 		ObjectID: objectId,
-		Type:     object.ToDBString(e.Type),
+		Type:     utils.ToDBString(e.Type),
 		Severity: e.Severity,
-		Username: object.ToDBString(e.Username),
-		Message:  object.ToDBString(e.Message),
+		Username: utils.ToDBString(e.Username),
+		Message:  utils.ToDBString(e.Message),
 	}
 
 	err := eventRow.Sync(db)

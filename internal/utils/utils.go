@@ -1,9 +1,11 @@
 package utils
 
 import (
+	"database/sql"
 	"fmt"
 	"github.com/icinga/icingadb/pkg/driver"
 	"github.com/icinga/icingadb/pkg/icingadb"
+	"github.com/icinga/icingadb/pkg/types"
 	"github.com/icinga/icingadb/pkg/utils"
 	"strings"
 )
@@ -53,4 +55,14 @@ func InsertAndFetchId(db *icingadb.DB, stmt string, args any) (int64, error) {
 	}
 
 	return lastInsertId, nil
+}
+
+// ToDBString transforms the given string to types.String.
+func ToDBString(value string) types.String {
+	str := types.String{NullString: sql.NullString{String: value}}
+	if value != "" {
+		str.Valid = true
+	}
+
+	return str
 }
