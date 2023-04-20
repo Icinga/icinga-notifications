@@ -45,7 +45,7 @@ func (h *HistoryEventType) Scan(src any) error {
 
 	historyType, ok := historyTypeByName[name]
 	if !ok {
-		return fmt.Errorf("unknown history type %q", name)
+		return fmt.Errorf("unknown history event type %q", name)
 	}
 
 	*h = historyType
