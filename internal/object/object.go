@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
+	"github.com/icinga/noma/internal/utils"
 	"sort"
 	"sync"
 )
@@ -49,7 +50,7 @@ func FromTags(db *icingadb.DB, tags map[string]string) (*Object, error) {
 	}
 
 	if service, ok := object.Tags["service"]; ok {
-		dbObj.Service = ToDBString(service)
+		dbObj.Service = utils.ToDBString(service)
 	}
 
 	_, err := object.db.NamedExec(stmt, dbObj)
