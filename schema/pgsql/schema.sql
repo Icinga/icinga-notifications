@@ -131,7 +131,7 @@ CREATE TABLE object_extra_tag (
     source_id bigint NOT NULL REFERENCES source(id),
 
     tag text NOT NULL,
-    value text,
+    value text NOT NULL,
 
     CONSTRAINT pk_object_extra_tag PRIMARY KEY (object_id, source_id, tag),
     FOREIGN KEY (object_id, source_id) REFERENCES source_object(object_id, source_id)
@@ -144,7 +144,7 @@ CREATE TABLE event (
     time bigint NOT NULL,
     source_id bigint NOT NULL REFERENCES source(id),
     object_id bytea NOT NULL REFERENCES object(id),
-    type text,
+    type text NOT NULL,
     severity severity,
     message text,
     username text,
@@ -249,7 +249,7 @@ CREATE TABLE incident_history (
     caused_by_incident_history_id bigint REFERENCES incident_history(id),
     channel_type text,
     time bigint NOT NULL,
-    message text NOT NULL,
+    message text,
     type incident_history_event_type NOT NULL,
     new_severity severity,
     old_severity severity,
