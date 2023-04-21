@@ -53,6 +53,12 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 	ev.Time = time.Now()
 
+	if ev.Severity == event.Severity(0) && ev.Type == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprintln(w, "ignoring invalid event: must set 'type' or 'severity'")
+		return
+	}
+
 	obj, err := object.FromTags(l.db, ev.Tags)
 	if err != nil {
 		log.Println(err)
