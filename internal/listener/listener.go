@@ -62,6 +62,17 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if ev.Severity != event.SeverityNone {
+		const stateType = "state"
+		if ev.Type == "" {
+			ev.Type = stateType
+		} else if ev.Type != stateType {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintf(w, "ignoring invalid event: if 'severity' is set, 'type' must not be set or set to %q\n", stateType)
+			return
+		}
+	}
+
 	obj, err := object.FromTags(l.db, ev.Tags)
 	if err != nil {
 		log.Println(err)
