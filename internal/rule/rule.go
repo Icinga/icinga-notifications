@@ -12,8 +12,8 @@ type Rule struct {
 	IsActive         types.Bool `db:"is_active"`
 	Name             string     `db:"name"`
 	TimePeriod       *timeperiod.TimePeriod
-	TimePeriodID     sql.NullInt64 `db:"timeperiod_id"`
-	ObjectFilter     *object.Filter
-	ObjectFilterExpr sql.NullString `db:"object_filter"`
+	TimePeriodID     sql.NullInt64  `db:"timeperiod_id"`
+	ObjectFilter     *object.Filter `db:"-"`
+	ObjectFilterExpr types.String   `db:"object_filter"`
 	Escalations      []*Escalation
 }
