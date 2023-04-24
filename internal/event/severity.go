@@ -78,14 +78,19 @@ func (s *Severity) Scan(src any) error {
 		return nil
 	}
 
-	name, ok := src.(string)
-	if !ok {
+	var name string
+	switch val := src.(type) {
+	case string:
+		name = val
+	case []byte:
+		name = string(val)
+	default:
 		return fmt.Errorf("unable to scan type %T into Severity", src)
 	}
 
 	severity, ok := severityByName[name]
 	if !ok {
-		return fmt.Errorf("unknown severity %q", name)
+		return fmt.Errorf("unknown severity %q", string(name))
 	}
 
 	*s = severity

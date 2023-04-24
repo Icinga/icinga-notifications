@@ -38,8 +38,13 @@ func (h *HistoryEventType) Scan(src any) error {
 		return nil
 	}
 
-	name, ok := src.(string)
-	if !ok {
+	var name string
+	switch val := src.(type) {
+	case string:
+		name = val
+	case []byte:
+		name = string(val)
+	default:
 		return fmt.Errorf("unable to scan type %T into HistoryEventType", src)
 	}
 
