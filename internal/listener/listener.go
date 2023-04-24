@@ -56,7 +56,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 	ev.Time = time.Now()
 
-	if ev.Severity == event.Severity(0) && ev.Type == "" {
+	if ev.Severity == event.SeverityNone && ev.Type == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = fmt.Fprintln(w, "ignoring invalid event: must set 'type' or 'severity'")
 		return
@@ -100,7 +100,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	currentIncident, created := incident.GetCurrent(l.db, obj, ev.Severity != event.SeverityOK)
+	currentIncident, created := incident.GetCurrent(l.db, obj, ev.SourceId, ev.Severity != event.SeverityOK)
 
 	if currentIncident == nil {
 		if ev.Severity != event.SeverityOK {
@@ -117,7 +117,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	if created {
 		currentIncident.StartedAt = ev.Time
-		err = currentIncident.Sync(incident.NewHistoryEntry(ev.Time, "opened incident"))
+		err = currentIncident.Sync(incident.NewHistoryEntry(ev.Time, ev.ID, "opened incident"), nil)
 		if err != nil {
 			log.Println(err)
 			return
@@ -150,7 +150,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			OldSeverity: oldSourceSeverity,
 		}
 		err = currentIncident.AddHistory(
-			incident.NewHistoryEntry(ev.Time, "source %d severity changed from %s to %s", ev.SourceId, oldSourceSeverity.String(), ev.Severity.String()),
+			incident.NewHistoryEntry(ev.Time, ev.ID, "source %d severity changed from %s to %s", ev.SourceId, oldSourceSeverity.String(), ev.Severity.String()),
 			hr,
 		)
 		if err != nil {
@@ -172,8 +172,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			NewSeverity: newIncidentSeverity,
 			OldSeverity: oldIncidentSeverity,
 		}
-		err = currentIncident.AddHistory(
-			incident.NewHistoryEntry(ev.Time, "incident severity changed from %s to %s", oldIncidentSeverity.String(), newIncidentSeverity.String()),
+		err = currentIncident.Sync(
+			incident.NewHistoryEntry(ev.Time, ev.ID, "incident severity changed from %s to %s", oldIncidentSeverity.String(), newIncidentSeverity.String()),
 			hr,
 		)
 		if err != nil {
@@ -183,7 +183,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	if newIncidentSeverity == event.SeverityOK {
 		currentIncident.RecoveredAt = ev.Time
-		err = incident.RemoveCurrent(obj, incident.NewHistoryEntry(ev.Time, "all sources recovered, closing incident"))
+		err = incident.RemoveCurrent(obj, incident.NewHistoryEntry(ev.Time, ev.ID, "all sources recovered, closing incident"))
 		if err != nil {
 			log.Println(err)
 		}
@@ -202,7 +202,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 		if _, ok := currentIncident.State[r]; !ok && (r.ObjectFilter == nil || r.ObjectFilter.Matches(obj)) {
 			currentIncident.State[r] = make(map[*rule.Escalation]*incident.EscalationState)
-			err = currentIncident.AddRuleMatchedHistory(r, incident.NewHistoryEntry(ev.Time, "rule %q matches", r.Name))
+			err = currentIncident.AddRuleMatchedHistory(r, incident.NewHistoryEntry(ev.Time, ev.ID, "rule %q matches", r.Name))
 			if err != nil {
 				log.Println(err)
 			}
@@ -243,12 +243,15 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				state.RuleEscalationID = escalation.ID
 				state.TriggeredAt = types.UnixMilli(ev.Time)
 
-				err = currentIncident.AddEscalationTriggeredHistory(state, incident.NewHistoryEntry(ev.Time, "rule %q reached escalation %q", r.Name, escalation.DisplayName()))
+				err = currentIncident.AddEscalationTriggeredHistory(
+					state,
+					incident.NewHistoryEntry(ev.Time, ev.ID, "rule %q reached escalation %q", r.Name, escalation.DisplayName()),
+				)
 				if err != nil {
 					log.Println(err)
 				}
 
-				err = currentIncident.AddRecipient(escalation, ev.Time)
+				err = currentIncident.AddRecipient(escalation, ev.Time, ev.ID)
 				if err != nil {
 					log.Println(err)
 				}
@@ -282,7 +285,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 					ChannelType: utils.ToDBString(chType),
 				}
 				err = currentIncident.AddHistory(
-					incident.NewHistoryEntry(ev.Time, "notify %q via %q", contact.FullName, chType),
+					incident.NewHistoryEntry(ev.Time, ev.ID, "notify %q via %q", contact.FullName, chType),
 					hr,
 				)
 				if err != nil {

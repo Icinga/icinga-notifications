@@ -1,6 +1,7 @@
 package incident
 
 import (
+	"fmt"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
 	"github.com/icinga/noma/internal/event"
@@ -20,16 +21,31 @@ func (i *IncidentRow) TableName() string {
 	return "incident"
 }
 
+// Upsert implements the contracts.Upserter interface.
+func (i *IncidentRow) Upsert() interface{} {
+	return &struct {
+		Severity event.Severity `db:"severity"`
+	}{Severity: i.Severity}
+}
+
 // Sync synchronizes incidents to the database.
 // Fetches the last inserted incident id and modifies this incident's id.
 // Returns an error on database failure.
-func (i *IncidentRow) Sync(db *icingadb.DB) error {
-	incidentId, err := utils.InsertAndFetchId(db, utils.BuildInsertStmtWithout(db, i, "id"), i)
-	if err != nil {
-		return err
-	}
+func (i *IncidentRow) Sync(db *icingadb.DB, upsert bool) error {
+	if upsert {
+		stmt, _ := db.BuildUpsertStmt(i)
+		_, err := db.NamedExec(stmt, i)
+		if err != nil {
+			return fmt.Errorf("failed to upsert incident: %s", err)
+		}
+	} else {
+		incidentId, err := utils.InsertAndFetchId(db, utils.BuildInsertStmtWithout(db, i, "id"), i)
+		if err != nil {
+			return err
+		}
 
-	i.ID = incidentId
+		i.ID = incidentId
+	}
 
 	return nil
 }
@@ -107,7 +123,7 @@ type HistoryRow struct {
 	OldSeverity      event.Severity   `db:"old_severity"`
 	NewRecipientRole ContactRole      `db:"new_recipient_role"`
 	OldRecipientRole ContactRole      `db:"old_recipient_role"`
-	Message          string           `db:"message"`
+	Message          types.String     `db:"message"`
 }
 
 // TableName implements the contracts.TableNamer interface.
