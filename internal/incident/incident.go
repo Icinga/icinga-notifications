@@ -54,7 +54,7 @@ func (i *Incident) HasManager() bool {
 	return false
 }
 
-func (i *Incident) AddHistory(history *HistoryEntry, historyRow *HistoryRow) error {
+func (i *Incident) AddHistory(history *HistoryEntry, historyRow *HistoryRow, fetchId bool) (*types.Int, error) {
 	i.History = append(i.History, history)
 	log.Printf("[%s %s] %s", i.Object.DisplayName(), i.String(), history.Message)
 
@@ -64,30 +64,41 @@ func (i *Incident) AddHistory(history *HistoryEntry, historyRow *HistoryRow) err
 	historyRow.Time = types.UnixMilli(history.Time)
 	historyRow.EventID = history.eventRowID
 
-	_, err := i.db.NamedExec(utils.BuildInsertStmtWithout(i.db, historyRow, "id"), historyRow)
-	if err != nil {
-		return fmt.Errorf("failed to insert incident history: %s\n", err)
+	stmt := utils.BuildInsertStmtWithout(i.db, historyRow, "id")
+	if fetchId {
+		historyId, err := utils.InsertAndFetchId(i.db, stmt, historyRow)
+		if err != nil {
+			return nil, err
+		}
+
+		return &types.Int{NullInt64: sql.NullInt64{Int64: historyId, Valid: true}}, nil
+	} else {
+		_, err := i.db.NamedExec(stmt, historyRow)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert incident history: %s\n", err)
+		}
 	}
 
-	return nil
+	return nil, nil
 }
 
-func (i *Incident) AddEscalationTriggeredHistory(state *EscalationState, history *HistoryEntry) error {
+func (i *Incident) AddEscalationTriggeredHistory(state *EscalationState, history *HistoryEntry) (*types.Int, error) {
 	// Set the incident id if it's not set already!
 	state.IncidentID = i.incidentRowID
 
 	stmt, _ := i.db.BuildUpsertStmt(state)
 	_, err := i.db.NamedExec(stmt, state)
 	if err != nil {
-		return fmt.Errorf("failed to insert incident rule escalation state: %s", err)
+		return nil, fmt.Errorf("failed to insert incident rule escalation state: %s", err)
 	}
 
 	hr := &HistoryRow{
-		RuleEscalationID: types.Int{NullInt64: sql.NullInt64{Int64: state.RuleEscalationID, Valid: true}},
-		Type:             EscalationTriggered,
+		RuleEscalationID:          types.Int{NullInt64: sql.NullInt64{Int64: state.RuleEscalationID, Valid: true}},
+		Type:                      EscalationTriggered,
+		CausedByIncidentHistoryID: history.CausedByIncidentHistoryId,
 	}
 
-	return i.AddHistory(history, hr)
+	return i.AddHistory(history, hr, true)
 }
 
 // AddEvent adds the given event to this incident events slice.
@@ -147,7 +158,7 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 					OldRecipientRole: oldRole,
 				}
 
-				err := i.AddHistory(history, hr)
+				_, err := i.AddHistory(history, hr, false)
 				if err != nil {
 					return err
 				}
@@ -173,7 +184,7 @@ func (i *Incident) String() string {
 // Sync initiates an *incident.IncidentRow from the current incident state and syncs it with the database.
 // Before syncing any incident related database entries, this method should be called at least once.
 // Returns an error on db failure.
-func (i *Incident) Sync(history *HistoryEntry, historyRow *HistoryRow) error {
+func (i *Incident) Sync(history *HistoryEntry, historyRow *HistoryRow) (*types.Int, error) {
 	incidentRow := &IncidentRow{
 		ObjectID:    i.Object.ID,
 		StartedAt:   types.UnixMilli(i.StartedAt),
@@ -183,7 +194,7 @@ func (i *Incident) Sync(history *HistoryEntry, historyRow *HistoryRow) error {
 
 	err := incidentRow.Sync(i.db, i.incidentRowID != 0)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	i.incidentRowID = incidentRow.ID
@@ -191,25 +202,26 @@ func (i *Incident) Sync(history *HistoryEntry, historyRow *HistoryRow) error {
 		historyRow = &HistoryRow{Type: Opened}
 	}
 
-	return i.AddHistory(history, historyRow)
+	return i.AddHistory(history, historyRow, true)
 }
 
 // AddRuleMatchedHistory syncs the given *rule.Rule and history entry to the database.
 // Returns an error on database failure.
-func (i *Incident) AddRuleMatchedHistory(r *rule.Rule, history *HistoryEntry) error {
+func (i *Incident) AddRuleMatchedHistory(r *rule.Rule, history *HistoryEntry) (*types.Int, error) {
 	rr := &RuleRow{IncidentID: i.incidentRowID, RuleID: r.ID}
 	stmt, _ := i.db.BuildUpsertStmt(rr)
 	_, err := i.db.NamedExec(stmt, rr)
 	if err != nil {
-		return fmt.Errorf("failed to insert incident rule: %s", err)
+		return nil, fmt.Errorf("failed to insert incident rule: %s", err)
 	}
 
 	hr := &HistoryRow{
-		RuleID: types.Int{NullInt64: sql.NullInt64{Int64: r.ID, Valid: true}},
-		Type:   RuleMatched,
+		RuleID:                    types.Int{NullInt64: sql.NullInt64{Int64: r.ID, Valid: true}},
+		Type:                      RuleMatched,
+		CausedByIncidentHistoryID: history.CausedByIncidentHistoryId,
 	}
 
-	return i.AddHistory(history, hr)
+	return i.AddHistory(history, hr, true)
 }
 
 type EscalationState struct {
@@ -224,9 +236,10 @@ func (e *EscalationState) TableName() string {
 }
 
 type HistoryEntry struct {
-	Time       time.Time
-	Message    string
-	eventRowID types.Int
+	Time                      time.Time
+	Message                   string
+	CausedByIncidentHistoryId types.Int
+	eventRowID                types.Int
 }
 
 func NewHistoryEntry(t time.Time, eventId int64, m string, args ...any) *HistoryEntry {
@@ -350,10 +363,12 @@ func RemoveCurrent(obj *object.Object, history *HistoryEntry) error {
 	incidentRow := &IncidentRow{ID: currentIncident.incidentRowID, RecoveredAt: types.UnixMilli(currentIncident.RecoveredAt)}
 	_, err := currentIncident.db.NamedExec(`UPDATE "incident" SET "recovered_at" = :recovered_at WHERE id = :id`, incidentRow)
 	if err != nil {
-		log.Printf("Failed to upsert current incident: %s", err)
+		return fmt.Errorf("failed to update current incident: %s", err)
 	}
 
-	return currentIncident.AddHistory(history, &HistoryRow{Type: Closed})
+	_, err = currentIncident.AddHistory(history, &HistoryRow{Type: Closed}, false)
+
+	return err
 }
 
 var (
