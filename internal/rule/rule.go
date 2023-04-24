@@ -2,7 +2,7 @@ package rule
 
 import (
 	"github.com/icinga/icingadb/pkg/types"
-	"github.com/icinga/noma/internal/object"
+	"github.com/icinga/noma/internal/filter"
 	"github.com/icinga/noma/internal/timeperiod"
 )
 
@@ -12,7 +12,7 @@ type Rule struct {
 	Name             string     `db:"name"`
 	TimePeriod       *timeperiod.TimePeriod
 	TimePeriodID     types.Int      `db:"timeperiod_id"`
-	ObjectFilter     *object.Filter `db:"-"`
+	ObjectFilter     *filter.Filter `db:"-"`
 	ObjectFilterExpr types.String   `db:"object_filter"`
 	Escalations      []*Escalation
 }
