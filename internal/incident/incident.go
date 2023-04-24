@@ -186,6 +186,7 @@ func (i *Incident) String() string {
 // Returns an error on db failure.
 func (i *Incident) Sync(history *HistoryEntry, historyRow *HistoryRow) (*types.Int, error) {
 	incidentRow := &IncidentRow{
+		ID:          i.incidentRowID,
 		ObjectID:    i.Object.ID,
 		StartedAt:   types.UnixMilli(i.StartedAt),
 		RecoveredAt: types.UnixMilli(i.RecoveredAt),
