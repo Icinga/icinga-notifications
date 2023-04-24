@@ -10,7 +10,9 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
 	"github.com/icinga/noma/internal/utils"
+	"regexp"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -157,6 +159,98 @@ func (o *Object) UpdateMetadata(source int64, name string, url types.String, ext
 	}
 
 	return nil
+}
+
+func (o *Object) EvalEqual(key string, value string) bool {
+	tagVal, ok := o.Tags[key]
+	if ok && tagVal == value {
+		return true
+	}
+
+	for _, m := range o.Metadata {
+		tagVal, ok = m.ExtraTags[key]
+		if ok && tagVal == value {
+			return true
+		}
+	}
+
+	return false
+}
+
+// EvalLike returns true when the objects tag/value matches the filter.Conditional value.
+func (o *Object) EvalLike(key string, value string) bool {
+	segments := strings.Split(value, "*")
+	builder := &strings.Builder{}
+	for _, segment := range segments {
+		if segment == "" {
+			builder.WriteString(".*")
+		}
+
+		builder.WriteString(regexp.QuoteMeta(segment))
+	}
+
+	regex := regexp.MustCompile("^" + builder.String() + "$")
+	tagVal, ok := o.Tags[key]
+	if ok && regex.MatchString(tagVal) {
+		return true
+	}
+
+	for _, m := range o.Metadata {
+		tagVal, ok = m.ExtraTags[key]
+		if ok && regex.MatchString(tagVal) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (o *Object) EvalLess(key string, value string) bool {
+	tagVal, ok := o.Tags[key]
+	if ok && tagVal < value {
+		return true
+	}
+
+	for _, m := range o.Metadata {
+		tagVal, ok = m.ExtraTags[key]
+		if ok && tagVal < value {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (o *Object) EvalLessOrEqual(key string, value string) bool {
+	tagVal, ok := o.Tags[key]
+	if ok && tagVal <= value {
+		return true
+	}
+
+	for _, m := range o.Metadata {
+		tagVal, ok = m.ExtraTags[key]
+		if ok && tagVal <= value {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (o *Object) EvalExists(key string) bool {
+	_, ok := o.Tags[key]
+	if ok {
+		return true
+	}
+
+	for _, m := range o.Metadata {
+		_, ok = m.ExtraTags[key]
+		if ok {
+			return true
+		}
+	}
+
+	return false
 }
 
 // TODO: the return value of this function must be stable like forever
