@@ -108,22 +108,23 @@ func (r *RuleRow) TableName() string {
 
 // HistoryRow represents a single incident history database entry.
 type HistoryRow struct {
-	ID               int64            `db:"id"`
-	IncidentID       int64            `db:"incident_id"`
-	RuleEscalationID types.Int        `db:"rule_escalation_id"`
-	EventID          types.Int        `db:"event_id"`
-	ContactID        types.Int        `db:"contact_id"`
-	ContactGroupID   types.Int        `db:"contactgroup_id"`
-	ScheduleID       types.Int        `db:"schedule_id"`
-	RuleID           types.Int        `db:"rule_id"`
-	Time             types.UnixMilli  `db:"time"`
-	Type             HistoryEventType `db:"type"`
-	ChannelType      types.String     `db:"channel_type"`
-	NewSeverity      event.Severity   `db:"new_severity"`
-	OldSeverity      event.Severity   `db:"old_severity"`
-	NewRecipientRole ContactRole      `db:"new_recipient_role"`
-	OldRecipientRole ContactRole      `db:"old_recipient_role"`
-	Message          types.String     `db:"message"`
+	ID                        int64            `db:"id"`
+	IncidentID                int64            `db:"incident_id"`
+	RuleEscalationID          types.Int        `db:"rule_escalation_id"`
+	EventID                   types.Int        `db:"event_id"`
+	ContactID                 types.Int        `db:"contact_id"`
+	ContactGroupID            types.Int        `db:"contactgroup_id"`
+	ScheduleID                types.Int        `db:"schedule_id"`
+	RuleID                    types.Int        `db:"rule_id"`
+	CausedByIncidentHistoryID types.Int        `db:"caused_by_incident_history_id"`
+	Time                      types.UnixMilli  `db:"time"`
+	Type                      HistoryEventType `db:"type"`
+	ChannelType               types.String     `db:"channel_type"`
+	NewSeverity               event.Severity   `db:"new_severity"`
+	OldSeverity               event.Severity   `db:"old_severity"`
+	NewRecipientRole          ContactRole      `db:"new_recipient_role"`
+	OldRecipientRole          ContactRole      `db:"old_recipient_role"`
+	Message                   types.String     `db:"message"`
 }
 
 // TableName implements the contracts.TableNamer interface.

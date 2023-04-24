@@ -117,7 +117,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	if created {
 		currentIncident.StartedAt = ev.Time
-		err = currentIncident.Sync(incident.NewHistoryEntry(ev.Time, ev.ID, "opened incident"), nil)
+		_, err = currentIncident.Sync(incident.NewHistoryEntry(ev.Time, ev.ID, "opened incident"), nil)
 		if err != nil {
 			log.Println(err)
 			return
@@ -142,6 +142,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	if oldSourceSeverity == event.SeverityNone {
 		oldSourceSeverity = event.SeverityOK
 	}
+
+	var causedByIncidentHistoryId *types.Int
 	if oldSourceSeverity != ev.Severity {
 		hr := &incident.HistoryRow{
 			EventID:     types.Int{NullInt64: sql.NullInt64{Int64: ev.ID, Valid: true}},
@@ -149,9 +151,9 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			NewSeverity: ev.Severity,
 			OldSeverity: oldSourceSeverity,
 		}
-		err = currentIncident.AddHistory(
+		causedByIncidentHistoryId, err = currentIncident.AddHistory(
 			incident.NewHistoryEntry(ev.Time, ev.ID, "source %d severity changed from %s to %s", ev.SourceId, oldSourceSeverity.String(), ev.Severity.String()),
-			hr,
+			hr, true,
 		)
 		if err != nil {
 			log.Println(err)
@@ -172,7 +174,11 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			NewSeverity: newIncidentSeverity,
 			OldSeverity: oldIncidentSeverity,
 		}
-		err = currentIncident.Sync(
+		if causedByIncidentHistoryId != nil {
+			hr.CausedByIncidentHistoryID = *causedByIncidentHistoryId
+		}
+
+		causedByIncidentHistoryId, err = currentIncident.Sync(
 			incident.NewHistoryEntry(ev.Time, ev.ID, "incident severity changed from %s to %s", oldIncidentSeverity.String(), newIncidentSeverity.String()),
 			hr,
 		)
@@ -202,9 +208,18 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 		if _, ok := currentIncident.State[r]; !ok && (r.ObjectFilter == nil || r.ObjectFilter.Matches(obj)) {
 			currentIncident.State[r] = make(map[*rule.Escalation]*incident.EscalationState)
-			err = currentIncident.AddRuleMatchedHistory(r, incident.NewHistoryEntry(ev.Time, ev.ID, "rule %q matches", r.Name))
+			history := incident.NewHistoryEntry(ev.Time, ev.ID, "rule %q matches", r.Name)
+			if causedByIncidentHistoryId != nil {
+				history.CausedByIncidentHistoryId = *causedByIncidentHistoryId
+			}
+
+			insertedId, err := currentIncident.AddRuleMatchedHistory(r, history)
 			if err != nil {
 				log.Println(err)
+			}
+
+			if insertedId != nil && causedByIncidentHistoryId == nil {
+				causedByIncidentHistoryId = insertedId
 			}
 		}
 	}
@@ -243,10 +258,12 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				state.RuleEscalationID = escalation.ID
 				state.TriggeredAt = types.UnixMilli(ev.Time)
 
-				err = currentIncident.AddEscalationTriggeredHistory(
-					state,
-					incident.NewHistoryEntry(ev.Time, ev.ID, "rule %q reached escalation %q", r.Name, escalation.DisplayName()),
-				)
+				history := incident.NewHistoryEntry(ev.Time, ev.ID, "rule %q reached escalation %q", r.Name, escalation.DisplayName())
+				if causedByIncidentHistoryId != nil {
+					history.CausedByIncidentHistoryId = *causedByIncidentHistoryId
+				}
+
+				causedByIncidentHistoryId, err = currentIncident.AddEscalationTriggeredHistory(state, history)
 				if err != nil {
 					log.Println(err)
 				}
@@ -284,9 +301,13 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 					Type:        incident.Notified,
 					ChannelType: utils.ToDBString(chType),
 				}
-				err = currentIncident.AddHistory(
+				if causedByIncidentHistoryId != nil {
+					hr.CausedByIncidentHistoryID = *causedByIncidentHistoryId
+				}
+
+				_, err = currentIncident.AddHistory(
 					incident.NewHistoryEntry(ev.Time, ev.ID, "notify %q via %q", contact.FullName, chType),
-					hr,
+					hr, false,
 				)
 				if err != nil {
 					log.Println(err)
