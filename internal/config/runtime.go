@@ -7,7 +7,7 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/noma/internal/channel"
-	"github.com/icinga/noma/internal/object"
+	"github.com/icinga/noma/internal/filter"
 	"github.com/icinga/noma/internal/recipient"
 	"github.com/icinga/noma/internal/rule"
 	"github.com/icinga/noma/internal/timeperiod"
@@ -393,7 +393,7 @@ func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingad
 		}
 
 		if rule.ObjectFilterExpr.Valid {
-			f, err := object.ParseFilter(rule.ObjectFilterExpr.String)
+			f, err := filter.ParseFilter(rule.ObjectFilterExpr.String)
 			if err != nil {
 				ruleLogger.Warnw("ignoring rule as parsing object_filter failed", zap.Error(err))
 				rules[i] = nil
