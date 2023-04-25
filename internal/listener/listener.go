@@ -99,7 +99,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusTeapot)
+	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintln(w, "received event")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, obj.String())
