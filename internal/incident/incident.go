@@ -147,7 +147,7 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 				oldRole := state.Role
 				state.Role = newRole
 
-				history := NewHistoryEntry(t, eventId, "contact %q role changed from %s to %s", r.RecipientName(), state.Role.String(), newRole.String())
+				history := NewHistoryEntry(t, eventId, "contact %q role changed from %s to %s", r, state.Role.String(), newRole.String())
 				hr := &HistoryRow{
 					IncidentID:       i.incidentRowID,
 					ContactID:        cr.ContactID,
@@ -170,7 +170,7 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 		stmt, _ := i.db.BuildUpsertStmt(cr)
 		_, err := i.db.NamedExec(stmt, cr)
 		if err != nil {
-			return fmt.Errorf("failed to upsert incident contact %s: %s", r.RecipientName(), err)
+			return fmt.Errorf("failed to upsert incident contact %s: %s", r, err)
 		}
 	}
 
