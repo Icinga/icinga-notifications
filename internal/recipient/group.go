@@ -16,4 +16,8 @@ func (g *Group) TableName() string {
 	return "contactgroup"
 }
 
+func (g *Group) String() string {
+	return g.Name
+}
+
 var _ Recipient = (*Group)(nil)
