@@ -30,6 +30,14 @@ var historyTypeByName = map[string]HistoryEventType{
 	"notified":                  Notified,
 }
 
+var historyEventTypeToName = func() map[HistoryEventType]string {
+	eventTypes := make(map[HistoryEventType]string)
+	for name, eventType := range historyTypeByName {
+		eventTypes[eventType] = name
+	}
+	return eventTypes
+}()
+
 // Scan implements the sql.Scanner interface.
 // Supports SQL NULL.
 func (h *HistoryEventType) Scan(src any) error {
@@ -59,20 +67,13 @@ func (h *HistoryEventType) Scan(src any) error {
 }
 
 func (h HistoryEventType) Value() (driver.Value, error) {
-	val := h.String()
-	if val == "" {
+	if h == HistoryEventTypeNull {
 		return nil, nil
 	}
 
-	return val, nil
+	return h.String(), nil
 }
 
 func (h *HistoryEventType) String() string {
-	for name, historyType := range historyTypeByName {
-		if historyType == *h {
-			return name
-		}
-	}
-
-	return ""
+	return historyEventTypeToName[*h]
 }
