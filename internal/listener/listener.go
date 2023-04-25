@@ -100,7 +100,13 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	currentIncident, created := incident.GetCurrent(l.db, obj, ev.SourceId, ev.Severity != event.SeverityOK)
+	currentIncident, created, err := incident.GetCurrent(l.db, obj, ev.SourceId, ev.Severity != event.SeverityOK)
+	if err != nil {
+		_, _ = fmt.Fprintln(w, err)
+
+		log.Println(err)
+		return
+	}
 
 	if currentIncident == nil {
 		if ev.Severity != event.SeverityOK {
@@ -117,11 +123,18 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	if created {
 		currentIncident.StartedAt = ev.Time
-		_, err = currentIncident.Sync(incident.NewHistoryEntry(ev.Time, ev.ID, "opened incident"), nil)
+		err = currentIncident.Sync()
 		if err != nil {
+			_, _ = fmt.Fprintln(w, err)
+
 			log.Println(err)
 			return
 		}
+
+		log.Printf("[%s %s] opened incident", obj.DisplayName(), currentIncident.String())
+
+		historyRow := &incident.HistoryRow{Type: incident.Opened}
+		_, err = currentIncident.AddHistory(&incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID}, historyRow, false)
 	}
 
 	err = currentIncident.AddEvent(l.db, &ev)
@@ -130,7 +143,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	//currentIncident.AddHistory(incident.NewHistoryEntry(ev.Time, "processing event"))
+	log.Println("processing event")
 
 	oldIncidentSeverity := currentIncident.Severity()
 
@@ -143,20 +156,26 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		oldSourceSeverity = event.SeverityOK
 	}
 
-	var causedByIncidentHistoryId *types.Int
+	var causedByIncidentHistoryId types.Int
 	if oldSourceSeverity != ev.Severity {
+		log.Printf(
+			"[%s %s] source %d severity changed from %s to %s",
+			obj.DisplayName(), currentIncident.String(), ev.SourceId,
+			oldSourceSeverity.String(), ev.Severity.String(),
+		)
+
 		hr := &incident.HistoryRow{
 			EventID:     types.Int{NullInt64: sql.NullInt64{Int64: ev.ID, Valid: true}},
 			Type:        incident.SourceSeverityChanged,
 			NewSeverity: ev.Severity,
 			OldSeverity: oldSourceSeverity,
 		}
-		causedByIncidentHistoryId, err = currentIncident.AddHistory(
-			incident.NewHistoryEntry(ev.Time, ev.ID, "source %d severity changed from %s to %s", ev.SourceId, oldSourceSeverity.String(), ev.Severity.String()),
-			hr, true,
-		)
+		causedByIncidentHistoryId, err = currentIncident.AddHistory(&incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID}, hr, true)
 		if err != nil {
+			_, _ = fmt.Fprintln(w, err)
+
 			log.Println(err)
+			return
 		}
 
 		if ev.Severity != event.SeverityOK {
@@ -169,29 +188,46 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	newIncidentSeverity := currentIncident.Severity()
 
 	if newIncidentSeverity != oldIncidentSeverity {
-		hr := &incident.HistoryRow{
-			Type:        incident.SeverityChanged,
-			NewSeverity: newIncidentSeverity,
-			OldSeverity: oldIncidentSeverity,
-		}
-		if causedByIncidentHistoryId != nil {
-			hr.CausedByIncidentHistoryID = *causedByIncidentHistoryId
+		log.Printf(
+			"[%s %s] incident severity changed from %s to %s",
+			obj.DisplayName(), currentIncident.String(),
+			oldIncidentSeverity.String(), newIncidentSeverity.String(),
+		)
+
+		err = currentIncident.Sync()
+		if err != nil {
+			_, _ = fmt.Fprintln(w, err)
+
+			log.Println(err)
+			return
 		}
 
-		causedByIncidentHistoryId, err = currentIncident.Sync(
-			incident.NewHistoryEntry(ev.Time, ev.ID, "incident severity changed from %s to %s", oldIncidentSeverity.String(), newIncidentSeverity.String()),
-			hr,
-		)
+		hr := &incident.HistoryRow{
+			Type:                      incident.SeverityChanged,
+			NewSeverity:               newIncidentSeverity,
+			OldSeverity:               oldIncidentSeverity,
+			CausedByIncidentHistoryID: causedByIncidentHistoryId,
+		}
+
+		causedByIncidentHistoryId, err = currentIncident.AddHistory(&incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID}, hr, true)
 		if err != nil {
+			_, _ = fmt.Fprintln(w, err)
+
 			log.Println(err)
+			return
 		}
 	}
 
 	if newIncidentSeverity == event.SeverityOK {
 		currentIncident.RecoveredAt = ev.Time
-		err = incident.RemoveCurrent(obj, incident.NewHistoryEntry(ev.Time, ev.ID, "all sources recovered, closing incident"))
+		log.Printf("[%s %s] all sources recovered, closing incident", obj.DisplayName(), currentIncident.String())
+
+		err = incident.RemoveCurrent(obj, &incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID})
 		if err != nil {
+			_, _ = fmt.Fprintln(w, err)
+
 			log.Println(err)
+			return
 		}
 	}
 
@@ -208,17 +244,23 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 		if _, ok := currentIncident.State[r]; !ok && (r.ObjectFilter == nil || r.ObjectFilter.Matches(obj)) {
 			currentIncident.State[r] = make(map[*rule.Escalation]*incident.EscalationState)
-			history := incident.NewHistoryEntry(ev.Time, ev.ID, "rule %q matches", r.Name)
-			if causedByIncidentHistoryId != nil {
-				history.CausedByIncidentHistoryId = *causedByIncidentHistoryId
+			log.Printf("[%s %s] rule %q matches", obj.DisplayName(), currentIncident.String(), r.Name)
+
+			history := &incident.HistoryEntry{
+				Time:                      ev.Time,
+				CausedByIncidentHistoryId: causedByIncidentHistoryId,
+				EventRowID:                ev.ID,
 			}
 
 			insertedId, err := currentIncident.AddRuleMatchedHistory(r, history)
 			if err != nil {
+				_, _ = fmt.Fprintln(w, err)
+
 				log.Println(err)
+				return
 			}
 
-			if insertedId != nil && causedByIncidentHistoryId == nil {
+			if insertedId.Valid && !causedByIncidentHistoryId.Valid {
 				causedByIncidentHistoryId = insertedId
 			}
 		}
@@ -258,19 +300,28 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				state.RuleEscalationID = escalation.ID
 				state.TriggeredAt = types.UnixMilli(ev.Time)
 
-				history := incident.NewHistoryEntry(ev.Time, ev.ID, "rule %q reached escalation %q", r.Name, escalation.DisplayName())
-				if causedByIncidentHistoryId != nil {
-					history.CausedByIncidentHistoryId = *causedByIncidentHistoryId
+				log.Printf("[%s %s] rule %q reached escalation %q", obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName())
+
+				history := &incident.HistoryEntry{
+					Time:                      ev.Time,
+					EventRowID:                ev.ID,
+					CausedByIncidentHistoryId: causedByIncidentHistoryId,
 				}
 
-				causedByIncidentHistoryId, err = currentIncident.AddEscalationTriggeredHistory(state, history)
+				causedByIncidentHistoryId, err = currentIncident.AddEscalationTriggered(state, history)
 				if err != nil {
+					_, _ = fmt.Fprintln(w, err)
+
 					log.Println(err)
+					return
 				}
 
 				err = currentIncident.AddRecipient(escalation, ev.Time, ev.ID)
 				if err != nil {
+					_, _ = fmt.Fprintln(w, err)
+
 					log.Println(err)
+					return
 				}
 			}
 		}
@@ -297,18 +348,15 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		for contact, channels := range contactChannels {
 			for chType := range channels {
 				hr := &incident.HistoryRow{
-					ContactID:   types.Int{NullInt64: sql.NullInt64{Int64: contact.ID, Valid: true}},
-					Type:        incident.Notified,
-					ChannelType: utils.ToDBString(chType),
-				}
-				if causedByIncidentHistoryId != nil {
-					hr.CausedByIncidentHistoryID = *causedByIncidentHistoryId
+					ContactID:                 types.Int{NullInt64: sql.NullInt64{Int64: contact.ID, Valid: true}},
+					Type:                      incident.Notified,
+					ChannelType:               utils.ToDBString(chType),
+					CausedByIncidentHistoryID: causedByIncidentHistoryId,
 				}
 
-				_, err = currentIncident.AddHistory(
-					incident.NewHistoryEntry(ev.Time, ev.ID, "notify %q via %q", contact.FullName, chType),
-					hr, false,
-				)
+				log.Printf("[%s %s] notify %q via %q", obj.DisplayName(), currentIncident.String(), contact.FullName, chType)
+
+				_, err = currentIncident.AddHistory(&incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID}, hr, false)
 				if err != nil {
 					log.Println(err)
 				}
