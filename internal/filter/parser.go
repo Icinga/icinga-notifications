@@ -28,6 +28,8 @@ func (p *Parser) Parse(expression string) (Rule, error) {
 	return p.readFilter(0, "", nil, true)
 }
 
+// readFilter reads the entire filter from the Parser.tag and derives a filter.Rule from it.
+// Returns an error on parsing failure.
 func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, explicit bool) (Rule, error) {
 	negate := false
 	for p.pos < p.length {
@@ -207,7 +209,7 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, exp
 	return chain, nil
 }
 
-// readCondition reads the next filter.Conditional.
+// readCondition reads the next filter.Rule.
 // returns nil if there is no char to read and an error on parsing failure.
 func (p *Parser) readCondition() (Rule, error) {
 	column := p.readColumn()
@@ -267,7 +269,7 @@ func (p *Parser) readCondition() (Rule, error) {
 	return condition, nil
 }
 
-// createCondition creates a filter.Conditional based on the given operator.
+// createCondition creates a filter.Rule based on the given operator.
 // returns nil when invalid operator is given.
 func (p *Parser) createCondition(column string, operator string, value string) (Rule, error) {
 	column = strings.TrimSpace(column)
