@@ -271,6 +271,14 @@ var contactRoleByName = map[string]ContactRole{
 	"manager":    RoleManager,
 }
 
+var contactRoleToName = func() map[ContactRole]string {
+	cr := make(map[ContactRole]string)
+	for name, role := range contactRoleByName {
+		cr[role] = name
+	}
+	return cr
+}()
+
 // Scan implements the sql.Scanner interface.
 func (c *ContactRole) Scan(src any) error {
 	if c == nil {
@@ -300,22 +308,15 @@ func (c *ContactRole) Scan(src any) error {
 
 // Value implements the driver.Valuer interface.
 func (c ContactRole) Value() (driver.Value, error) {
-	val := c.String()
-	if val == "" {
+	if c == RoleNone {
 		return nil, nil
 	}
 
-	return val, nil
+	return c.String(), nil
 }
 
 func (c *ContactRole) String() string {
-	for name, role := range contactRoleByName {
-		if role == *c {
-			return name
-		}
-	}
-
-	return ""
+	return contactRoleToName[*c]
 }
 
 type RecipientState struct {
