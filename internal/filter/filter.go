@@ -6,8 +6,7 @@ type Filter struct {
 
 // ParseFilter parses an object filter expression.
 func ParseFilter(expr string) (*Filter, error) {
-	parser := &Parser{}
-	rule, err := parser.Parse(expr)
+	rule, err := Parse(expr)
 	if err != nil {
 		return nil, err
 	}

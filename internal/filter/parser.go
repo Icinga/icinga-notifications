@@ -11,21 +11,14 @@ type Parser struct {
 	length int
 }
 
-func NewParser() *Parser {
-	return &Parser{}
-}
-
 // Parse parses an object filter expression.
-func (p *Parser) Parse(expression string) (Rule, error) {
-	p.tag = expression
-	if len(p.tag) == 0 {
+func Parse(expression string) (Rule, error) {
+	parser := &Parser{tag: expression, length: len(expression)}
+	if parser.length == 0 {
 		return &All{}, nil
 	}
 
-	p.pos = 0
-	p.length = len(p.tag)
-
-	return p.readFilter(0, "", nil, true)
+	return parser.readFilter(0, "", nil, true)
 }
 
 // readFilter reads the entire filter from the Parser.tag and derives a filter.Rule from it.
