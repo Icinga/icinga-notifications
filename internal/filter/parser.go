@@ -276,24 +276,24 @@ func (p *Parser) createCondition(column string, operator string, value string) (
 	switch operator {
 	case "=":
 		if strings.Contains(value, "*") {
-			return &Like{Condition: NewCondition(column, value)}, nil
+			return &Like{column: column, value: value}, nil
 		}
 
-		return &Equal{Condition: NewCondition(column, value)}, nil
+		return &Equal{column: column, value: value}, nil
 	case "!=":
 		if strings.Contains(value, "*") {
-			return &Unlike{Condition: NewCondition(column, value)}, nil
+			return &Unlike{column: column, value: value}, nil
 		}
 
-		return &UnEqual{Condition: NewCondition(column, value)}, nil
+		return &UnEqual{column: column, value: value}, nil
 	case ">":
-		return &GreaterThan{Condition: NewCondition(column, value)}, nil
+		return &GreaterThan{column: column, value: value}, nil
 	case ">=":
-		return &GreaterThanOrEqual{Condition: NewCondition(column, value)}, nil
+		return &GreaterThanOrEqual{column: column, value: value}, nil
 	case "<":
-		return &LessThan{Condition: NewCondition(column, value)}, nil
+		return &LessThan{column: column, value: value}, nil
 	case "<=":
-		return &LessThanOrEqual{Condition: NewCondition(column, value)}, nil
+		return &LessThanOrEqual{column: column, value: value}, nil
 	default:
 		return nil, fmt.Errorf("invalid operator %s provided", operator)
 	}
