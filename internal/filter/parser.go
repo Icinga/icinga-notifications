@@ -2,28 +2,28 @@ package filter
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 )
 
 type Parser struct {
-	tag    string
-	pos    int
-	length int
+	tag                          string
+	pos, length, openParenthesis int
 }
 
 // Parse parses an object filter expression.
-func Parse(expression string) (Rule, error) {
+func Parse(expression string) (Filter, error) {
 	parser := &Parser{tag: expression, length: len(expression)}
 	if parser.length == 0 {
 		return &All{}, nil
 	}
 
-	return parser.readFilter(0, "", nil, true)
+	return parser.readFilter(0, "", nil)
 }
 
 // readFilter reads the entire filter from the Parser.tag and derives a filter.Rule from it.
 // Returns an error on parsing failure.
-func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, explicit bool) (Rule, error) {
+func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule) (Rule, error) {
 	negate := false
 	for p.pos < p.length {
 		condition, err := p.readCondition()
@@ -35,13 +35,11 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, exp
 		if condition == nil {
 			if next == "!" {
 				negate = true
-
 				continue
 			}
 
 			if operator == "" && len(rules) > 0 && (next == "&" || next == "|") {
 				operator = next
-
 				continue
 			}
 
@@ -50,15 +48,13 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, exp
 			}
 
 			if next == ")" {
+				p.openParenthesis--
+
 				if nestingLevel > 0 {
-					if !explicit {
-						p.pos--
-					} else {
-						next = p.nextChar()
-						if next != "" && next != "&" && next != "|" && next != ")" {
-							p.pos++
-							return nil, p.parseError(next, "Expected logical operator")
-						}
+					next = p.nextChar()
+					if next != "" && next != "&" && next != "|" && next != ")" {
+						p.pos++
+						return nil, p.parseError(next, "Expected logical operator")
 					}
 
 					break
@@ -68,12 +64,22 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, exp
 			}
 
 			if next == "(" {
+				if p.nextChar() == "&" || p.nextChar() == "|" {
+					// When a logical operator follows directly after the opening parenthesis "(",
+					// this can't be a valid expression. E.g. "!(&"
+					next = p.readChar()
+
+					return nil, p.parseError(next, "")
+				}
+
+				p.openParenthesis++
+
 				op := ""
 				if negate {
 					op = "!"
 				}
 
-				rule, err := p.readFilter(nestingLevel+1, op, nil, true)
+				rule, err := p.readFilter(nestingLevel+1, op, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -87,7 +93,8 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, exp
 				continue
 			}
 
-			if next == "&" || next == "|" {
+			// When the current operator is a "!", the next one can't be a logical operator.
+			if operator != "!" && (next == "&" || next == "|") {
 				if operator == "&" {
 					if len(rules) > 1 {
 						all := &All{rules: rules}
@@ -101,7 +108,7 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, exp
 					// Erase it from our Rules slice
 					rules = rules[:len(rules)-1]
 
-					rule, err := p.readFilter(nestingLevel+1, next, []Rule{lastRule}, false)
+					rule, err := p.readFilter(nestingLevel+1, next, []Filter{lastRule})
 					if err != nil {
 						return nil, err
 					}
@@ -126,15 +133,13 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, exp
 			}
 
 			if next == ")" {
+				p.openParenthesis--
+
 				if nestingLevel > 0 {
-					if !explicit {
-						p.pos--
-					} else {
-						next = p.nextChar()
-						if next != "" && next != "&" && next != "|" && next != ")" {
-							p.pos++
-							return nil, p.parseError(next, "Expected logical operator")
-						}
+					next = p.nextChar()
+					if next != "" && next != "&" && next != "|" && next != ")" {
+						p.pos++
+						return nil, p.parseError(next, "Expected logical operator")
 					}
 
 					break
@@ -161,7 +166,7 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, exp
 					// Erase it from our Rules slice
 					rules = rules[:len(rules)-1]
 
-					rule, err := p.readFilter(nestingLevel+1, next, []Rule{lastRule}, false)
+					rule, err := p.readFilter(nestingLevel+1, next, []Filter{lastRule})
 					if err != nil {
 						return nil, err
 					}
@@ -180,7 +185,15 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, exp
 		return nil, p.parseError(operator, "Did not read full filter")
 	}
 
-	var chain Rule
+	if nestingLevel == 0 && p.openParenthesis > 0 {
+		return nil, fmt.Errorf("invalid filter '%s', missing %d closing ')' at pos %d", p.tag, p.openParenthesis, p.pos)
+	}
+
+	if nestingLevel == 0 && p.openParenthesis < 0 {
+		return nil, fmt.Errorf("invalid filter '%s', unexpected closing ')' at pos %d", p.tag, p.pos)
+	}
+
+	var chain Filter
 	switch operator {
 	case "&":
 		chain = &All{rules: rules}
@@ -205,27 +218,9 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule, exp
 // readCondition reads the next filter.Rule.
 // returns nil if there is no char to read and an error on parsing failure.
 func (p *Parser) readCondition() (Rule, error) {
-	column := p.readColumn()
-	if column == "" {
-		return nil, nil
-	}
-
-	for _, operator := range "<>" {
-		if pos := strings.Index(column, string(operator)); pos != -1 {
-			if p.nextChar() == "=" {
-				break
-			}
-
-			value := column[pos+1:]
-			column = column[0:pos]
-
-			condition, err := p.createCondition(column, string(operator), value)
-			if err != nil {
-				return nil, err
-			}
-
-			return condition, nil
-		}
+	column, err := p.readColumn()
+	if err != nil || column == "" {
+		return nil, err
 	}
 
 	operator := ""
@@ -237,13 +232,7 @@ func (p *Parser) readCondition() (Rule, error) {
 		return NewExists(column), nil
 	}
 
-	if operator == "=" {
-		last := column[len(column)-1:]
-		if last == ">" || last == "<" {
-			operator = last + operator
-			column = column[0 : len(column)-1]
-		}
-	} else if strings.Contains("><!", operator) {
+	if strings.Contains("><!", operator) {
 		if p.nextChar() == "=" {
 			operator += p.readChar()
 		}
@@ -294,26 +283,24 @@ func (p *Parser) createCondition(column string, operator string, value string) (
 
 // readColumn reads a column name from the Parser.tag.
 // returns empty string if there is no char to read.
-func (p *Parser) readColumn() string {
-	return p.readUntil("=()&|><!")
+func (p *Parser) readColumn() (string, error) {
+	return url.QueryUnescape(p.readUntil("=()&|><!"))
 }
 
 // readValue reads a single value from the Parser.tag.
 // returns empty string and a parsing error on invalid filter
 func (p *Parser) readValue() (string, error) {
-	var val string
-	if p.nextChar() == "(" {
-		p.readChar()
-		val = p.readUntil(")")
-
-		if p.readChar() != ")" {
-			return "", p.parseError("", "Expected ')'")
-		}
-	} else {
-		val = p.readUntil(")&|><")
+	value := p.readUntil(")&|><")
+	if value == "" {
+		return "", nil
 	}
 
-	return val, nil
+	if index := strings.Index(value, "("); index != -1 {
+		pos := p.pos + index + 1 - len(value)
+		return "", fmt.Errorf("invalid filter '%s', unexpected opening '(' at pos %d", p.tag, pos)
+	}
+
+	return url.QueryUnescape(value)
 }
 
 // readUntil reads chars until any of the given characters
@@ -360,11 +347,12 @@ func (p *Parser) nextChar() string {
 // By specifying the `msg` arg you can provide additional err hints that can help debugging.
 func (p *Parser) parseError(invalidChar string, msg string) error {
 	if invalidChar == "" {
-		if p.pos > p.length {
-			p.pos--
+		pos := p.pos
+		if p.pos == p.length {
+			pos--
 		}
 
-		invalidChar = string(p.tag[p.pos])
+		invalidChar = string(p.tag[pos])
 	}
 
 	if msg != "" {
