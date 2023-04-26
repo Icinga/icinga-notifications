@@ -2,6 +2,7 @@ package filter
 
 import (
 	"github.com/stretchr/testify/assert"
+	"strings"
 	"testing"
 )
 
@@ -192,6 +193,10 @@ func FuzzParser(f *testing.F) {
 	f.Add("col%29umn>val%29ue")
 
 	f.Fuzz(func(t *testing.T, expr string) {
-		_, _ = Parse(expr)
+		_, err := Parse(expr)
+
+		if strings.Count(expr, "(") != strings.Count(expr, ")") {
+			assert.Error(t, err)
+		}
 	})
 }
