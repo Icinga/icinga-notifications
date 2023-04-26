@@ -35,6 +35,9 @@ func TestParser(t *testing.T) {
 		_, err = Parse("!(&")
 		assert.EqualError(t, err, "invalid filter '!(&', unexpected & at pos 3", "Errors should be the same")
 
+		_, err = Parse("!(!&")
+		assert.EqualError(t, err, "invalid filter '!(!&', unexpected & at pos 4: operator level 1", "Errors should be the same")
+
 		_, err = Parse("!(|test")
 		assert.EqualError(t, err, "invalid filter '!(|test', unexpected | at pos 3", "Errors should be the same")
 
@@ -145,5 +148,50 @@ func TestFilter(t *testing.T) {
 		rule, err = Parse("col%26umn<=val%26ue")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 		assert.Equal(t, &LessThanOrEqual{column: "col&umn", value: "val&ue"}, rule)
+
+		rule, err = Parse("col%28umn>val%28ue")
+		assert.Nil(t, err, "There should be no errors but got: %s", err)
+		assert.Equal(t, &GreaterThan{column: "col(umn", value: "val(ue"}, rule)
+
+		rule, err = Parse("col%29umn>=val%29ue")
+		assert.Nil(t, err, "There should be no errors but got: %s", err)
+		assert.Equal(t, &GreaterThanOrEqual{column: "col)umn", value: "val)ue"}, rule)
+	})
+}
+
+func FuzzParser(f *testing.F) {
+	f.Add("(a=b|c=d)e=f")
+	f.Add("(a=b|c=d|)e=f")
+	f.Add("col=(")
+	f.Add("(((x=a)&y=b")
+	f.Add("(x=a)&y=b)")
+	f.Add("!(&")
+	f.Add("!(|test")
+	f.Add("foo&bar=(te(st)")
+	f.Add("foo&bar=te(st)")
+	f.Add("foo&bar=test)")
+	f.Add("foo=bar")
+	f.Add("foo!=bar")
+	f.Add("foo=bar*")
+	f.Add("foo!=bar*")
+	f.Add("foo<bar")
+	f.Add("foo<=bar")
+	f.Add("foo>bar")
+	f.Add("foo>=bar")
+	f.Add("foo=bar&bar=foo")
+	f.Add("foo=bar|bar=foo")
+	f.Add("!(foo=bar|bar=foo)")
+	f.Add("!foo")
+	f.Add("foo")
+	f.Add("!(foo=bar|bar=foo)&(foo=bar|bar=foo)")
+	f.Add("foo=bar")
+	f.Add("col%3Cumn<val%3Cue")
+	f.Add("col%7Cumn=val%7Cue")
+	f.Add("col%26umn<=val%26ue")
+	f.Add("col%28umn>val%28ue")
+	f.Add("col%29umn>val%29ue")
+
+	f.Fuzz(func(t *testing.T, expr string) {
+		_, _ = Parse(expr)
 	})
 }
