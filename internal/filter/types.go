@@ -58,77 +58,59 @@ func NewCondition(column string, value string) *Condition {
 	}
 }
 
-type Exists struct {
-	*Condition
-}
+type Exists Condition
 
 func NewExists(column string) *Exists {
-	return &Exists{Condition: &Condition{column: column}}
+	return &Exists{column: column}
 }
 
 func (e *Exists) Eval(filterable Filterable) bool {
 	return filterable.EvalExists(e.column)
 }
 
-type Equal struct {
-	*Condition
-}
+type Equal Condition
 
 func (e *Equal) Eval(filterable Filterable) bool {
 	return filterable.EvalEqual(e.column, e.value)
 }
 
-type UnEqual struct {
-	*Condition
-}
+type UnEqual Condition
 
 func (e *UnEqual) Eval(filterable Filterable) bool {
 	return filterable.EvalExists(e.column) && !filterable.EvalEqual(e.column, e.value)
 }
 
-type Like struct {
-	*Condition
-}
+type Like Condition
 
 func (e *Like) Eval(filterable Filterable) bool {
 	return filterable.EvalLike(e.column, e.value)
 }
 
-type Unlike struct {
-	*Condition
-}
+type Unlike Condition
 
 func (e *Unlike) Eval(filterable Filterable) bool {
 	return filterable.EvalExists(e.column) && !filterable.EvalLike(e.column, e.value)
 }
 
-type LessThan struct {
-	*Condition
-}
+type LessThan Condition
 
 func (e *LessThan) Eval(filterable Filterable) bool {
 	return filterable.EvalLess(e.column, e.value)
 }
 
-type LessThanOrEqual struct {
-	*Condition
-}
+type LessThanOrEqual Condition
 
 func (e *LessThanOrEqual) Eval(filterable Filterable) bool {
 	return filterable.EvalLessOrEqual(e.column, e.value)
 }
 
-type GreaterThan struct {
-	*Condition
-}
+type GreaterThan Condition
 
 func (e *GreaterThan) Eval(filterable Filterable) bool {
 	return filterable.EvalExists(e.column) && !filterable.EvalLess(e.column, e.value)
 }
 
-type GreaterThanOrEqual struct {
-	*Condition
-}
+type GreaterThanOrEqual Condition
 
 func (e *GreaterThanOrEqual) Eval(filterable Filterable) bool {
 	return filterable.EvalExists(e.column) && !filterable.EvalLessOrEqual(e.column, e.value)
