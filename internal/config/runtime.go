@@ -393,7 +393,7 @@ func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingad
 		}
 
 		if rule.ObjectFilterExpr.Valid {
-			f, err := filter.ParseFilter(rule.ObjectFilterExpr.String)
+			f, err := filter.Parse(rule.ObjectFilterExpr.String)
 			if err != nil {
 				ruleLogger.Warnw("ignoring rule as parsing object_filter failed", zap.Error(err))
 				rules[i] = nil

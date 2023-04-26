@@ -21,9 +21,9 @@ func Parse(expression string) (Filter, error) {
 	return parser.readFilter(0, "", nil)
 }
 
-// readFilter reads the entire filter from the Parser.tag and derives a filter.Rule from it.
+// readFilter reads the entire filter from the Parser.tag and derives a filter.Filter from it.
 // Returns an error on parsing failure.
-func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule) (Rule, error) {
+func (p *Parser) readFilter(nestingLevel int, operator string, rules []Filter) (Filter, error) {
 	negate := false
 	for p.pos < p.length {
 		condition, err := p.readCondition()
@@ -97,8 +97,7 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule) (Ru
 			if operator != "!" && (next == "&" || next == "|") {
 				if operator == "&" {
 					if len(rules) > 1 {
-						all := &All{rules: rules}
-						rules = []Rule{all}
+						rules = []Filter{&All{rules: rules}}
 					}
 
 					operator = next
@@ -123,7 +122,7 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule) (Ru
 		} else {
 			if negate {
 				negate = false
-				rules = append(rules, &None{rules: []Rule{condition}})
+				rules = append(rules, &None{rules: []Filter{condition}})
 			} else {
 				rules = append(rules, condition)
 			}
@@ -156,7 +155,7 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule) (Ru
 				if operator == "" || operator == "&" {
 					if operator == "&" && len(rules) > 1 {
 						all := &All{rules: rules}
-						rules = []Rule{all}
+						rules = []Filter{all}
 					}
 
 					operator = next
@@ -215,9 +214,9 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Rule) (Ru
 	return chain, nil
 }
 
-// readCondition reads the next filter.Rule.
+// readCondition reads the next filter.Filter.
 // returns nil if there is no char to read and an error on parsing failure.
-func (p *Parser) readCondition() (Rule, error) {
+func (p *Parser) readCondition() (Filter, error) {
 	column, err := p.readColumn()
 	if err != nil || column == "" {
 		return nil, err
@@ -251,9 +250,9 @@ func (p *Parser) readCondition() (Rule, error) {
 	return condition, nil
 }
 
-// createCondition creates a filter.Rule based on the given operator.
+// createCondition creates a filter.Filter based on the given operator.
 // returns nil when invalid operator is given.
-func (p *Parser) createCondition(column string, operator string, value string) (Rule, error) {
+func (p *Parser) createCondition(column string, operator string, value string) (Filter, error) {
 	column = strings.TrimSpace(column)
 	switch operator {
 	case "=":

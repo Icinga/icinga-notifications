@@ -2,7 +2,7 @@ package filter
 
 // All represents a filter chain type that matches when all of its Rules matches.
 type All struct {
-	rules []Rule
+	rules []Filter
 }
 
 func (a *All) Eval(filterable Filterable) bool {
@@ -17,7 +17,7 @@ func (a *All) Eval(filterable Filterable) bool {
 
 // Any represents a filter chain type that matches when at least one of its Rules matches.
 type Any struct {
-	rules []Rule
+	rules []Filter
 }
 
 func (a *Any) Eval(filterable Filterable) bool {
@@ -32,7 +32,7 @@ func (a *Any) Eval(filterable Filterable) bool {
 
 // None represents a filter chain type that matches when none of its Rules matches.
 type None struct {
-	rules []Rule
+	rules []Filter
 }
 
 func (n *None) Eval(filterable Filterable) bool {
@@ -117,17 +117,17 @@ func (e *GreaterThanOrEqual) Eval(filterable Filterable) bool {
 }
 
 var (
-	_ Rule = (*All)(nil)
-	_ Rule = (*Any)(nil)
-	_ Rule = (*None)(nil)
+	_ Filter = (*All)(nil)
+	_ Filter = (*Any)(nil)
+	_ Filter = (*None)(nil)
 
-	_ Rule = (*Exists)(nil)
-	_ Rule = (*Equal)(nil)
-	_ Rule = (*UnEqual)(nil)
-	_ Rule = (*Like)(nil)
-	_ Rule = (*Unlike)(nil)
-	_ Rule = (*LessThan)(nil)
-	_ Rule = (*LessThanOrEqual)(nil)
-	_ Rule = (*GreaterThan)(nil)
-	_ Rule = (*GreaterThanOrEqual)(nil)
+	_ Filter = (*Exists)(nil)
+	_ Filter = (*Equal)(nil)
+	_ Filter = (*UnEqual)(nil)
+	_ Filter = (*Like)(nil)
+	_ Filter = (*Unlike)(nil)
+	_ Filter = (*LessThan)(nil)
+	_ Filter = (*LessThanOrEqual)(nil)
+	_ Filter = (*GreaterThan)(nil)
+	_ Filter = (*GreaterThanOrEqual)(nil)
 )

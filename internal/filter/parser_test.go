@@ -106,7 +106,7 @@ func TestFilter(t *testing.T) {
 		rule, err = Parse("!foo")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 
-		assert.Equal(t, &None{rules: []Rule{NewExists("foo")}}, rule)
+		assert.Equal(t, &None{rules: []Filter{NewExists("foo")}}, rule)
 
 		rule, err = Parse("foo")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
@@ -115,12 +115,12 @@ func TestFilter(t *testing.T) {
 		rule, err = Parse("!(foo=bar|bar=foo)&(foo=bar|bar=foo)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 
-		expected := &All{rules: []Rule{
-			&None{rules: []Rule{
+		expected := &All{rules: []Filter{
+			&None{rules: []Filter{
 				&Equal{column: "foo", value: "bar"},
 				&Equal{column: "bar", value: "foo"},
 			}},
-			&Any{rules: []Rule{
+			&Any{rules: []Filter{
 				&Equal{column: "foo", value: "bar"},
 				&Equal{column: "bar", value: "foo"},
 			}},
