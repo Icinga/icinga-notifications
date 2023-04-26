@@ -21,6 +21,35 @@ func TestParser(t *testing.T) {
 		expected := "invalid filter '(a=b|c=d|)e=f', unexpected e at pos 11: Expected logical operator"
 		assert.EqualError(t, err, expected, "Errors should be the same")
 	})
+
+	t.Run("ParserIdentifiesInvalidExpression", func(t *testing.T) {
+		_, err := Parse("col=(")
+		assert.EqualError(t, err, "invalid filter 'col=(', unexpected opening '(' at pos 5", "Errors should be the same")
+
+		_, err = Parse("(((x=a)&y=b")
+		assert.EqualError(t, err, "invalid filter '(((x=a)&y=b', missing 2 closing ')' at pos 11", "Errors should be the same")
+
+		_, err = Parse("(x=a)&y=b)")
+		assert.EqualError(t, err, "invalid filter '(x=a)&y=b)', unexpected ) at pos 10", "Errors should be the same")
+
+		_, err = Parse("!(&")
+		assert.EqualError(t, err, "invalid filter '!(&', unexpected & at pos 3", "Errors should be the same")
+
+		_, err = Parse("!(|test")
+		assert.EqualError(t, err, "invalid filter '!(|test', unexpected | at pos 3", "Errors should be the same")
+
+		_, err = Parse("foo&bar=(te(st)")
+		assert.EqualError(t, err, "invalid filter 'foo&bar=(te(st)', unexpected opening '(' at pos 9", "Errors should be the same")
+
+		_, err = Parse("foo&bar=te(st)")
+		assert.EqualError(t, err, "invalid filter 'foo&bar=te(st)', unexpected opening '(' at pos 11", "Errors should be the same")
+
+		_, err = Parse("foo&bar=test)")
+		assert.EqualError(t, err, "invalid filter 'foo&bar=test)', unexpected ) at pos 13", "Errors should be the same")
+
+		_, err = Parse("!()|&()&)")
+		assert.EqualError(t, err, "invalid filter '!()|&()&)', unexpected closing ')' at pos 9", "Errors should be the same")
+	})
 }
 
 func TestFilter(t *testing.T) {
@@ -102,5 +131,19 @@ func TestFilter(t *testing.T) {
 
 		expected := &Equal{column: "foo", value: "bar"}
 		assert.Equal(t, expected, rule, "Parser doesn't parse single condition correctly")
+	})
+
+	t.Run("UrlEncodedFilterExpression", func(t *testing.T) {
+		rule, err := Parse("col%3Cumn<val%3Cue")
+		assert.Nil(t, err, "There should be no errors but got: %s", err)
+		assert.Equal(t, &LessThan{column: "col<umn", value: "val<ue"}, rule)
+
+		rule, err = Parse("col%7Cumn=val%7Cue")
+		assert.Nil(t, err, "There should be no errors but got: %s", err)
+		assert.Equal(t, &Equal{column: "col|umn", value: "val|ue"}, rule)
+
+		rule, err = Parse("col%26umn<=val%26ue")
+		assert.Nil(t, err, "There should be no errors but got: %s", err)
+		assert.Equal(t, &LessThanOrEqual{column: "col&umn", value: "val&ue"}, rule)
 	})
 }
