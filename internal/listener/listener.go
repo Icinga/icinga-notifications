@@ -253,7 +253,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			continue
 		}
 
-		if _, ok := currentIncident.State[r]; !ok && (r.ObjectFilter == nil || r.ObjectFilter.Matches(obj)) {
+		if _, ok := currentIncident.State[r]; !ok && (r.ObjectFilter == nil || r.ObjectFilter.Eval(obj)) {
 			currentIncident.State[r] = make(map[*rule.Escalation]*incident.EscalationState)
 			log.Printf("[%s %s] rule %q matches", obj.DisplayName(), currentIncident.String(), r.Name)
 

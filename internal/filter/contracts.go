@@ -9,7 +9,7 @@ type Filterable interface {
 	EvalExists(key string) bool
 }
 
-// Rule is implemented by every filter chains and filter conditions.
-type Rule interface {
+// Filter is implemented by every filter chains and filter conditions.
+type Filter interface {
 	Eval(filterable Filterable) bool
 }
