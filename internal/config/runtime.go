@@ -127,11 +127,7 @@ func (r *RuntimeConfig) applyPending(logger *logging.Logger) {
 	r.applyPendingGroups(logger)
 	r.applyPendingTimePeriods(logger)
 	r.applyPendingSchedules(logger)
-
-	// Don't update types for which incremental updates are not implemented yet.
-	if r.Rules == nil {
-		r.Rules = r.pending.Rules
-	}
+	r.applyPendingRules(logger)
 
 	logger.Debugw("applied pending configuration", zap.Duration("took", time.Since(start)))
 }

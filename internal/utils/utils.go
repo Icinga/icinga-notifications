@@ -66,3 +66,22 @@ func ToDBString(value string) types.String {
 
 	return str
 }
+
+func RemoveIf[T any](slice []T, pred func(T) bool) []T {
+	n := len(slice)
+
+	for i := 0; i < n; i++ {
+		for i < n && pred(slice[i]) {
+			n--
+			slice[i], slice[n] = slice[n], slice[i]
+		}
+	}
+
+	return slice[:n]
+}
+
+func RemoveNils[T any](slice []*T) []*T {
+	return RemoveIf(slice, func(ptr *T) bool {
+		return ptr == nil
+	})
+}
