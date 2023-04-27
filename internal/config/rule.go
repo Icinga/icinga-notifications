@@ -11,7 +11,7 @@ import (
 	"log"
 )
 
-func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
 	var rulePtr *rule.Rule
 	stmt := db.BuildSelectStmt(rulePtr, rulePtr)
 	log.Println(stmt)
@@ -32,7 +32,7 @@ func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingad
 		)
 
 		if rule.TimePeriodID.Valid {
-			p := r.TimePeriodsById[rule.TimePeriodID.Int64]
+			p := r.pending.TimePeriodsById[rule.TimePeriodID.Int64]
 			if p == nil {
 				ruleLogger.Warnw("ignoring rule with unknown timeperiod_id")
 				continue
@@ -121,15 +121,15 @@ func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingad
 		if recipient.ContactID.Valid {
 			id := recipient.ContactID.Int64
 			recipientLogger = recipientLogger.With(zap.Int64("contact_id", id))
-			recipient.Recipient = r.ContactsByID[id]
+			recipient.Recipient = r.pending.ContactsByID[id]
 		} else if recipient.GroupID.Valid {
 			id := recipient.GroupID.Int64
 			recipientLogger = recipientLogger.With(zap.Int64("contactgroup_id", id))
-			recipient.Recipient = r.GroupsByID[id]
+			recipient.Recipient = r.pending.GroupsByID[id]
 		} else if recipient.ScheduleID.Valid {
 			id := recipient.ScheduleID.Int64
 			recipientLogger = recipientLogger.With(zap.Int64("schedule_id", id))
-			recipient.Recipient = r.SchedulesByID[id]
+			recipient.Recipient = r.pending.SchedulesByID[id]
 		}
 
 		escalation := escalationsByID[recipient.EscalationID]
@@ -143,7 +143,7 @@ func (r *RuntimeConfig) UpdateRulesFromDatabase(ctx context.Context, db *icingad
 		}
 	}
 
-	r.RulesByID = rulesByID
+	r.pending.RulesByID = rulesByID
 
 	return nil
 }

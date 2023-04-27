@@ -14,6 +14,14 @@ import (
 
 // RuntimeConfig stores the runtime representation of the configuration present in the database.
 type RuntimeConfig struct {
+	// ConfigSet is the current live config. It is embedded to allow direct access to its members.
+	ConfigSet
+
+	// pending contains changes to config objects that are to be applied to the embedded live config.
+	pending ConfigSet
+}
+
+type ConfigSet struct {
 	ChannelByType   map[string]*channel.Channel
 	ContactsByID    map[int64]*recipient.Contact
 	GroupsByID      map[int64]*recipient.Group
@@ -23,6 +31,17 @@ type RuntimeConfig struct {
 }
 
 func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
+	err := r.fetchFromDatabase(ctx, db, logger)
+	if err != nil {
+		return err
+	}
+
+	r.applyPending(logger)
+
+	return nil
+}
+
+func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
 	tx, err := db.BeginTxx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  true,
@@ -34,12 +53,12 @@ func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB,
 	defer func() { _ = tx.Rollback() }()
 
 	updateFuncs := []func(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error{
-		r.UpdateChannelsFromDatabase,
-		r.UpdateContactsFromDatabase,
-		r.UpdateGroupsFromDatabase,
-		r.UpdateTimePeriodsFromDatabase,
-		r.UpdateSchedulesFromDatabase,
-		r.UpdateRulesFromDatabase,
+		r.fetchChannels,
+		r.fetchContacts,
+		r.fetchGroups,
+		r.fetchTimePeriods,
+		r.fetchSchedules,
+		r.fetchRules,
 	}
 	for _, f := range updateFuncs {
 		if err := f(ctx, db, tx, logger); err != nil {
@@ -48,4 +67,8 @@ func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB,
 	}
 
 	return nil
+}
+
+func (r *RuntimeConfig) applyPending(logger *logging.Logger) {
+	r.ConfigSet = r.pending
 }
