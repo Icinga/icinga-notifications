@@ -51,6 +51,8 @@ func main() {
 		logger.Fatalw("failed to load config from database", zap.Error(err))
 	}
 
+	go runtimeConfig.PeriodicUpdates(context.TODO(), db, logger, 1*time.Second)
+
 	if err := listener.NewListener(db, conf.Listen, &runtimeConfig).Run(); err != nil {
 		panic(err)
 	}
