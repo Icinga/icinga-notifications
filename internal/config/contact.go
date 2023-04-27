@@ -30,32 +30,35 @@ func (r *RuntimeConfig) fetchContacts(ctx context.Context, db *icingadb.DB, tx *
 			zap.String("name", c.FullName))
 	}
 
-	var addressPtr *recipient.Address
-	stmt = db.BuildSelectStmt(addressPtr, addressPtr)
-	log.Println(stmt)
-
-	var addresses []*recipient.Address
-	if err := tx.SelectContext(ctx, &addresses, stmt); err != nil {
-		log.Println(err)
-		return err
-	}
-
-	for _, a := range addresses {
-		addressLogger := logger.With(
-			zap.Int64("contact_id", a.ContactID),
-			zap.String("type", a.Type),
-			zap.String("address", a.Address),
-		)
-		if c := contactsByID[a.ContactID]; c != nil {
-			c.Addresses = append(c.Addresses, a)
-
-			addressLogger.Debugw("loaded contact address", zap.String("contact_name", c.FullName))
-		} else {
-			addressLogger.Warnw("ignoring address for unknown contact_id")
+	if r.ContactsByID != nil {
+		// mark no longer existing contacts for deletion
+		for id := range r.ContactsByID {
+			if _, ok := contactsByID[id]; !ok {
+				contactsByID[id] = nil
+			}
 		}
 	}
 
 	r.pending.ContactsByID = contactsByID
 
 	return nil
+}
+
+func (r *RuntimeConfig) applyPendingContacts(logger *logging.Logger) {
+	if r.ContactsByID == nil {
+		r.ContactsByID = make(map[int64]*recipient.Contact)
+	}
+
+	for id, pendingContact := range r.pending.ContactsByID {
+		if pendingContact == nil {
+			delete(r.ContactsByID, id)
+		} else if currentContact := r.ContactsByID[id]; currentContact != nil {
+			currentContact.FullName = pendingContact.FullName
+			currentContact.Username = pendingContact.Username
+		} else {
+			r.ContactsByID[id] = pendingContact
+		}
+	}
+
+	r.pending.ContactsByID = nil
 }
