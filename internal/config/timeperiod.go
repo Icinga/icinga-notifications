@@ -14,8 +14,19 @@ import (
 )
 
 func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
-	// TODO: At the moment, the timeperiod table contains no interesting fields for the daemon, therefore only
-	// entries are fetched and TimePeriod instances are created on the fly.
+	var timePeriodPtr *timeperiod.TimePeriod
+	stmt := db.BuildSelectStmt(timePeriodPtr, timePeriodPtr)
+	log.Println(stmt)
+
+	var timePeriods []*timeperiod.TimePeriod
+	if err := tx.SelectContext(ctx, &timePeriods, stmt); err != nil {
+		log.Println(err)
+		return err
+	}
+	timePeriodsById := make(map[int64]*timeperiod.TimePeriod)
+	for _, period := range timePeriods {
+		timePeriodsById[period.ID] = period
+	}
 
 	type TimeperiodEntry struct {
 		ID           int64          `db:"id"`
@@ -28,7 +39,7 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 	}
 
 	var entryPtr *TimeperiodEntry
-	stmt := db.BuildSelectStmt(entryPtr, entryPtr)
+	stmt = db.BuildSelectStmt(entryPtr, entryPtr)
 	log.Println(stmt)
 
 	var entries []*TimeperiodEntry
@@ -37,21 +48,20 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 		return err
 	}
 
-	timePeriodsById := make(map[int64]*timeperiod.TimePeriod)
 	for _, row := range entries {
 		p := timePeriodsById[row.TimePeriodID]
 		if p == nil {
-			p = &timeperiod.TimePeriod{
-				Name: fmt.Sprintf("Time Period #%d", row.TimePeriodID),
-			}
+			logger.Warnw("ignoring entry for unknown timeperiod_id",
+				zap.Int64("timeperiod_entry_id", row.ID),
+				zap.Int64("timeperiod_id", row.TimePeriodID))
+			continue
+		}
+
+		if p.Name == "" {
+			p.Name = fmt.Sprintf("Time Period #%d", row.TimePeriodID)
 			if row.Description.Valid {
 				p.Name += fmt.Sprintf(" (%s)", row.Description.String)
 			}
-			timePeriodsById[row.TimePeriodID] = p
-
-			logger.Debugw("created time period",
-				zap.Int64("id", row.TimePeriodID),
-				zap.String("name", p.Name))
 		}
 
 		loc, err := time.LoadLocation(row.Timezone)
@@ -82,6 +92,8 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 			continue
 		}
 
+		p.Entries = append(p.Entries, entry)
+
 		logger.Debugw("loaded time period entry",
 			zap.String("timeperiod", p.Name),
 			zap.Time("start", entry.Start),
@@ -89,12 +101,40 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 			zap.String("rrule", entry.RecurrenceRule))
 	}
 
-	timePeriods := make([]*timeperiod.TimePeriod, len(timePeriodsById))
 	for _, p := range timePeriodsById {
-		timePeriods = append(timePeriods, p)
+		if p.Name == "" {
+			p.Name = fmt.Sprintf("Time Period #%d (empty)", p.ID)
+		}
+	}
+
+	if r.TimePeriods != nil {
+		// mark no longer existing time periods for deletion
+		for id := range r.TimePeriods {
+			if _, ok := timePeriodsById[id]; !ok {
+				timePeriodsById[id] = nil
+			}
+		}
 	}
 
 	r.pending.TimePeriods = timePeriodsById
 
 	return nil
+}
+
+func (r *RuntimeConfig) applyPendingTimePeriods(logger *logging.Logger) {
+	if r.TimePeriods == nil {
+		r.TimePeriods = make(map[int64]*timeperiod.TimePeriod)
+	}
+
+	for id, pendingTimePeriod := range r.pending.TimePeriods {
+		if pendingTimePeriod == nil {
+			delete(r.TimePeriods, id)
+		} else if currentTimePeriod := r.TimePeriods[id]; currentTimePeriod != nil {
+			*currentTimePeriod = *pendingTimePeriod
+		} else {
+			r.TimePeriods[id] = pendingTimePeriod
+		}
+	}
+
+	r.pending.TimePeriods = nil
 }
