@@ -37,7 +37,37 @@ func (r *RuntimeConfig) fetchChannels(ctx context.Context, db *icingadb.DB, tx *
 		}
 	}
 
+	if r.Channels != nil {
+		// mark no longer existing channels for deletion
+		for typ := range r.Channels {
+			if _, ok := channelsByType[typ]; !ok {
+				channelsByType[typ] = nil
+			}
+		}
+	}
+
 	r.pending.Channels = channelsByType
 
 	return nil
+}
+
+func (r *RuntimeConfig) applyPendingChannels(logger *logging.Logger) {
+	if r.Channels == nil {
+		r.Channels = make(map[string]*channel.Channel)
+	}
+
+	for typ, pendingChannel := range r.pending.Channels {
+		if pendingChannel == nil {
+			delete(r.Channels, typ)
+		} else if currentChannel := r.Channels[typ]; currentChannel != nil {
+			currentChannel.ID = pendingChannel.ID
+			currentChannel.Name = pendingChannel.Name
+			currentChannel.Config = pendingChannel.Config
+			currentChannel.ResetPlugin()
+		} else {
+			r.Channels[typ] = pendingChannel
+		}
+	}
+
+	r.pending.Channels = nil
 }

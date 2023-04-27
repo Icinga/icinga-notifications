@@ -121,13 +121,11 @@ func (r *RuntimeConfig) applyPending(logger *logging.Logger) {
 	logger.Debug("applying pending configuration")
 	start := time.Now()
 
+	r.applyPendingChannels(logger)
 	r.applyPendingContacts(logger)
 	r.applyPendingContactAddresses(logger)
 
 	// Don't update types for which incremental updates are not implemented yet.
-	if r.Channels == nil {
-		r.Channels = r.pending.Channels
-	}
 	if r.Groups == nil {
 		r.Groups = r.pending.Groups
 	}
