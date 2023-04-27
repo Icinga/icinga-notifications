@@ -289,14 +289,9 @@ func (p *Parser) readColumn() (string, error) {
 // readValue reads a single value from the Parser.tag.
 // returns empty string and a parsing error on invalid filter
 func (p *Parser) readValue() (string, error) {
-	value := p.readUntil(")&|><")
+	value := p.readUntil("()&|><")
 	if value == "" {
 		return "", nil
-	}
-
-	if index := strings.Index(value, "("); index != -1 {
-		pos := p.pos + index + 1 - len(value)
-		return "", fmt.Errorf("invalid filter '%s', unexpected opening '(' at pos %d", p.tag, pos)
 	}
 
 	return url.QueryUnescape(value)

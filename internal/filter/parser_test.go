@@ -25,7 +25,7 @@ func TestParser(t *testing.T) {
 
 	t.Run("ParserIdentifiesInvalidExpression", func(t *testing.T) {
 		_, err := Parse("col=(")
-		assert.EqualError(t, err, "invalid filter 'col=(', unexpected opening '(' at pos 5", "Errors should be the same")
+		assert.EqualError(t, err, "invalid filter 'col=(', unexpected ( at pos 5", "Errors should be the same")
 
 		_, err = Parse("(((x=a)&y=b")
 		assert.EqualError(t, err, "invalid filter '(((x=a)&y=b', missing 2 closing ')' at pos 11", "Errors should be the same")
@@ -43,10 +43,10 @@ func TestParser(t *testing.T) {
 		assert.EqualError(t, err, "invalid filter '!(|test', unexpected | at pos 3", "Errors should be the same")
 
 		_, err = Parse("foo&bar=(te(st)")
-		assert.EqualError(t, err, "invalid filter 'foo&bar=(te(st)', unexpected opening '(' at pos 9", "Errors should be the same")
+		assert.EqualError(t, err, "invalid filter 'foo&bar=(te(st)', unexpected ( at pos 9", "Errors should be the same")
 
 		_, err = Parse("foo&bar=te(st)")
-		assert.EqualError(t, err, "invalid filter 'foo&bar=te(st)', unexpected opening '(' at pos 11", "Errors should be the same")
+		assert.EqualError(t, err, "invalid filter 'foo&bar=te(st)', unexpected ( at pos 11", "Errors should be the same")
 
 		_, err = Parse("foo&bar=test)")
 		assert.EqualError(t, err, "invalid filter 'foo&bar=test)', unexpected ) at pos 13", "Errors should be the same")
