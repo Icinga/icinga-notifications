@@ -68,7 +68,7 @@ func (r *RuntimeConfig) applyPendingContactAddresses(logger *logging.Logger) {
 }
 
 func (r *RuntimeConfig) addContactAddress(logger *logging.Logger, addr *recipient.Address) {
-	contact := r.ContactsByID[addr.ContactID]
+	contact := r.Contacts[addr.ContactID]
 	if contact != nil {
 		if i := slices.Index(contact.Addresses, addr); i < 0 {
 			contact.Addresses = append(contact.Addresses, addr)
@@ -101,7 +101,7 @@ func (r *RuntimeConfig) updateContactAddress(logger *logging.Logger, addr, pendi
 }
 
 func (r *RuntimeConfig) removeContactAddress(logger *logging.Logger, addr *recipient.Address) {
-	if contact := r.ContactsByID[addr.ContactID]; contact != nil {
+	if contact := r.Contacts[addr.ContactID]; contact != nil {
 		if i := slices.Index(contact.Addresses, addr); i >= 0 {
 			contact.Addresses = slices.Delete(contact.Addresses, i, i+1)
 

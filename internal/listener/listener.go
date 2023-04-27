@@ -251,7 +251,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
 	// to be checked again, these rules already matched and stay effective for the ongoing incident.
-	for _, r := range l.runtimeConfig.RulesByID {
+	for _, r := range l.runtimeConfig.Rules {
 		if !r.IsActive.Valid || !r.IsActive.Bool {
 			continue
 		}
@@ -375,7 +375,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 					log.Println(err)
 				}
 
-				chConf := l.runtimeConfig.ChannelByType[chType]
+				chConf := l.runtimeConfig.Channels[chType]
 				if chConf == nil {
 					log.Printf("ERROR: could not find config for channel type %q", chType)
 					continue

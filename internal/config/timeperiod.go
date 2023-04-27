@@ -94,7 +94,7 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 		timePeriods = append(timePeriods, p)
 	}
 
-	r.pending.TimePeriodsById = timePeriodsById
+	r.pending.TimePeriods = timePeriodsById
 
 	return nil
 }

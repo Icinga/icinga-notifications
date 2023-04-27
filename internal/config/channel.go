@@ -37,7 +37,7 @@ func (r *RuntimeConfig) fetchChannels(ctx context.Context, db *icingadb.DB, tx *
 		}
 	}
 
-	r.pending.ChannelByType = channelsByType
+	r.pending.Channels = channelsByType
 
 	return nil
 }

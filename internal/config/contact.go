@@ -30,35 +30,35 @@ func (r *RuntimeConfig) fetchContacts(ctx context.Context, db *icingadb.DB, tx *
 			zap.String("name", c.FullName))
 	}
 
-	if r.ContactsByID != nil {
+	if r.Contacts != nil {
 		// mark no longer existing contacts for deletion
-		for id := range r.ContactsByID {
+		for id := range r.Contacts {
 			if _, ok := contactsByID[id]; !ok {
 				contactsByID[id] = nil
 			}
 		}
 	}
 
-	r.pending.ContactsByID = contactsByID
+	r.pending.Contacts = contactsByID
 
 	return nil
 }
 
 func (r *RuntimeConfig) applyPendingContacts(logger *logging.Logger) {
-	if r.ContactsByID == nil {
-		r.ContactsByID = make(map[int64]*recipient.Contact)
+	if r.Contacts == nil {
+		r.Contacts = make(map[int64]*recipient.Contact)
 	}
 
-	for id, pendingContact := range r.pending.ContactsByID {
+	for id, pendingContact := range r.pending.Contacts {
 		if pendingContact == nil {
-			delete(r.ContactsByID, id)
-		} else if currentContact := r.ContactsByID[id]; currentContact != nil {
+			delete(r.Contacts, id)
+		} else if currentContact := r.Contacts[id]; currentContact != nil {
 			currentContact.FullName = pendingContact.FullName
 			currentContact.Username = pendingContact.Username
 		} else {
-			r.ContactsByID[id] = pendingContact
+			r.Contacts[id] = pendingContact
 		}
 	}
 
-	r.pending.ContactsByID = nil
+	r.pending.Contacts = nil
 }

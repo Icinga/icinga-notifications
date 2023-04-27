@@ -27,13 +27,13 @@ type RuntimeConfig struct {
 }
 
 type ConfigSet struct {
-	ChannelByType    map[string]*channel.Channel
-	ContactsByID     map[int64]*recipient.Contact
+	Channels         map[string]*channel.Channel
+	Contacts         map[int64]*recipient.Contact
 	ContactAddresses map[int64]*recipient.Address
-	GroupsByID       map[int64]*recipient.Group
-	TimePeriodsById  map[int64]*timeperiod.TimePeriod
-	SchedulesByID    map[int64]*recipient.Schedule
-	RulesByID        map[int64]*rule.Rule
+	Groups           map[int64]*recipient.Group
+	TimePeriods      map[int64]*timeperiod.TimePeriod
+	Schedules        map[int64]*recipient.Schedule
+	Rules            map[int64]*rule.Rule
 }
 
 func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
@@ -93,9 +93,9 @@ func (r *RuntimeConfig) applyPending(logger *logging.Logger) {
 	r.applyPendingContacts(logger)
 	r.applyPendingContactAddresses(logger)
 
-	r.ChannelByType = r.pending.ChannelByType
-	r.GroupsByID = r.pending.GroupsByID
-	r.TimePeriodsById = r.pending.TimePeriodsById
-	r.SchedulesByID = r.pending.SchedulesByID
-	r.RulesByID = r.pending.RulesByID
+	r.Channels = r.pending.Channels
+	r.Groups = r.pending.Groups
+	r.TimePeriods = r.pending.TimePeriods
+	r.Schedules = r.pending.Schedules
+	r.Rules = r.pending.Rules
 }
