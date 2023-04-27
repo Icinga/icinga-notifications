@@ -3,9 +3,10 @@ package recipient
 import "time"
 
 type Group struct {
-	ID      int64  `db:"id"`
-	Name    string `db:"name"`
-	Members []*Contact
+	ID        int64  `db:"id"`
+	Name      string `db:"name"`
+	Members   []*Contact
+	MemberIDs []int64
 }
 
 func (g *Group) GetContactsAt(t time.Time) []*Contact {

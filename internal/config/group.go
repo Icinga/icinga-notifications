@@ -50,20 +50,54 @@ func (r *RuntimeConfig) fetchGroups(ctx context.Context, db *icingadb.DB, tx *sq
 			zap.Int64("contact_id", m.ContactId),
 			zap.Int64("contactgroup_id", m.GroupId),
 		)
+
 		if g := groupsById[m.GroupId]; g == nil {
 			memberLogger.Warnw("ignoring member for unknown contactgroup_id")
-		} else if c := r.pending.Contacts[m.ContactId]; c == nil {
-			memberLogger.Warnw("ignoring member for unknown contact_id")
 		} else {
-			g.Members = append(g.Members, c)
+			g.MemberIDs = append(g.MemberIDs, m.ContactId)
 
 			memberLogger.Debugw("loaded contact group member",
-				zap.String("contact_name", c.FullName),
 				zap.String("contactgroup_name", g.Name))
+		}
+	}
+
+	if r.Groups != nil {
+		// mark no longer existing groups for deletion
+		for id := range r.Groups {
+			if _, ok := groupsById[id]; !ok {
+				groupsById[id] = nil
+			}
 		}
 	}
 
 	r.pending.Groups = groupsById
 
 	return nil
+}
+
+func (r *RuntimeConfig) applyPendingGroups(logger *logging.Logger) {
+	if r.Groups == nil {
+		r.Groups = make(map[int64]*recipient.Group)
+	}
+
+	for id, pendingGroup := range r.pending.Groups {
+		if pendingGroup == nil {
+			delete(r.Groups, id)
+		} else {
+			pendingGroup.Members = make([]*recipient.Contact, 0, len(pendingGroup.MemberIDs))
+			for _, contactID := range pendingGroup.MemberIDs {
+				if c := r.Contacts[contactID]; c != nil {
+					pendingGroup.Members = append(pendingGroup.Members, c)
+				}
+			}
+
+			if currentGroup := r.Groups[id]; currentGroup != nil {
+				*currentGroup = *pendingGroup
+			} else {
+				r.Groups[id] = pendingGroup
+			}
+		}
+	}
+
+	r.pending.Groups = nil
 }
