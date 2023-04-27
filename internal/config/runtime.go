@@ -10,7 +10,9 @@ import (
 	"github.com/icinga/noma/internal/rule"
 	"github.com/icinga/noma/internal/timeperiod"
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
 	"sync"
+	"time"
 )
 
 // RuntimeConfig stores the runtime representation of the configuration present in the database.
@@ -58,6 +60,9 @@ func (r *RuntimeConfig) RUnlock() {
 }
 
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
+	logger.Debug("fetching configuration from database")
+	start := time.Now()
+
 	tx, err := db.BeginTxx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  true,
@@ -83,12 +88,17 @@ func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, 
 		}
 	}
 
+	logger.Debugw("fetched configuration from database", zap.Duration("took", time.Since(start)))
+
 	return nil
 }
 
 func (r *RuntimeConfig) applyPending(logger *logging.Logger) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	logger.Debug("applying pending configuration")
+	start := time.Now()
 
 	r.applyPendingContacts(logger)
 	r.applyPendingContactAddresses(logger)
@@ -98,4 +108,6 @@ func (r *RuntimeConfig) applyPending(logger *logging.Logger) {
 	r.TimePeriods = r.pending.TimePeriods
 	r.Schedules = r.pending.Schedules
 	r.Rules = r.pending.Rules
+
+	logger.Debugw("applied pending configuration", zap.Duration("took", time.Since(start)))
 }
