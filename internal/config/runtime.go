@@ -46,6 +46,11 @@ func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB,
 
 	r.applyPending(logger)
 
+	err = r.debugVerify()
+	if err != nil {
+		panic(err)
+	}
+
 	return nil
 }
 
