@@ -10,15 +10,20 @@ import (
 	"github.com/icinga/noma/internal/rule"
 	"github.com/icinga/noma/internal/timeperiod"
 	"github.com/jmoiron/sqlx"
+	"sync"
 )
 
 // RuntimeConfig stores the runtime representation of the configuration present in the database.
 type RuntimeConfig struct {
 	// ConfigSet is the current live config. It is embedded to allow direct access to its members.
+	// Accessing it requires a lock that is obtained with RLock() and released with RUnlock().
 	ConfigSet
 
 	// pending contains changes to config objects that are to be applied to the embedded live config.
 	pending ConfigSet
+
+	// mu is used to synchronize access to the live ConfigSet.
+	mu sync.RWMutex
 }
 
 type ConfigSet struct {
@@ -39,6 +44,16 @@ func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB,
 	r.applyPending(logger)
 
 	return nil
+}
+
+// RLock locks the config for reading.
+func (r *RuntimeConfig) RLock() {
+	r.mu.RLock()
+}
+
+// RUnlock releases a lock obtained by RLock().
+func (r *RuntimeConfig) RUnlock() {
+	r.mu.RUnlock()
 }
 
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
@@ -70,5 +85,8 @@ func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, 
 }
 
 func (r *RuntimeConfig) applyPending(logger *logging.Logger) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.ConfigSet = r.pending
 }
