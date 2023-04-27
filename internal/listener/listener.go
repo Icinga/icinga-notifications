@@ -246,6 +246,9 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		currentIncident.State = make(map[*rule.Rule]map[*rule.Escalation]*incident.EscalationState)
 	}
 
+	l.runtimeConfig.RLock()
+	defer l.runtimeConfig.RUnlock()
+
 	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
 	// to be checked again, these rules already matched and stay effective for the ongoing incident.
 	for _, r := range l.runtimeConfig.RulesByID {
