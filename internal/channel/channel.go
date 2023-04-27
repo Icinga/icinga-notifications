@@ -34,6 +34,10 @@ func (c *Channel) GetPlugin() (Plugin, error) {
 	return c.plugin, nil
 }
 
+func (c *Channel) ResetPlugin() {
+	c.plugin = nil
+}
+
 type Plugin interface {
 	Send(contact *recipient.Contact, incident *incident.Incident, event *event.Event) error
 }
