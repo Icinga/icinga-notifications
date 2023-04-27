@@ -6,6 +6,7 @@ import (
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/noma/internal/filter"
 	"github.com/icinga/noma/internal/rule"
+	"github.com/icinga/noma/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 	"log"
@@ -30,16 +31,6 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 			zap.String("object_filter", rule.ObjectFilterExpr.String),
 			zap.Int64("timeperiod_id", rule.TimePeriodID.Int64),
 		)
-
-		if rule.TimePeriodID.Valid {
-			p := r.pending.TimePeriods[rule.TimePeriodID.Int64]
-			if p == nil {
-				ruleLogger.Warnw("ignoring rule with unknown timeperiod_id")
-				continue
-			}
-
-			rule.TimePeriod = p
-		}
 
 		if rule.ObjectFilterExpr.Valid {
 			f, err := filter.Parse(rule.ObjectFilterExpr.String)
@@ -118,32 +109,104 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 			zap.Int64("escalation_id", recipient.EscalationID),
 			zap.String("channel_type", recipient.ChannelType))
 
-		if recipient.ContactID.Valid {
-			id := recipient.ContactID.Int64
-			recipientLogger = recipientLogger.With(zap.Int64("contact_id", id))
-			recipient.Recipient = r.pending.Contacts[id]
-		} else if recipient.GroupID.Valid {
-			id := recipient.GroupID.Int64
-			recipientLogger = recipientLogger.With(zap.Int64("contactgroup_id", id))
-			recipient.Recipient = r.pending.Groups[id]
-		} else if recipient.ScheduleID.Valid {
-			id := recipient.ScheduleID.Int64
-			recipientLogger = recipientLogger.With(zap.Int64("schedule_id", id))
-			recipient.Recipient = r.pending.Schedules[id]
-		}
-
 		escalation := escalationsByID[recipient.EscalationID]
 		if escalation == nil {
 			recipientLogger.Warnw("ignoring recipient for unknown escalation")
-		} else if recipient.Recipient == nil {
-			recipientLogger.Warnw("ignoring unknown escalation recipient")
 		} else {
 			escalation.Recipients = append(escalation.Recipients, recipient)
 			recipientLogger.Debugw("loaded escalation recipient config")
 		}
 	}
 
+	if r.Rules != nil {
+		// mark no longer existing rules for deletion
+		for id := range r.Rules {
+			if _, ok := rulesByID[id]; !ok {
+				rulesByID[id] = nil
+			}
+		}
+	}
+
 	r.pending.Rules = rulesByID
 
 	return nil
+}
+
+func (r *RuntimeConfig) applyPendingRules(logger *logging.Logger) {
+	if r.Rules == nil {
+		r.Rules = make(map[int64]*rule.Rule)
+	}
+
+	for id, pendingRule := range r.pending.Rules {
+		if pendingRule == nil {
+			delete(r.Rules, id)
+		} else {
+			ruleLogger := logger.With(
+				zap.Int64("id", pendingRule.ID),
+				zap.String("name", pendingRule.Name),
+				zap.String("object_filter", pendingRule.ObjectFilterExpr.String),
+				zap.Int64("timeperiod_id", pendingRule.TimePeriodID.Int64),
+			)
+
+			if pendingRule.TimePeriodID.Valid {
+				if p := r.TimePeriods[pendingRule.TimePeriodID.Int64]; p == nil {
+					ruleLogger.Warnw("ignoring rule with unknown timeperiod_id")
+					continue
+				} else {
+					pendingRule.TimePeriod = p
+				}
+			}
+
+			for _, escalation := range pendingRule.Escalations {
+				for i, recipient := range escalation.Recipients {
+					recipientLogger := logger.With(
+						zap.Int64("id", recipient.ID),
+						zap.Int64("escalation_id", recipient.EscalationID),
+						zap.String("channel_type", recipient.ChannelType))
+
+					if recipient.ContactID.Valid {
+						id := recipient.ContactID.Int64
+						recipientLogger = recipientLogger.With(zap.Int64("contact_id", id))
+						if c := r.Contacts[id]; c != nil {
+							recipient.Recipient = c
+						} else {
+							recipientLogger.Warnw("ignoring unknown escalation recipient")
+							escalation.Recipients[i] = nil
+						}
+					} else if recipient.GroupID.Valid {
+						id := recipient.GroupID.Int64
+						recipientLogger = recipientLogger.With(zap.Int64("contactgroup_id", id))
+						if g := r.Groups[id]; g != nil {
+							recipient.Recipient = g
+						} else {
+							recipientLogger.Warnw("ignoring unknown escalation recipient")
+							escalation.Recipients[i] = nil
+						}
+					} else if recipient.ScheduleID.Valid {
+						id := recipient.ScheduleID.Int64
+						recipientLogger = recipientLogger.With(zap.Int64("schedule_id", id))
+						if s := r.Schedules[id]; s != nil {
+							recipient.Recipient = s
+						} else {
+							recipientLogger.Warnw("ignoring unknown escalation recipient")
+							escalation.Recipients[i] = nil
+						}
+					} else {
+						recipientLogger.Warnw("ignoring unknown escalation recipient")
+						escalation.Recipients[i] = nil
+					}
+				}
+
+				escalation.Recipients = utils.RemoveNils(escalation.Recipients)
+			}
+
+			if currentRule := r.Rules[id]; currentRule != nil {
+				*currentRule = *pendingRule
+			} else {
+				r.Rules[id] = pendingRule
+			}
+		}
+	}
+
+	r.pending.Rules = nil
 }
