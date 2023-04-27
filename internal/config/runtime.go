@@ -27,12 +27,13 @@ type RuntimeConfig struct {
 }
 
 type ConfigSet struct {
-	ChannelByType   map[string]*channel.Channel
-	ContactsByID    map[int64]*recipient.Contact
-	GroupsByID      map[int64]*recipient.Group
-	TimePeriodsById map[int64]*timeperiod.TimePeriod
-	SchedulesByID   map[int64]*recipient.Schedule
-	RulesByID       map[int64]*rule.Rule
+	ChannelByType    map[string]*channel.Channel
+	ContactsByID     map[int64]*recipient.Contact
+	ContactAddresses map[int64]*recipient.Address
+	GroupsByID       map[int64]*recipient.Group
+	TimePeriodsById  map[int64]*timeperiod.TimePeriod
+	SchedulesByID    map[int64]*recipient.Schedule
+	RulesByID        map[int64]*rule.Rule
 }
 
 func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
@@ -70,6 +71,7 @@ func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, 
 	updateFuncs := []func(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error{
 		r.fetchChannels,
 		r.fetchContacts,
+		r.fetchContactAddresses,
 		r.fetchGroups,
 		r.fetchTimePeriods,
 		r.fetchSchedules,
@@ -88,5 +90,12 @@ func (r *RuntimeConfig) applyPending(logger *logging.Logger) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.ConfigSet = r.pending
+	r.applyPendingContacts(logger)
+	r.applyPendingContactAddresses(logger)
+
+	r.ChannelByType = r.pending.ChannelByType
+	r.GroupsByID = r.pending.GroupsByID
+	r.TimePeriodsById = r.pending.TimePeriodsById
+	r.SchedulesByID = r.pending.SchedulesByID
+	r.RulesByID = r.pending.RulesByID
 }
