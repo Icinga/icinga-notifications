@@ -52,7 +52,7 @@ func (r *RuntimeConfig) fetchGroups(ctx context.Context, db *icingadb.DB, tx *sq
 		)
 		if g := groupsById[m.GroupId]; g == nil {
 			memberLogger.Warnw("ignoring member for unknown contactgroup_id")
-		} else if c := r.pending.ContactsByID[m.ContactId]; c == nil {
+		} else if c := r.pending.Contacts[m.ContactId]; c == nil {
 			memberLogger.Warnw("ignoring member for unknown contact_id")
 		} else {
 			g.Members = append(g.Members, c)
@@ -63,7 +63,7 @@ func (r *RuntimeConfig) fetchGroups(ctx context.Context, db *icingadb.DB, tx *sq
 		}
 	}
 
-	r.pending.GroupsByID = groupsById
+	r.pending.Groups = groupsById
 
 	return nil
 }

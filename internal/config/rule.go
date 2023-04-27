@@ -32,7 +32,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 		)
 
 		if rule.TimePeriodID.Valid {
-			p := r.pending.TimePeriodsById[rule.TimePeriodID.Int64]
+			p := r.pending.TimePeriods[rule.TimePeriodID.Int64]
 			if p == nil {
 				ruleLogger.Warnw("ignoring rule with unknown timeperiod_id")
 				continue
@@ -121,15 +121,15 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 		if recipient.ContactID.Valid {
 			id := recipient.ContactID.Int64
 			recipientLogger = recipientLogger.With(zap.Int64("contact_id", id))
-			recipient.Recipient = r.pending.ContactsByID[id]
+			recipient.Recipient = r.pending.Contacts[id]
 		} else if recipient.GroupID.Valid {
 			id := recipient.GroupID.Int64
 			recipientLogger = recipientLogger.With(zap.Int64("contactgroup_id", id))
-			recipient.Recipient = r.pending.GroupsByID[id]
+			recipient.Recipient = r.pending.Groups[id]
 		} else if recipient.ScheduleID.Valid {
 			id := recipient.ScheduleID.Int64
 			recipientLogger = recipientLogger.With(zap.Int64("schedule_id", id))
-			recipient.Recipient = r.pending.SchedulesByID[id]
+			recipient.Recipient = r.pending.Schedules[id]
 		}
 
 		escalation := escalationsByID[recipient.EscalationID]
@@ -143,7 +143,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 		}
 	}
 
-	r.pending.RulesByID = rulesByID
+	r.pending.Rules = rulesByID
 
 	return nil
 }
