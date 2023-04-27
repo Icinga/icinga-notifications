@@ -1,20 +1,33 @@
 package recipient
 
 import (
+	"database/sql"
 	"github.com/icinga/noma/internal/timeperiod"
 	"time"
 )
 
 type Schedule struct {
-	ID      int64  `db:"id"`
-	Name    string `db:"name"`
-	Members []*Member
+	ID         int64  `db:"id"`
+	Name       string `db:"name"`
+	Members    []*Member
+	MemberRows []*ScheduleMemberRow
 }
 
 type Member struct {
 	TimePeriod   *timeperiod.TimePeriod
 	Contact      *Contact
 	ContactGroup *Group
+}
+
+type ScheduleMemberRow struct {
+	ScheduleID   int64         `db:"schedule_id"`
+	TimePeriodID int64         `db:"timeperiod_id"`
+	ContactID    sql.NullInt64 `db:"contact_id"`
+	GroupID      sql.NullInt64 `db:"contactgroup_id"`
+}
+
+func (s *ScheduleMemberRow) TableName() string {
+	return "schedule_member"
 }
 
 // GetContactsAt returns the contacts that are active in the schedule at the given time.

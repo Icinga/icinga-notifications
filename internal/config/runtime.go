@@ -126,11 +126,9 @@ func (r *RuntimeConfig) applyPending(logger *logging.Logger) {
 	r.applyPendingContactAddresses(logger)
 	r.applyPendingGroups(logger)
 	r.applyPendingTimePeriods(logger)
+	r.applyPendingSchedules(logger)
 
 	// Don't update types for which incremental updates are not implemented yet.
-	if r.Schedules == nil {
-		r.Schedules = r.pending.Schedules
-	}
 	if r.Rules == nil {
 		r.Rules = r.pending.Rules
 	}
