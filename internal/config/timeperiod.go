@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func (r *RuntimeConfig) UpdateTimePeriodsFromDatabase(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
 	// TODO: At the moment, the timeperiod table contains no interesting fields for the daemon, therefore only
 	// entries are fetched and TimePeriod instances are created on the fly.
 
@@ -94,7 +94,7 @@ func (r *RuntimeConfig) UpdateTimePeriodsFromDatabase(ctx context.Context, db *i
 		timePeriods = append(timePeriods, p)
 	}
 
-	r.TimePeriodsById = timePeriodsById
+	r.pending.TimePeriodsById = timePeriodsById
 
 	return nil
 }

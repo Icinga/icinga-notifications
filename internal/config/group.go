@@ -10,7 +10,7 @@ import (
 	"log"
 )
 
-func (r *RuntimeConfig) UpdateGroupsFromDatabase(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchGroups(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
 	var groupPtr *recipient.Group
 	stmt := db.BuildSelectStmt(groupPtr, groupPtr)
 	log.Println(stmt)
@@ -52,7 +52,7 @@ func (r *RuntimeConfig) UpdateGroupsFromDatabase(ctx context.Context, db *icinga
 		)
 		if g := groupsById[m.GroupId]; g == nil {
 			memberLogger.Warnw("ignoring member for unknown contactgroup_id")
-		} else if c := r.ContactsByID[m.ContactId]; c == nil {
+		} else if c := r.pending.ContactsByID[m.ContactId]; c == nil {
 			memberLogger.Warnw("ignoring member for unknown contact_id")
 		} else {
 			g.Members = append(g.Members, c)
@@ -63,7 +63,7 @@ func (r *RuntimeConfig) UpdateGroupsFromDatabase(ctx context.Context, db *icinga
 		}
 	}
 
-	r.GroupsByID = groupsById
+	r.pending.GroupsByID = groupsById
 
 	return nil
 }

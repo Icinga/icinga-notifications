@@ -11,7 +11,7 @@ import (
 	"log"
 )
 
-func (r *RuntimeConfig) UpdateSchedulesFromDatabase(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchSchedules(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
 	var schedulePtr *recipient.Schedule
 	stmt := db.BuildSelectStmt(schedulePtr, schedulePtr)
 	log.Println(stmt)
@@ -58,11 +58,11 @@ func (r *RuntimeConfig) UpdateSchedulesFromDatabase(ctx context.Context, db *ici
 
 		if s := schedulesById[member.ScheduleID]; s == nil {
 			memberLogger.Warnw("ignoring schedule member for unknown schedule_id")
-		} else if p := r.TimePeriodsById[member.TimePeriodID]; p == nil {
+		} else if p := r.pending.TimePeriodsById[member.TimePeriodID]; p == nil {
 			memberLogger.Warnw("ignoring schedule member for unknown timeperiod_id")
-		} else if c := r.ContactsByID[member.ContactID.Int64]; member.ContactID.Valid && p == nil {
+		} else if c := r.pending.ContactsByID[member.ContactID.Int64]; member.ContactID.Valid && p == nil {
 			memberLogger.Warnw("ignoring schedule member for unknown contact_id")
-		} else if g := r.GroupsByID[member.GroupID.Int64]; member.GroupID.Valid && p == nil {
+		} else if g := r.pending.GroupsByID[member.GroupID.Int64]; member.GroupID.Valid && p == nil {
 			memberLogger.Warnw("ignoring schedule member for unknown contactgroup_id")
 		} else {
 			s.Members = append(s.Members, &recipient.Member{
@@ -75,7 +75,7 @@ func (r *RuntimeConfig) UpdateSchedulesFromDatabase(ctx context.Context, db *ici
 		}
 	}
 
-	r.SchedulesByID = schedulesById
+	r.pending.SchedulesByID = schedulesById
 
 	return nil
 }

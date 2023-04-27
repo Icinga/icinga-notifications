@@ -10,7 +10,7 @@ import (
 	"log"
 )
 
-func (r *RuntimeConfig) UpdateContactsFromDatabase(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchContacts(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
 	var contactPtr *recipient.Contact
 	stmt := db.BuildSelectStmt(contactPtr, contactPtr)
 	log.Println(stmt)
@@ -55,7 +55,7 @@ func (r *RuntimeConfig) UpdateContactsFromDatabase(ctx context.Context, db *icin
 		}
 	}
 
-	r.ContactsByID = contactsByID
+	r.pending.ContactsByID = contactsByID
 
 	return nil
 }

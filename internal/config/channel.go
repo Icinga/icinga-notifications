@@ -10,7 +10,7 @@ import (
 	"log"
 )
 
-func (r *RuntimeConfig) UpdateChannelsFromDatabase(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchChannels(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
 	var channelPtr *channel.Channel
 	stmt := db.BuildSelectStmt(channelPtr, channelPtr)
 	log.Println(stmt)
@@ -37,7 +37,7 @@ func (r *RuntimeConfig) UpdateChannelsFromDatabase(ctx context.Context, db *icin
 		}
 	}
 
-	r.ChannelByType = channelsByType
+	r.pending.ChannelByType = channelsByType
 
 	return nil
 }
