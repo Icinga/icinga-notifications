@@ -49,6 +49,24 @@ func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB,
 	return nil
 }
 
+func (r *RuntimeConfig) PeriodicUpdates(ctx context.Context, db *icingadb.DB, logger *logging.Logger, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			logger.Debug("periodically updating config")
+			err := r.UpdateFromDatabase(ctx, db, logger)
+			if err != nil {
+				logger.Errorw("periodic config update failed, continuing with previous config", zap.Error(err))
+			}
+		case <-ctx.Done():
+			break
+		}
+	}
+}
+
 // RLock locks the config for reading.
 func (r *RuntimeConfig) RLock() {
 	r.mu.RLock()
@@ -62,6 +80,9 @@ func (r *RuntimeConfig) RUnlock() {
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
 	logger.Debug("fetching configuration from database")
 	start := time.Now()
+
+	// Reset all pending state to start from a clean state.
+	r.pending = ConfigSet{}
 
 	tx, err := db.BeginTxx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
@@ -103,11 +124,22 @@ func (r *RuntimeConfig) applyPending(logger *logging.Logger) {
 	r.applyPendingContacts(logger)
 	r.applyPendingContactAddresses(logger)
 
-	r.Channels = r.pending.Channels
-	r.Groups = r.pending.Groups
-	r.TimePeriods = r.pending.TimePeriods
-	r.Schedules = r.pending.Schedules
-	r.Rules = r.pending.Rules
+	// Don't update types for which incremental updates are not implemented yet.
+	if r.Channels == nil {
+		r.Channels = r.pending.Channels
+	}
+	if r.Groups == nil {
+		r.Groups = r.pending.Groups
+	}
+	if r.TimePeriods == nil {
+		r.TimePeriods = r.pending.TimePeriods
+	}
+	if r.Schedules == nil {
+		r.Schedules = r.pending.Schedules
+	}
+	if r.Rules == nil {
+		r.Rules = r.pending.Rules
+	}
 
 	logger.Debugw("applied pending configuration", zap.Duration("took", time.Since(start)))
 }
