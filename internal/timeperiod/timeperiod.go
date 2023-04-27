@@ -7,8 +7,13 @@ import (
 )
 
 type TimePeriod struct {
+	ID      int64 `db:"id"`
 	Name    string
 	Entries []*Entry
+}
+
+func (p *TimePeriod) TableName() string {
+	return "timeperiod"
 }
 
 // Contains returns whether a point in time t is covered by this time period, i.e. there is an entry covering it.
