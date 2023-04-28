@@ -5,14 +5,19 @@ type All struct {
 	rules []Filter
 }
 
-func (a *All) Eval(filterable Filterable) bool {
+func (a *All) Eval(filterable Filterable) (bool, error) {
 	for _, rule := range a.rules {
-		if !rule.Eval(filterable) {
-			return false
+		matched, err := rule.Eval(filterable)
+		if err != nil {
+			return false, err
+		}
+
+		if !matched {
+			return false, nil
 		}
 	}
 
-	return true
+	return true, nil
 }
 
 // Any represents a filter chain type that matches when at least one of its Rules matches.
@@ -20,14 +25,19 @@ type Any struct {
 	rules []Filter
 }
 
-func (a *Any) Eval(filterable Filterable) bool {
+func (a *Any) Eval(filterable Filterable) (bool, error) {
 	for _, rule := range a.rules {
-		if rule.Eval(filterable) {
-			return true
+		matched, err := rule.Eval(filterable)
+		if err != nil {
+			return false, err
+		}
+
+		if matched {
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 // None represents a filter chain type that matches when none of its Rules matches.
@@ -35,14 +45,19 @@ type None struct {
 	rules []Filter
 }
 
-func (n *None) Eval(filterable Filterable) bool {
+func (n *None) Eval(filterable Filterable) (bool, error) {
 	for _, rule := range n.rules {
-		if rule.Eval(filterable) {
-			return false
+		matched, err := rule.Eval(filterable)
+		if err != nil {
+			return false, err
+		}
+
+		if matched {
+			return false, nil
 		}
 	}
 
-	return true
+	return true, nil
 }
 
 // Condition represents a single filter condition.
@@ -64,56 +79,96 @@ func NewExists(column string) *Exists {
 	return &Exists{column: column}
 }
 
-func (e *Exists) Eval(filterable Filterable) bool {
-	return filterable.EvalExists(e.column)
+func (e *Exists) Eval(filterable Filterable) (bool, error) {
+	return filterable.EvalExists(e.column), nil
 }
 
 type Equal Condition
 
-func (e *Equal) Eval(filterable Filterable) bool {
-	return filterable.EvalEqual(e.column, e.value)
+func (e *Equal) Eval(filterable Filterable) (bool, error) {
+	match, err := filterable.EvalEqual(e.column, e.value)
+	if err != nil {
+		return false, err
+	}
+
+	return match, nil
 }
 
 type UnEqual Condition
 
-func (e *UnEqual) Eval(filterable Filterable) bool {
-	return filterable.EvalExists(e.column) && !filterable.EvalEqual(e.column, e.value)
+func (u *UnEqual) Eval(filterable Filterable) (bool, error) {
+	match, err := filterable.EvalEqual(u.column, u.value)
+	if err != nil {
+		return false, err
+	}
+
+	return filterable.EvalExists(u.column) && !match, nil
 }
 
 type Like Condition
 
-func (e *Like) Eval(filterable Filterable) bool {
-	return filterable.EvalLike(e.column, e.value)
+func (l *Like) Eval(filterable Filterable) (bool, error) {
+	match, err := filterable.EvalLike(l.column, l.value)
+	if err != nil {
+		return false, err
+	}
+
+	return match, nil
 }
 
 type Unlike Condition
 
-func (e *Unlike) Eval(filterable Filterable) bool {
-	return filterable.EvalExists(e.column) && !filterable.EvalLike(e.column, e.value)
+func (u *Unlike) Eval(filterable Filterable) (bool, error) {
+	match, err := filterable.EvalLike(u.column, u.value)
+	if err != nil {
+		return false, err
+	}
+
+	return filterable.EvalExists(u.column) && !match, nil
 }
 
 type LessThan Condition
 
-func (e *LessThan) Eval(filterable Filterable) bool {
-	return filterable.EvalLess(e.column, e.value)
+func (less *LessThan) Eval(filterable Filterable) (bool, error) {
+	match, err := filterable.EvalLess(less.column, less.value)
+	if err != nil {
+		return false, err
+	}
+
+	return match, nil
 }
 
 type LessThanOrEqual Condition
 
-func (e *LessThanOrEqual) Eval(filterable Filterable) bool {
-	return filterable.EvalLessOrEqual(e.column, e.value)
+func (loe *LessThanOrEqual) Eval(filterable Filterable) (bool, error) {
+	match, err := filterable.EvalLessOrEqual(loe.column, loe.value)
+	if err != nil {
+		return false, err
+	}
+
+	return match, nil
 }
 
 type GreaterThan Condition
 
-func (e *GreaterThan) Eval(filterable Filterable) bool {
-	return filterable.EvalExists(e.column) && !filterable.EvalLess(e.column, e.value)
+func (g *GreaterThan) Eval(filterable Filterable) (bool, error) {
+	match, err := filterable.EvalLess(g.column, g.value)
+	if err != nil {
+		return false, err
+	}
+
+	return filterable.EvalExists(g.column) && !match, nil
 }
 
 type GreaterThanOrEqual Condition
 
-func (e *GreaterThanOrEqual) Eval(filterable Filterable) bool {
-	return filterable.EvalExists(e.column) && !filterable.EvalLessOrEqual(e.column, e.value)
+func (goe *GreaterThanOrEqual) Eval(filterable Filterable) (bool, error) {
+	match, err := filterable.EvalLessOrEqual(goe.column, goe.value)
+	if err != nil {
+		return false, err
+	}
+
+	return filterable.EvalExists(goe.column) && !match, nil
 }
 
 var (

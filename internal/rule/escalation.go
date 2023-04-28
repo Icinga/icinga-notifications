@@ -2,6 +2,7 @@ package rule
 
 import (
 	"database/sql"
+	"github.com/icinga/noma/internal/filter"
 	"github.com/icinga/noma/internal/recipient"
 	"strings"
 	"time"
@@ -12,7 +13,7 @@ type Escalation struct {
 	RuleID        int64          `db:"rule_id"`
 	Name          string         `db:"-"`
 	NameRaw       sql.NullString `db:"name"`
-	Condition     *Condition     `db:"-"`
+	Condition     filter.Filter  `db:"-"`
 	ConditionExpr sql.NullString `db:"condition"`
 	FallbackForID sql.NullInt64  `db:"fallback_for"`
 	Fallbacks     []*Escalation
