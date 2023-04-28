@@ -41,6 +41,15 @@ var severityToName = func() map[Severity]string {
 	return m
 }()
 
+func GetSeverityByName(sev string) (Severity, error) {
+	severity, ok := severityByName[sev]
+	if !ok {
+		return SeverityNone, fmt.Errorf("unknown severity %q", sev)
+	}
+
+	return severity, nil
+}
+
 func (s *Severity) MarshalJSON() ([]byte, error) {
 	if name, ok := severityToName[*s]; ok {
 		return json.Marshal(name)
