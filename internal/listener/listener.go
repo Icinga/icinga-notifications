@@ -259,7 +259,18 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			continue
 		}
 
-		if _, ok := currentIncident.State[r.ID]; !ok && (r.ObjectFilter == nil || r.ObjectFilter.Eval(obj)) {
+		if _, ok := currentIncident.State[r.ID]; !ok {
+			if r.ObjectFilter != nil {
+				matched, err := r.ObjectFilter.Eval(obj)
+				if err != nil {
+					log.Printf("[%s %s] rule %q failed to evaulte object filter: %s", obj.DisplayName(), currentIncident.String(), r.Name, err)
+				}
+
+				if err != nil || !matched {
+					continue
+				}
+			}
+
 			currentIncident.State[r.ID] = make(map[int64]*incident.EscalationState)
 			log.Printf("[%s %s] rule %q matches", obj.DisplayName(), currentIncident.String(), r.Name)
 
@@ -293,18 +304,19 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		// Check if new escalation stages are reached
 		for _, escalation := range r.Escalations {
 			if _, ok := states[escalation.ID]; !ok {
-				cond := escalation.Condition
-				match := false
-
-				if cond == nil {
-					match = true
-				} else if cond.MinDuration > 0 && ev.Time.Sub(currentIncident.StartedAt) > cond.MinDuration {
-					match = true
-				} else if cond.MinSeverity > 0 && currentIncident.Severity() >= cond.MinSeverity {
-					match = true
+				filter := escalation.Condition
+				cond := &rule.EscalationFilter{
+					IncidentAge:      ev.Time.Sub(currentIncident.StartedAt),
+					IncidentSeverity: currentIncident.Severity(),
 				}
 
-				if match {
+				matched, err := filter.Eval(cond)
+				if err != nil {
+					log.Printf(
+						"[%s %s] rule %q failed to evaulte escalation %q condition: %s",
+						obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName(), err,
+					)
+				} else if matched {
 					states[escalation.ID] = new(incident.EscalationState)
 				}
 			}

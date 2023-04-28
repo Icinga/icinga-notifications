@@ -161,24 +161,24 @@ func (o *Object) UpdateMetadata(source int64, name string, url types.String, ext
 	return nil
 }
 
-func (o *Object) EvalEqual(key string, value string) bool {
+func (o *Object) EvalEqual(key string, value string) (bool, error) {
 	tagVal, ok := o.Tags[key]
 	if ok && tagVal == value {
-		return true
+		return true, nil
 	}
 
 	for _, m := range o.Metadata {
 		tagVal, ok = m.ExtraTags[key]
 		if ok && tagVal == value {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 // EvalLike returns true when the objects tag/value matches the filter.Conditional value.
-func (o *Object) EvalLike(key string, value string) bool {
+func (o *Object) EvalLike(key string, value string) (bool, error) {
 	segments := strings.Split(value, "*")
 	builder := &strings.Builder{}
 	for _, segment := range segments {
@@ -192,49 +192,49 @@ func (o *Object) EvalLike(key string, value string) bool {
 	regex := regexp.MustCompile("^" + builder.String() + "$")
 	tagVal, ok := o.Tags[key]
 	if ok && regex.MatchString(tagVal) {
-		return true
+		return true, nil
 	}
 
 	for _, m := range o.Metadata {
 		tagVal, ok = m.ExtraTags[key]
 		if ok && regex.MatchString(tagVal) {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
-func (o *Object) EvalLess(key string, value string) bool {
+func (o *Object) EvalLess(key string, value string) (bool, error) {
 	tagVal, ok := o.Tags[key]
 	if ok && tagVal < value {
-		return true
+		return true, nil
 	}
 
 	for _, m := range o.Metadata {
 		tagVal, ok = m.ExtraTags[key]
 		if ok && tagVal < value {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
-func (o *Object) EvalLessOrEqual(key string, value string) bool {
+func (o *Object) EvalLessOrEqual(key string, value string) (bool, error) {
 	tagVal, ok := o.Tags[key]
 	if ok && tagVal <= value {
-		return true
+		return true, nil
 	}
 
 	for _, m := range o.Metadata {
 		tagVal, ok = m.ExtraTags[key]
 		if ok && tagVal <= value {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 func (o *Object) EvalExists(key string) bool {
