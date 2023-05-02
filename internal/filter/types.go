@@ -24,6 +24,15 @@ type Chain struct {
 	rules []Filter
 }
 
+func NewChain(op LogicalOp, rules ...Filter) (*Chain, error) {
+	switch op {
+	case None, All, Any:
+		return &Chain{rules: rules, op: op}, nil
+	default:
+		return nil, fmt.Errorf("invalid logical operator provided: %q", op)
+	}
+}
+
 // Eval evaluates the filter rule sets recursively based on their operator type.
 func (c *Chain) Eval(filterable Filterable) (bool, error) {
 	switch c.op {
@@ -103,6 +112,17 @@ type Condition struct {
 	op     CompOperator
 	column string
 	value  string
+}
+
+// NewCondition initiates a new Condition instance from the given data.
+// Returns error if invalid CompOperator is provided.
+func NewCondition(column string, op CompOperator, value string) (Filter, error) {
+	switch op {
+	case Equal, UnEqual, Like, UnLike, LessThan, LessThanEqual, GreaterThan, GreaterThanEqual:
+		return &Condition{op: op, column: column, value: value}, nil
+	default:
+		return nil, fmt.Errorf("invalid comparison operator provided: %q", op)
+	}
 }
 
 // Eval evaluates this Condition based on its operator.
