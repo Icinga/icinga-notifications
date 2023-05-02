@@ -46,7 +46,9 @@ func TestFilter(t *testing.T) {
 	for _, td := range testdata {
 		f, err := filter.Parse(td.Expression)
 		if assert.NoError(t, err, "parsing %q should not return an error", td.Expression) {
-			assert.Equal(t, td.Expected, f.Eval(obj), "unexpected filter result for %q", td.Expression)
+			matched, err := f.Eval(obj)
+			assert.NoError(t, err)
+			assert.Equal(t, td.Expected, matched, "unexpected filter result for %q", td.Expression)
 		}
 	}
 }
