@@ -11,7 +11,6 @@ import (
 	"github.com/icinga/noma/internal/incident"
 	"github.com/icinga/noma/internal/object"
 	"github.com/icinga/noma/internal/recipient"
-	"github.com/icinga/noma/internal/rule"
 	"github.com/icinga/noma/internal/utils"
 	"log"
 	"net/http"
@@ -243,7 +242,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if currentIncident.State == nil {
-		currentIncident.State = make(map[*rule.Rule]map[*rule.Escalation]*incident.EscalationState)
+		currentIncident.State = make(map[int64]map[int64]*incident.EscalationState)
 	}
 
 	l.runtimeConfig.RLock()
@@ -256,8 +255,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			continue
 		}
 
-		if _, ok := currentIncident.State[r]; !ok && (r.ObjectFilter == nil || r.ObjectFilter.Eval(obj)) {
-			currentIncident.State[r] = make(map[*rule.Escalation]*incident.EscalationState)
+		if _, ok := currentIncident.State[r.ID]; !ok && (r.ObjectFilter == nil || r.ObjectFilter.Eval(obj)) {
+			currentIncident.State[r.ID] = make(map[int64]*incident.EscalationState)
 			log.Printf("[%s %s] rule %q matches", obj.DisplayName(), currentIncident.String(), r.Name)
 
 			history := &incident.HistoryEntry{
@@ -280,14 +279,16 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	for r, states := range currentIncident.State {
-		if !r.IsActive.Valid || !r.IsActive.Bool {
+	for rID, states := range currentIncident.State {
+		r := l.runtimeConfig.Rules[rID]
+
+		if r == nil || !r.IsActive.Valid || !r.IsActive.Bool {
 			continue
 		}
 
 		// Check if new escalation stages are reached
 		for _, escalation := range r.Escalations {
-			if _, ok := states[escalation]; !ok {
+			if _, ok := states[escalation.ID]; !ok {
 				cond := escalation.Condition
 				match := false
 
@@ -300,18 +301,23 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				}
 
 				if match {
-					states[escalation] = new(incident.EscalationState)
+					states[escalation.ID] = new(incident.EscalationState)
 				}
 			}
 		}
 
 		if currentIncident.Recipients == nil {
-			currentIncident.Recipients = make(map[recipient.Recipient]*incident.RecipientState)
+			currentIncident.Recipients = make(map[incident.RecipientKey]*incident.RecipientState)
 		}
 
-		for escalation, state := range states {
+		for escalationID, state := range states {
 			if state.TriggeredAt.Time().IsZero() {
-				state.RuleEscalationID = escalation.ID
+				escalation := r.Escalations[escalationID]
+				if escalation == nil {
+					continue
+				}
+
+				state.RuleEscalationID = escalationID
 				state.TriggeredAt = types.UnixMilli(ev.Time)
 
 				log.Printf("[%s %s] rule %q reached escalation %q", obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName())
@@ -344,8 +350,13 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 		contactChannels := make(map[*recipient.Contact]map[string]struct{})
 
-		for r, state := range currentIncident.Recipients {
+		for recipientKey, state := range currentIncident.Recipients {
 			if !managed || state.Role > incident.RoleRecipient {
+				r := l.runtimeConfig.GetRecipient(recipientKey)
+				if r == nil {
+					continue
+				}
+
 				for _, c := range r.GetContactsAt(ev.Time) {
 					channels := contactChannels[c]
 					if channels == nil {

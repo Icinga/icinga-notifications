@@ -24,25 +24,27 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 	}
 
 	rulesByID := make(map[int64]*rule.Rule)
-	for _, rule := range rules {
+	for _, ru := range rules {
 		ruleLogger := logger.With(
-			zap.Int64("id", rule.ID),
-			zap.String("name", rule.Name),
-			zap.String("object_filter", rule.ObjectFilterExpr.String),
-			zap.Int64("timeperiod_id", rule.TimePeriodID.Int64),
+			zap.Int64("id", ru.ID),
+			zap.String("name", ru.Name),
+			zap.String("object_filter", ru.ObjectFilterExpr.String),
+			zap.Int64("timeperiod_id", ru.TimePeriodID.Int64),
 		)
 
-		if rule.ObjectFilterExpr.Valid {
-			f, err := filter.Parse(rule.ObjectFilterExpr.String)
+		if ru.ObjectFilterExpr.Valid {
+			f, err := filter.Parse(ru.ObjectFilterExpr.String)
 			if err != nil {
 				ruleLogger.Warnw("ignoring rule as parsing object_filter failed", zap.Error(err))
 				continue
 			}
 
-			rule.ObjectFilter = f
+			ru.ObjectFilter = f
 		}
 
-		rulesByID[rule.ID] = rule
+		ru.Escalations = make(map[int64]*rule.Escalation)
+
+		rulesByID[ru.ID] = ru
 		ruleLogger.Debugw("loaded rule config")
 	}
 
@@ -88,7 +90,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 			escalation.Name = escalation.NameRaw.String
 		}
 
-		rule.Escalations = append(rule.Escalations, escalation)
+		rule.Escalations[escalation.ID] = escalation
 		escalationsByID[escalation.ID] = escalation
 		escalationLogger.Debugw("loaded escalation config")
 	}

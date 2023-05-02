@@ -16,15 +16,18 @@ import (
 	"time"
 )
 
+type ruleID = int64
+type escalationID = int64
+
 type Incident struct {
 	Object           *object.Object
 	StartedAt        time.Time
 	RecoveredAt      time.Time
 	SeverityBySource map[int64]event.Severity
 
-	State      map[*rule.Rule]map[*rule.Escalation]*EscalationState
+	State      map[ruleID]map[escalationID]*EscalationState
 	Events     []*event.Event
-	Recipients map[recipient.Recipient]*RecipientState
+	Recipients map[RecipientKey]*RecipientState
 	History    []*HistoryEntry
 
 	incidentRowID int64
@@ -32,6 +35,26 @@ type Incident struct {
 	db *icingadb.DB
 
 	sync.Mutex
+}
+
+type RecipientKey struct {
+	// Only one of the members is allowed to be a non-zero value.
+	ContactID  int64
+	GroupID    int64
+	ScheduleID int64
+}
+
+func RecipientToKey(r recipient.Recipient) RecipientKey {
+	switch v := r.(type) {
+	case *recipient.Contact:
+		return RecipientKey{ContactID: v.ID}
+	case *recipient.Group:
+		return RecipientKey{GroupID: v.ID}
+	case *recipient.Schedule:
+		return RecipientKey{ScheduleID: v.ID}
+	default:
+		panic(fmt.Sprintf("unexpected recipient type: %T", r))
+	}
 }
 
 func (i *Incident) Severity() event.Severity {
@@ -133,9 +156,10 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 			cr.ScheduleID = types.Int{NullInt64: sql.NullInt64{Int64: c.ID, Valid: true}}
 		}
 
-		state, ok := i.Recipients[r]
+		recipientKey := RecipientToKey(r)
+		state, ok := i.Recipients[recipientKey]
 		if !ok {
-			i.Recipients[r] = &RecipientState{
+			i.Recipients[recipientKey] = &RecipientState{
 				Role:     newRole,
 				Channels: map[string]struct{}{escalationRecipient.ChannelType: {}},
 			}
