@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
 	"strings"
 	"testing"
@@ -209,6 +210,31 @@ func FuzzParser(f *testing.F) {
 
 		if strings.Count(expr, "(") != strings.Count(expr, ")") {
 			assert.Error(t, err)
+		}
+
+		if err == nil {
+			dump := spew.Sdump(f)
+
+			assertDumpContainsAny := func(substrs ...string) {
+				for _, substr := range substrs {
+					if strings.Contains(dump, substr) {
+						return
+					}
+				}
+
+				assert.Failf(t, "Parsed expression dump did not contain any expected string",
+					"Expression: %q\nExpected: %#v\n\n%s", expr, substrs, dump)
+			}
+
+			if strings.Contains(expr, "&") {
+				assertDumpContainsAny("All")
+			}
+			if strings.Contains(expr, "|") {
+				assertDumpContainsAny("Any", "None")
+			}
+			if strings.Contains(expr, "!") {
+				assertDumpContainsAny("None", "UnEqual", "Unlike")
+			}
 		}
 	})
 }
