@@ -12,6 +12,7 @@ import (
 	"github.com/icinga/noma/internal/incident"
 	"github.com/icinga/noma/internal/object"
 	"github.com/icinga/noma/internal/recipient"
+	"github.com/icinga/noma/internal/rule"
 	"github.com/icinga/noma/internal/utils"
 	"log"
 	"net/http"
