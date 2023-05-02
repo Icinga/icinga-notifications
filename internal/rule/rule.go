@@ -14,5 +14,5 @@ type Rule struct {
 	TimePeriodID     types.Int     `db:"timeperiod_id"`
 	ObjectFilter     filter.Filter `db:"-"`
 	ObjectFilterExpr types.String  `db:"object_filter"`
-	Escalations      []*Escalation
+	Escalations      map[int64]*Escalation
 }

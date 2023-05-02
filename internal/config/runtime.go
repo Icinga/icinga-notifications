@@ -6,6 +6,7 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/noma/internal/channel"
+	"github.com/icinga/noma/internal/incident"
 	"github.com/icinga/noma/internal/recipient"
 	"github.com/icinga/noma/internal/rule"
 	"github.com/icinga/noma/internal/timeperiod"
@@ -80,6 +81,28 @@ func (r *RuntimeConfig) RLock() {
 // RUnlock releases a lock obtained by RLock().
 func (r *RuntimeConfig) RUnlock() {
 	r.mu.RUnlock()
+}
+
+func (r *RuntimeConfig) GetRecipient(k incident.RecipientKey) recipient.Recipient {
+	// Note: be careful to return nil for non-existent IDs instead of (*T)(nil) as (*T)(nil) != nil.
+	if k.ContactID != 0 {
+		c := r.Contacts[k.ContactID]
+		if c != nil {
+			return c
+		}
+	} else if k.GroupID != 0 {
+		g := r.Groups[k.GroupID]
+		if g != nil {
+			return g
+		}
+	} else if k.ScheduleID != 0 {
+		s := r.Schedules[k.ScheduleID]
+		if s != nil {
+			return s
+		}
+	}
+
+	return nil
 }
 
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
