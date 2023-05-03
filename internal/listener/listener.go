@@ -252,8 +252,12 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	if currentIncident.State == nil {
-		currentIncident.State = make(map[int64]map[int64]*incident.EscalationState)
+	if currentIncident.EscalationState == nil {
+		currentIncident.EscalationState = make(map[int64]*incident.EscalationState)
+	}
+
+	if currentIncident.Rules == nil {
+		currentIncident.Rules = make(map[int64]struct{})
 	}
 
 	l.runtimeConfig.RLock()
@@ -266,7 +270,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			continue
 		}
 
-		if _, ok := currentIncident.State[r.ID]; !ok {
+		if _, ok := currentIncident.Rules[r.ID]; !ok {
 			if r.ObjectFilter != nil {
 				matched, err := r.ObjectFilter.Eval(obj)
 				if err != nil {
@@ -278,7 +282,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				}
 			}
 
-			currentIncident.State[r.ID] = make(map[int64]*incident.EscalationState)
+			currentIncident.Rules[r.ID] = struct{}{}
 			log.Printf("[%s %s] rule %q matches", obj.DisplayName(), currentIncident.String(), r.Name)
 
 			history := &incident.HistoryEntry{
@@ -301,7 +305,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	for rID, states := range currentIncident.State {
+	for rID, _ := range currentIncident.Rules {
 		r := l.runtimeConfig.Rules[rID]
 
 		if r == nil || !r.IsActive.Valid || !r.IsActive.Bool {
@@ -310,7 +314,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 		// Check if new escalation stages are reached
 		for _, escalation := range r.Escalations {
-			if _, ok := states[escalation.ID]; !ok {
+			if _, ok := currentIncident.EscalationState[escalation.ID]; !ok {
 				matched := false
 
 				if escalation.Condition == nil {
@@ -333,108 +337,109 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				}
 
 				if matched {
-					states[escalation.ID] = new(incident.EscalationState)
+					currentIncident.EscalationState[escalation.ID] = new(incident.EscalationState)
 				}
 			}
 		}
+	}
 
-		if currentIncident.Recipients == nil {
-			currentIncident.Recipients = make(map[incident.RecipientKey]*incident.RecipientState)
+	if currentIncident.Recipients == nil {
+		currentIncident.Recipients = make(map[incident.RecipientKey]*incident.RecipientState)
+	}
+
+	for escalationID, state := range currentIncident.EscalationState {
+		if state.TriggeredAt.Time().IsZero() {
+			escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
+			if escalation == nil {
+				continue
+			}
+
+			state.RuleEscalationID = escalationID
+			state.TriggeredAt = types.UnixMilli(ev.Time)
+
+			r := l.runtimeConfig.Rules[escalation.RuleID]
+			log.Printf("[%s %s] rule %q reached escalation %q", obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName())
+
+			history := &incident.HistoryEntry{
+				Time:                      ev.Time,
+				EventRowID:                ev.ID,
+				CausedByIncidentHistoryId: causedByIncidentHistoryId,
+			}
+
+			causedByIncidentHistoryId, err = currentIncident.AddEscalationTriggered(state, history)
+			if err != nil {
+				_, _ = fmt.Fprintln(w, err)
+
+				log.Println(err)
+				return
+			}
+
+			err = currentIncident.AddRecipient(escalation, ev.Time, ev.ID)
+			if err != nil {
+				_, _ = fmt.Fprintln(w, err)
+
+				log.Println(err)
+				return
+			}
 		}
+	}
 
-		for escalationID, state := range states {
-			if state.TriggeredAt.Time().IsZero() {
-				escalation := r.Escalations[escalationID]
-				if escalation == nil {
-					continue
+	managed := currentIncident.HasManager()
+
+	contactChannels := make(map[*recipient.Contact]map[string]struct{})
+
+	for recipientKey, state := range currentIncident.Recipients {
+		if !managed || state.Role > incident.RoleRecipient {
+			r := l.runtimeConfig.GetRecipient(recipientKey)
+			if r == nil {
+				continue
+			}
+
+			for _, c := range r.GetContactsAt(ev.Time) {
+				channels := contactChannels[c]
+				if channels == nil {
+					channels = make(map[string]struct{})
+					contactChannels[c] = channels
 				}
-
-				state.RuleEscalationID = escalationID
-				state.TriggeredAt = types.UnixMilli(ev.Time)
-
-				log.Printf("[%s %s] rule %q reached escalation %q", obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName())
-
-				history := &incident.HistoryEntry{
-					Time:                      ev.Time,
-					EventRowID:                ev.ID,
-					CausedByIncidentHistoryId: causedByIncidentHistoryId,
-				}
-
-				causedByIncidentHistoryId, err = currentIncident.AddEscalationTriggered(state, history)
-				if err != nil {
-					_, _ = fmt.Fprintln(w, err)
-
-					log.Println(err)
-					return
-				}
-
-				err = currentIncident.AddRecipient(escalation, ev.Time, ev.ID)
-				if err != nil {
-					_, _ = fmt.Fprintln(w, err)
-
-					log.Println(err)
-					return
+				for channel := range state.Channels {
+					channels[channel] = struct{}{}
 				}
 			}
 		}
+	}
 
-		managed := currentIncident.HasManager()
-
-		contactChannels := make(map[*recipient.Contact]map[string]struct{})
-
-		for recipientKey, state := range currentIncident.Recipients {
-			if !managed || state.Role > incident.RoleRecipient {
-				r := l.runtimeConfig.GetRecipient(recipientKey)
-				if r == nil {
-					continue
-				}
-
-				for _, c := range r.GetContactsAt(ev.Time) {
-					channels := contactChannels[c]
-					if channels == nil {
-						channels = make(map[string]struct{})
-						contactChannels[c] = channels
-					}
-					for channel := range state.Channels {
-						channels[channel] = struct{}{}
-					}
-				}
+	for contact, channels := range contactChannels {
+		for chType := range channels {
+			hr := &incident.HistoryRow{
+				ContactID:                 types.Int{NullInt64: sql.NullInt64{Int64: contact.ID, Valid: true}},
+				Type:                      incident.Notified,
+				ChannelType:               utils.ToDBString(chType),
+				CausedByIncidentHistoryID: causedByIncidentHistoryId,
 			}
-		}
 
-		for contact, channels := range contactChannels {
-			for chType := range channels {
-				hr := &incident.HistoryRow{
-					ContactID:                 types.Int{NullInt64: sql.NullInt64{Int64: contact.ID, Valid: true}},
-					Type:                      incident.Notified,
-					ChannelType:               utils.ToDBString(chType),
-					CausedByIncidentHistoryID: causedByIncidentHistoryId,
-				}
+			log.Printf("[%s %s] notify %q via %q", obj.DisplayName(), currentIncident.String(), contact.FullName, chType)
 
-				log.Printf("[%s %s] notify %q via %q", obj.DisplayName(), currentIncident.String(), contact.FullName, chType)
+			_, err = currentIncident.AddHistory(&incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID}, hr, false)
+			if err != nil {
+				log.Println(err)
+			}
 
-				_, err = currentIncident.AddHistory(&incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID}, hr, false)
-				if err != nil {
-					log.Println(err)
-				}
+			chConf := l.runtimeConfig.Channels[chType]
+			if chConf == nil {
+				log.Printf("ERROR: could not find config for channel type %q", chType)
+				continue
+			}
 
-				chConf := l.runtimeConfig.Channels[chType]
-				if chConf == nil {
-					log.Printf("ERROR: could not find config for channel type %q", chType)
-					continue
-				}
+			plugin, err := chConf.GetPlugin()
+			if err != nil {
+				log.Printf("ERROR: could initialize channel type %q: %v", chType, err)
+				continue
+			}
 
-				plugin, err := chConf.GetPlugin()
-				if err != nil {
-					log.Printf("ERROR: could initialize channel type %q: %v", chType, err)
-					continue
-				}
-
-				err = plugin.Send(contact, currentIncident, &ev)
-				if err != nil {
-					log.Printf("ERROR: failed to send via channel type %q: %v", chType, err)
-					continue
-				}
+			err = plugin.Send(contact, currentIncident, &ev)
+			if err != nil {
+				log.Printf("ERROR: failed to send via channel type %q: %v", chType, err)
+				continue
 			}
 		}
 	}
