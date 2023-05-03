@@ -25,10 +25,11 @@ type Incident struct {
 	RecoveredAt      time.Time
 	SeverityBySource map[int64]event.Severity
 
-	State      map[ruleID]map[escalationID]*EscalationState
-	Events     []*event.Event
-	Recipients map[RecipientKey]*RecipientState
-	History    []*HistoryEntry
+	EscalationState map[escalationID]*EscalationState
+	Rules           map[ruleID]struct{}
+	Events          []*event.Event
+	Recipients      map[RecipientKey]*RecipientState
+	History         []*HistoryEntry
 
 	incidentRowID int64
 
@@ -364,6 +365,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, source int64, create bool) 
 			}
 		} else {
 			currentIncident.SeverityBySource = make(map[int64]event.Severity)
+			currentIncident.EscalationState = make(map[escalationID]*EscalationState)
 			currentIncident.incidentRowID = ir.ID
 			currentIncident.StartedAt = ir.StartedAt.Time()
 
@@ -380,6 +382,17 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, source int64, create bool) 
 
 			for _, source := range sources {
 				currentIncident.SeverityBySource[sourceSeverity.SourceID] = source.Severity
+			}
+
+			state := &EscalationState{}
+			var states []*EscalationState
+			err = db.Select(&states, db.Rebind(db.BuildSelectStmt(state, state)+` WHERE "incident_id" = ?`), ir.ID)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to fetch incident rule escalation state: %s", err)
+			}
+
+			for _, state := range states {
+				currentIncident.EscalationState[state.RuleEscalationID] = state
 			}
 		}
 
