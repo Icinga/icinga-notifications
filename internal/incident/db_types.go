@@ -74,11 +74,9 @@ func (e *EventRow) TableName() string {
 
 // ContactRow represents a single incident contact database entry.
 type ContactRow struct {
-	IncidentID     int64       `db:"incident_id"`
-	ContactID      types.Int   `db:"contact_id"`
-	ContactGroupID types.Int   `db:"contactgroup_id"`
-	ScheduleID     types.Int   `db:"schedule_id"`
-	Role           ContactRole `db:"role"`
+	IncidentID   int64 `db:"incident_id"`
+	RecipientKey `db:",inline"`
+	Role         ContactRole `db:"role"`
 }
 
 // TableName implements the contracts.TableNamer interface.
@@ -99,7 +97,7 @@ func (c *ContactRow) Constraint() string {
 		return "key_incident_contact_contact"
 	}
 
-	if c.ContactGroupID.Valid {
+	if c.GroupID.Valid {
 		return "key_incident_contact_contactgroup"
 	}
 
