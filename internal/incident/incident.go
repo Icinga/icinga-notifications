@@ -40,19 +40,19 @@ type Incident struct {
 
 type RecipientKey struct {
 	// Only one of the members is allowed to be a non-zero value.
-	ContactID  int64
-	GroupID    int64
-	ScheduleID int64
+	ContactID  types.Int `db:"contact_id"`
+	GroupID    types.Int `db:"contactgroup_id"`
+	ScheduleID types.Int `db:"schedule_id"`
 }
 
 func RecipientToKey(r recipient.Recipient) RecipientKey {
 	switch v := r.(type) {
 	case *recipient.Contact:
-		return RecipientKey{ContactID: v.ID}
+		return RecipientKey{ContactID: utils.ToDBInt(v.ID)}
 	case *recipient.Group:
-		return RecipientKey{GroupID: v.ID}
+		return RecipientKey{GroupID: utils.ToDBInt(v.ID)}
 	case *recipient.Schedule:
-		return RecipientKey{ScheduleID: v.ID}
+		return RecipientKey{ScheduleID: utils.ToDBInt(v.ID)}
 	default:
 		panic(fmt.Sprintf("unexpected recipient type: %T", r))
 	}
@@ -152,7 +152,7 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 		case *recipient.Contact:
 			cr.ContactID = types.Int{NullInt64: sql.NullInt64{Int64: c.ID, Valid: true}}
 		case *recipient.Group:
-			cr.ContactGroupID = types.Int{NullInt64: sql.NullInt64{Int64: c.ID, Valid: true}}
+			cr.GroupID = types.Int{NullInt64: sql.NullInt64{Int64: c.ID, Valid: true}}
 		case *recipient.Schedule:
 			cr.ScheduleID = types.Int{NullInt64: sql.NullInt64{Int64: c.ID, Valid: true}}
 		}
@@ -174,7 +174,7 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 				hr := &HistoryRow{
 					IncidentID:       i.incidentRowID,
 					ContactID:        cr.ContactID,
-					ContactGroupID:   cr.ContactGroupID,
+					ContactGroupID:   cr.GroupID,
 					ScheduleID:       cr.ScheduleID,
 					Type:             RecipientRoleChanged,
 					NewRecipientRole: newRole,
@@ -366,6 +366,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, source int64, create bool) 
 		} else {
 			currentIncident.SeverityBySource = make(map[int64]event.Severity)
 			currentIncident.EscalationState = make(map[escalationID]*EscalationState)
+			currentIncident.Recipients = make(map[RecipientKey]*RecipientState)
 			currentIncident.incidentRowID = ir.ID
 			currentIncident.StartedAt = ir.StartedAt.Time()
 
@@ -393,6 +394,18 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, source int64, create bool) 
 
 			for _, state := range states {
 				currentIncident.EscalationState[state.RuleEscalationID] = state
+			}
+
+			contact := &ContactRow{}
+			var contacts []*ContactRow
+			err = db.Select(&contacts, db.Rebind(db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), ir.ID)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to fetch incident recipients: %s", err)
+			}
+
+			for _, contact := range contacts {
+				key := RecipientKey{ContactID: contact.ContactID, GroupID: contact.GroupID, ScheduleID: contact.ScheduleID}
+				currentIncident.Recipients[key] = &RecipientState{Role: contact.Role, Channels: map[string]struct{}{}}
 			}
 		}
 

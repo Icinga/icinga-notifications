@@ -348,8 +348,17 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	for escalationID, state := range currentIncident.EscalationState {
+		escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
+		for _, escalationRecipient := range escalation.Recipients {
+			rk := incident.RecipientKey{ContactID: escalationRecipient.ContactID, GroupID: escalationRecipient.GroupID}
+			for recipientKey, state := range currentIncident.Recipients {
+				if recipientKey == rk {
+					state.Channels[escalationRecipient.ChannelType] = struct{}{}
+				}
+			}
+		}
+
 		if state.TriggeredAt.Time().IsZero() {
-			escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
 			if escalation == nil {
 				continue
 			}
