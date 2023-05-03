@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
+	"github.com/icinga/icingadb/pkg/types"
 	"github.com/icinga/noma/internal/timeperiod"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
@@ -29,13 +30,13 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 	}
 
 	type TimeperiodEntry struct {
-		ID           int64          `db:"id"`
-		TimePeriodID int64          `db:"timeperiod_id"`
-		StartTime    int64          `db:"start_time"`
-		EndTime      int64          `db:"end_time"`
-		Timezone     string         `db:"timezone"`
-		RRule        sql.NullString `db:"rrule"`
-		Description  sql.NullString `db:"description"`
+		ID           int64           `db:"id"`
+		TimePeriodID int64           `db:"timeperiod_id"`
+		StartTime    types.UnixMilli `db:"start_time"`
+		EndTime      types.UnixMilli `db:"end_time"`
+		Timezone     string          `db:"timezone"`
+		RRule        sql.NullString  `db:"rrule"`
+		Description  sql.NullString  `db:"description"`
 	}
 
 	var entryPtr *TimeperiodEntry
@@ -74,8 +75,8 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 		}
 
 		entry := &timeperiod.Entry{
-			Start:    time.Unix(row.StartTime, 0).In(loc),
-			End:      time.Unix(row.EndTime, 0).In(loc),
+			Start:    row.StartTime.Time().Truncate(time.Second).In(loc),
+			End:      row.EndTime.Time().Truncate(time.Second).In(loc),
 			TimeZone: row.Timezone,
 		}
 
