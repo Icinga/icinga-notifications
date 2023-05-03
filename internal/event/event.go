@@ -26,6 +26,11 @@ type Event struct {
 	ID int64
 }
 
+const (
+	TypeState           = "state"
+	TypeAcknowledgement = "acknowledgement"
+)
+
 func (e *Event) String() string {
 	return fmt.Sprintf("[time=%s type=%q severity=%s]", e.Time, e.Type, e.Severity.String())
 }

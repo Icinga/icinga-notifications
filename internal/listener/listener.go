@@ -65,12 +65,11 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if ev.Severity != event.SeverityNone {
-		const stateType = "state"
 		if ev.Type == "" {
-			ev.Type = stateType
-		} else if ev.Type != stateType {
+			ev.Type = event.TypeState
+		} else if ev.Type != event.TypeState {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = fmt.Fprintf(w, "ignoring invalid event: if 'severity' is set, 'type' must not be set or set to %q\n", stateType)
+			_, _ = fmt.Fprintf(w, "ignoring invalid event: if 'severity' is set, 'type' must not be set or set to %q\n", event.TypeState)
 			return
 		}
 	}
@@ -108,12 +107,15 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	_, _ = fmt.Fprintln(w, ev.String())
 
 	if ev.Severity == event.SeverityNone {
-		// not a state event
-		_, _ = fmt.Fprintf(w, "not a state event, ignoring for now\n")
-		return
+		if ev.Type != event.TypeAcknowledgement {
+			// not a state event
+			_, _ = fmt.Fprintf(w, "not a state/acknowledgement event, ignoring for now\n")
+			return
+		}
 	}
 
-	currentIncident, created, err := incident.GetCurrent(l.db, obj, ev.Severity != event.SeverityOK)
+	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
+	currentIncident, created, err := incident.GetCurrent(l.db, obj, createIncident)
 	if err != nil {
 		_, _ = fmt.Fprintln(w, err)
 
@@ -122,6 +124,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if currentIncident == nil {
+		if ev.Type == event.TypeAcknowledgement {
+			msg := fmt.Sprintf("%q doesn't have active incident. Ignoring acknowledgement event from source %d", obj.DisplayName(), ev.SourceId)
+			_, _ = fmt.Fprintln(w, msg)
+
+			log.Println(msg)
+			return
+		}
+
 		if ev.Severity != event.SeverityOK {
 			panic("non-OK state but no incident was created")
 		}
@@ -157,6 +167,17 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	log.Println("processing event")
+
+	if ev.Type == event.TypeAcknowledgement {
+		err := l.ProcessAcknowledgementEvent(currentIncident, ev)
+		if err != nil {
+			_, _ = fmt.Fprintln(w, err)
+
+			log.Println(err)
+		}
+
+		return
+	}
 
 	oldIncidentSeverity := currentIncident.Severity()
 
@@ -512,4 +533,53 @@ func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(encodedIncidents)
+}
+
+func (l *Listener) ProcessAcknowledgementEvent(i *incident.Incident, ev event.Event) error {
+	l.runtimeConfig.RLock()
+	defer l.runtimeConfig.RUnlock()
+
+	contact := l.runtimeConfig.GetContact(ev.Username)
+	if contact == nil {
+		return fmt.Errorf("unknown acknowledgment author %q", ev.Username)
+	}
+
+	recipientKey := recipient.ToKey(contact)
+	state := i.Recipients[recipientKey]
+	oldRole := incident.RoleNone
+	newRole := incident.RoleManager
+	if state != nil {
+		oldRole = state.Role
+
+		if oldRole == incident.RoleManager {
+			// The user is already a manager
+			return nil
+		}
+	} else {
+		i.Recipients[recipientKey] = &incident.RecipientState{Role: newRole}
+	}
+
+	log.Printf("[%s %s] contact %q role changed from %s to %s", i.Object.DisplayName(), i.String(), contact.String(), oldRole.String(), newRole.String())
+
+	hr := &incident.HistoryRow{
+		Key:              recipientKey,
+		Type:             incident.RecipientRoleChanged,
+		NewRecipientRole: newRole,
+		OldRecipientRole: oldRole,
+	}
+
+	_, err := i.AddHistory(&incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID, Message: ev.Message}, hr, false)
+	if err != nil {
+		return err
+	}
+
+	cr := &incident.ContactRow{IncidentID: hr.IncidentID, Key: recipientKey, Role: newRole}
+
+	stmt, _ := l.db.BuildUpsertStmt(cr)
+	_, err = l.db.NamedExec(stmt, cr)
+	if err != nil {
+		return fmt.Errorf("failed to upsert incident contact %s: %s", contact.String(), err)
+	}
+
+	return nil
 }
