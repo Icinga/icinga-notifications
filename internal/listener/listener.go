@@ -193,9 +193,15 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		if ev.Severity != event.SeverityOK {
-			currentIncident.SeverityBySource[ev.SourceId] = ev.Severity
-		} else {
+		err := currentIncident.AddSourceSeverity(ev.Severity, ev.SourceId)
+		if err != nil {
+			_, _ = fmt.Fprintln(w, err)
+
+			log.Println(err)
+			return
+		}
+
+		if ev.Severity == event.SeverityOK {
 			delete(currentIncident.SeverityBySource, ev.SourceId)
 		}
 	}

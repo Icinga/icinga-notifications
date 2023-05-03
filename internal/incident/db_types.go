@@ -50,6 +50,17 @@ func (i *IncidentRow) Sync(db *icingadb.DB, upsert bool) error {
 	return nil
 }
 
+type SourceSeverity struct {
+	IncidentID int64          `db:"incident_id"`
+	SourceID   int64          `db:"source_id"`
+	Severity   event.Severity `db:"severity"`
+}
+
+// TableName implements the contracts.TableNamer interface.
+func (s *SourceSeverity) TableName() string {
+	return "incident_source"
+}
+
 // EventRow represents a single incident event database entry.
 type EventRow struct {
 	IncidentID int64 `db:"incident_id"`
