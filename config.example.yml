@@ -3,6 +3,9 @@
 #listen: "192.0.2.1:5680"
 #listen: "[2001:db8::1]:5680"
 
+# Set credentials for some debug endpoints provided via HTTP. If not set, these are disabled.
+#debug-password: "put-something-secret-here"
+
 database:
   type: pgsql
   host: /run/postgresql

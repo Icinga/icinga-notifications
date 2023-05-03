@@ -1,6 +1,7 @@
 package listener
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -18,25 +19,26 @@ import (
 )
 
 type Listener struct {
-	address       string
+	configFile    *config.ConfigFile
 	db            *icingadb.DB
 	runtimeConfig *config.RuntimeConfig
 	mux           http.ServeMux
 }
 
-func NewListener(db *icingadb.DB, address string, runtimeConfig *config.RuntimeConfig) *Listener {
+func NewListener(db *icingadb.DB, configFile *config.ConfigFile, runtimeConfig *config.RuntimeConfig) *Listener {
 	l := &Listener{
-		address:       address,
+		configFile:    configFile,
 		db:            db,
 		runtimeConfig: runtimeConfig,
 	}
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
+	l.mux.HandleFunc("/dump-config", l.DumpConfig)
 	return l
 }
 
 func (l *Listener) Run() error {
-	log.Printf("Starting listener on http://%s", l.address)
-	return http.ListenAndServe(l.address, &l.mux)
+	log.Printf("Starting listener on http://%s", l.configFile.Listen)
+	return http.ListenAndServe(l.configFile.Listen, &l.mux)
 }
 
 func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
@@ -408,4 +410,25 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	_, _ = fmt.Fprintln(w)
+}
+
+func (l *Listener) DumpConfig(w http.ResponseWriter, r *http.Request) {
+	expectedPassword := l.configFile.DebugPassword
+	if expectedPassword == "" {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = fmt.Fprintln(w, "config dump disables, no debug-password set in config")
+		return
+	}
+
+	_, providedPassword, _ := r.BasicAuth()
+	if subtle.ConstantTimeCompare([]byte(expectedPassword), []byte(providedPassword)) != 1 {
+		w.Header().Set("WWW-Authenticate", `Basic realm="debug"`)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = fmt.Fprintln(w, "please provide the debug-password as basic auth credentials (user is ignored)")
+		return
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(&l.runtimeConfig.ConfigSet)
 }

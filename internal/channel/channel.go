@@ -11,7 +11,7 @@ type Channel struct {
 	ID     int64  `db:"id"`
 	Name   string `db:"name"`
 	Type   string `db:"type"`
-	Config string `db:"config"`
+	Config string `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
 
 	plugin Plugin
 }
