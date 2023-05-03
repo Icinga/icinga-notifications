@@ -8,8 +8,9 @@ import (
 )
 
 type ConfigFile struct {
-	Listen   string                  `yaml:"listen" default:"localhost:5680"`
-	Database icingadbConfig.Database `yaml:"database"`
+	Listen        string                  `yaml:"listen" default:"localhost:5680"`
+	DebugPassword string                  `yaml:"debug-password"`
+	Database      icingadbConfig.Database `yaml:"database"`
 }
 
 func FromFile(path string) (*ConfigFile, error) {
