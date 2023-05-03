@@ -244,6 +244,21 @@ func (i *Incident) AddRuleMatchedHistory(r *rule.Rule, history *HistoryEntry) (t
 	return i.AddHistory(history, hr, true)
 }
 
+func (i *Incident) AddSourceSeverity(severity event.Severity, sourceID int64) error {
+	i.SeverityBySource[sourceID] = severity
+
+	sourceSeverity := &SourceSeverity{
+		IncidentID: i.incidentRowID,
+		SourceID:   sourceID,
+		Severity:   severity,
+	}
+
+	stmt, _ := i.db.BuildUpsertStmt(sourceSeverity)
+	_, err := i.db.NamedExec(stmt, sourceSeverity)
+
+	return err
+}
+
 type EscalationState struct {
 	IncidentID       int64           `db:"incident_id"`
 	RuleEscalationID int64           `db:"rule_escalation_id"`
@@ -349,11 +364,23 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, source int64, create bool) 
 			}
 		} else {
 			currentIncident.SeverityBySource = make(map[int64]event.Severity)
-
 			currentIncident.incidentRowID = ir.ID
 			currentIncident.StartedAt = ir.StartedAt.Time()
-			// TODO: The severity from the database might be originated from a source other than the current one!
-			currentIncident.SeverityBySource[source] = ir.Severity
+
+			sourceSeverity := &SourceSeverity{IncidentID: ir.ID}
+			var sources []SourceSeverity
+			err := db.Select(
+				&sources,
+				db.Rebind(db.BuildSelectStmt(sourceSeverity, sourceSeverity)+` WHERE "incident_id" = ? AND "severity" != ?`),
+				ir.ID, event.SeverityOK,
+			)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to fetch incident sources Severity: %s", err)
+			}
+
+			for _, source := range sources {
+				currentIncident.SeverityBySource[sourceSeverity.SourceID] = source.Severity
+			}
 		}
 
 		currentIncidents[obj] = currentIncident
@@ -379,8 +406,11 @@ func RemoveCurrent(obj *object.Object, history *HistoryEntry) error {
 	}
 
 	_, err = currentIncident.AddHistory(history, &HistoryRow{Type: Closed}, false)
+	if err != nil {
+		return fmt.Errorf("failed to add incident closed history: %s", err)
+	}
 
-	return err
+	return nil
 }
 
 var (
