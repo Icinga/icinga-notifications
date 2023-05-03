@@ -117,6 +117,18 @@ func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Escalation {
 	return nil
 }
 
+// GetContact returns *recipient.Contact by the given username.
+// Returns nil when the given username doesn't exist.
+func (r *RuntimeConfig) GetContact(username string) *recipient.Contact {
+	for _, contact := range r.Contacts {
+		if contact.Username.String == username {
+			return contact
+		}
+	}
+
+	return nil
+}
+
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
 	logger.Debug("fetching configuration from database")
 	start := time.Now()
