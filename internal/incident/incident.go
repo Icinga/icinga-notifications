@@ -347,22 +347,18 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 	created := false
 	currentIncident := currentIncidents[obj]
 
-	if create && currentIncident == nil {
+	if currentIncident == nil {
 		ir := &IncidentRow{}
-		currentIncident = &Incident{Object: obj, db: db}
+		incident := &Incident{Object: obj, db: db}
 		err := db.QueryRowx(db.Rebind(db.BuildSelectStmt(ir, ir)+` WHERE "object_id" = ? AND "recovered_at" IS NULL`), obj.ID).StructScan(ir)
-		if err != nil {
-			created = true
-
-			if err != sql.ErrNoRows {
-				return nil, false, fmt.Errorf("incident query failed with: %s", err)
-			}
-		} else {
-			currentIncident.SeverityBySource = make(map[int64]event.Severity)
-			currentIncident.EscalationState = make(map[escalationID]*EscalationState)
-			currentIncident.Recipients = make(map[RecipientKey]*RecipientState)
-			currentIncident.incidentRowID = ir.ID
-			currentIncident.StartedAt = ir.StartedAt.Time()
+		if err != nil && err != sql.ErrNoRows {
+			return nil, false, fmt.Errorf("incident query failed with: %s", err)
+		} else if err == nil {
+			incident.SeverityBySource = make(map[int64]event.Severity)
+			incident.EscalationState = make(map[escalationID]*EscalationState)
+			incident.Recipients = make(map[RecipientKey]*RecipientState)
+			incident.incidentRowID = ir.ID
+			incident.StartedAt = ir.StartedAt.Time()
 
 			sourceSeverity := &SourceSeverity{IncidentID: ir.ID}
 			var sources []SourceSeverity
@@ -376,7 +372,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 			}
 
 			for _, source := range sources {
-				currentIncident.SeverityBySource[sourceSeverity.SourceID] = source.Severity
+				incident.SeverityBySource[sourceSeverity.SourceID] = source.Severity
 			}
 
 			state := &EscalationState{}
@@ -387,7 +383,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 			}
 
 			for _, state := range states {
-				currentIncident.EscalationState[state.RuleEscalationID] = state
+				incident.EscalationState[state.RuleEscalationID] = state
 			}
 
 			contact := &ContactRow{}
@@ -399,11 +395,20 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 
 			for _, contact := range contacts {
 				key := RecipientKey{ContactID: contact.ContactID, GroupID: contact.GroupID, ScheduleID: contact.ScheduleID}
-				currentIncident.Recipients[key] = &RecipientState{Role: contact.Role, Channels: map[string]struct{}{}}
+				incident.Recipients[key] = &RecipientState{Role: contact.Role, Channels: map[string]struct{}{}}
 			}
+
+			currentIncident = incident
 		}
 
-		currentIncidents[obj] = currentIncident
+		if create && currentIncident == nil {
+			created = true
+			currentIncident = incident
+		}
+
+		if currentIncident != nil {
+			currentIncidents[obj] = currentIncident
+		}
 	}
 
 	return currentIncident, created, nil
