@@ -67,6 +67,16 @@ func ToDBString(value string) types.String {
 	return str
 }
 
+// ToDBInt transforms the given value to types.Int.
+func ToDBInt(value int64) types.Int {
+	val := types.Int{NullInt64: sql.NullInt64{Int64: value}}
+	if value != 0 {
+		val.Valid = true
+	}
+
+	return val
+}
+
 func RemoveIf[T any](slice []T, pred func(T) bool) []T {
 	n := len(slice)
 
