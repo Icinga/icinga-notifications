@@ -182,7 +182,9 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			NewSeverity: ev.Severity,
 			OldSeverity: oldSourceSeverity,
 		}
-		causedByIncidentHistoryId, err = currentIncident.AddHistory(&incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID}, hr, true)
+		causedByIncidentHistoryId, err = currentIncident.AddHistory(
+			&incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID, Message: ev.Message}, hr, true,
+		)
 		if err != nil {
 			_, _ = fmt.Fprintln(w, err)
 
