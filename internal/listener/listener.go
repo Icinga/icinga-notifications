@@ -305,7 +305,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	for rID, _ := range currentIncident.Rules {
+	for rID := range currentIncident.Rules {
 		r := l.runtimeConfig.Rules[rID]
 
 		if r == nil || !r.IsActive.Valid || !r.IsActive.Bool {
