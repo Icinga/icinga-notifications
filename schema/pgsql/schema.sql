@@ -8,7 +8,8 @@ CREATE TABLE contact (
     username text, -- reference to web user
     color varchar(7), -- hex color codes e.g #000000
 
-    CONSTRAINT pk_contact PRIMARY KEY (id)
+    CONSTRAINT pk_contact PRIMARY KEY (id),
+    UNIQUE (username)
 );
 
 CREATE TABLE contact_address (
