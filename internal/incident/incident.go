@@ -346,7 +346,7 @@ type RecipientState struct {
 	Channels map[string]struct{}
 }
 
-func GetCurrent(db *icingadb.DB, obj *object.Object, source int64, create bool) (*Incident, bool, error) {
+func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bool, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
 

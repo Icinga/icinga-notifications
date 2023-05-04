@@ -113,7 +113,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	currentIncident, created, err := incident.GetCurrent(l.db, obj, ev.SourceId, ev.Severity != event.SeverityOK)
+	currentIncident, created, err := incident.GetCurrent(l.db, obj, ev.Severity != event.SeverityOK)
 	if err != nil {
 		_, _ = fmt.Fprintln(w, err)
 
