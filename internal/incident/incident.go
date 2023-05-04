@@ -372,7 +372,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 			}
 
 			for _, source := range sources {
-				incident.SeverityBySource[sourceSeverity.SourceID] = source.Severity
+				incident.SeverityBySource[source.SourceID] = source.Severity
 			}
 
 			state := &EscalationState{}
