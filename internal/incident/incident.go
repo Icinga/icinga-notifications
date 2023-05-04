@@ -27,7 +27,6 @@ type Incident struct {
 
 	EscalationState map[escalationID]*EscalationState
 	Rules           map[ruleID]struct{}
-	Events          []*event.Event
 	Recipients      map[RecipientKey]*RecipientState
 	History         []*HistoryEntry
 
@@ -122,11 +121,8 @@ func (i *Incident) AddEscalationTriggered(state *EscalationState, history *Histo
 	return i.AddHistory(history, hr, true)
 }
 
-// AddEvent adds the given event to this incident events slice.
-// Inserts also incident history record to the database and returns an error on db failure.
+// AddEvent Inserts incident history record to the database and returns an error on db failure.
 func (i *Incident) AddEvent(db *icingadb.DB, ev *event.Event) error {
-	i.Events = append(i.Events, ev)
-
 	ie := &EventRow{IncidentID: i.incidentRowID, EventID: ev.ID}
 	stmt, _ := db.BuildInsertStmt(ie)
 	_, err := db.NamedExec(stmt, ie)
