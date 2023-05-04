@@ -105,6 +105,19 @@ func (r *RuntimeConfig) GetRecipient(k incident.RecipientKey) recipient.Recipien
 	return nil
 }
 
+// GetRuleEscalation returns a *rule.Escalation by the given id.
+// Returns nil if there is no rule escalation with given id.
+func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Escalation {
+	for _, r := range r.Rules {
+		escalation, ok := r.Escalations[escalationID]
+		if ok {
+			return escalation
+		}
+	}
+
+	return nil
+}
+
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
 	logger.Debug("fetching configuration from database")
 	start := time.Now()
