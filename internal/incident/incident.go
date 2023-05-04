@@ -84,7 +84,7 @@ func (i *Incident) AddHistory(history *HistoryEntry, historyRow *HistoryRow, fet
 	historyRow.IncidentID = i.incidentRowID
 	historyRow.Message = utils.ToDBString(history.Message)
 	historyRow.Time = types.UnixMilli(history.Time)
-	historyRow.EventID = types.Int{NullInt64: sql.NullInt64{Int64: history.EventRowID, Valid: true}}
+	historyRow.EventID = utils.ToDBInt(history.EventRowID)
 
 	stmt := utils.BuildInsertStmtWithout(i.db, historyRow, "id")
 	if fetchId {
@@ -93,7 +93,7 @@ func (i *Incident) AddHistory(history *HistoryEntry, historyRow *HistoryRow, fet
 			return types.Int{}, err
 		}
 
-		return types.Int{NullInt64: sql.NullInt64{Int64: historyId, Valid: true}}, nil
+		return utils.ToDBInt(historyId), nil
 	} else {
 		_, err := i.db.NamedExec(stmt, historyRow)
 		if err != nil {
@@ -114,7 +114,7 @@ func (i *Incident) AddEscalationTriggered(state *EscalationState, history *Histo
 	}
 
 	hr := &HistoryRow{
-		RuleEscalationID:          types.Int{NullInt64: sql.NullInt64{Int64: state.RuleEscalationID, Valid: true}},
+		RuleEscalationID:          utils.ToDBInt(state.RuleEscalationID),
 		Type:                      EscalationTriggered,
 		CausedByIncidentHistoryID: history.CausedByIncidentHistoryId,
 	}
@@ -148,16 +148,10 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 	for _, escalationRecipient := range escalation.Recipients {
 		r := escalationRecipient.Recipient
 		cr := &ContactRow{IncidentID: i.incidentRowID, Role: newRole}
-		switch c := r.(type) {
-		case *recipient.Contact:
-			cr.ContactID = types.Int{NullInt64: sql.NullInt64{Int64: c.ID, Valid: true}}
-		case *recipient.Group:
-			cr.GroupID = types.Int{NullInt64: sql.NullInt64{Int64: c.ID, Valid: true}}
-		case *recipient.Schedule:
-			cr.ScheduleID = types.Int{NullInt64: sql.NullInt64{Int64: c.ID, Valid: true}}
-		}
 
 		recipientKey := RecipientToKey(r)
+		cr.RecipientKey = recipientKey
+
 		state, ok := i.Recipients[recipientKey]
 		if !ok {
 			i.Recipients[recipientKey] = &RecipientState{
@@ -237,7 +231,7 @@ func (i *Incident) AddRuleMatchedHistory(r *rule.Rule, history *HistoryEntry) (t
 	}
 
 	hr := &HistoryRow{
-		RuleID:                    types.Int{NullInt64: sql.NullInt64{Int64: r.ID, Valid: true}},
+		RuleID:                    utils.ToDBInt(r.ID),
 		Type:                      RuleMatched,
 		CausedByIncidentHistoryID: history.CausedByIncidentHistoryId,
 	}
