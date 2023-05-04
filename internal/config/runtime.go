@@ -85,18 +85,18 @@ func (r *RuntimeConfig) RUnlock() {
 
 func (r *RuntimeConfig) GetRecipient(k incident.RecipientKey) recipient.Recipient {
 	// Note: be careful to return nil for non-existent IDs instead of (*T)(nil) as (*T)(nil) != nil.
-	if k.ContactID != 0 {
-		c := r.Contacts[k.ContactID]
+	if k.ContactID.Valid {
+		c := r.Contacts[k.ContactID.Int64]
 		if c != nil {
 			return c
 		}
-	} else if k.GroupID != 0 {
-		g := r.Groups[k.GroupID]
+	} else if k.GroupID.Valid {
+		g := r.Groups[k.GroupID.Int64]
 		if g != nil {
 			return g
 		}
-	} else if k.ScheduleID != 0 {
-		s := r.Schedules[k.ScheduleID]
+	} else if k.ScheduleID.Valid {
+		s := r.Schedules[k.ScheduleID.Int64]
 		if s != nil {
 			return s
 		}
