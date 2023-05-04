@@ -2,7 +2,6 @@ package listener
 
 import (
 	"crypto/subtle"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"github.com/icinga/icingadb/pkg/icingadb"
@@ -178,7 +177,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		)
 
 		hr := &incident.HistoryRow{
-			EventID:     types.Int{NullInt64: sql.NullInt64{Int64: ev.ID, Valid: true}},
+			EventID:     utils.ToDBInt(ev.ID),
 			Type:        incident.SourceSeverityChanged,
 			NewSeverity: ev.Severity,
 			OldSeverity: oldSourceSeverity,
@@ -420,7 +419,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	for contact, channels := range contactChannels {
 		for chType := range channels {
 			hr := &incident.HistoryRow{
-				ContactID:                 types.Int{NullInt64: sql.NullInt64{Int64: contact.ID, Valid: true}},
+				ContactID:                 utils.ToDBInt(contact.ID),
 				Type:                      incident.Notified,
 				ChannelType:               utils.ToDBString(chType),
 				CausedByIncidentHistoryID: causedByIncidentHistoryId,
