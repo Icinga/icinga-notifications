@@ -20,6 +20,19 @@ type Key struct {
 	ScheduleID types.Int `db:"schedule_id"`
 }
 
+// MarshalText implements the encoding.TextMarshaler interface to allow JSON marshaling of map[Key]T.
+func (r Key) MarshalText() (text []byte, err error) {
+	if r.ContactID.Valid {
+		return []byte(fmt.Sprintf("contact_id=%d", r.ContactID.Int64)), nil
+	} else if r.GroupID.Valid {
+		return []byte(fmt.Sprintf("group_id=%d", r.GroupID.Int64)), nil
+	} else if r.ScheduleID.Valid {
+		return []byte(fmt.Sprintf("schedule_id=%d", r.ScheduleID.Int64)), nil
+	} else {
+		return nil, nil
+	}
+}
+
 func ToKey(r Recipient) Key {
 	switch v := r.(type) {
 	case *Contact:

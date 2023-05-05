@@ -33,6 +33,7 @@ func NewListener(db *icingadb.DB, configFile *config.ConfigFile, runtimeConfig *
 	}
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
 	l.mux.HandleFunc("/dump-config", l.DumpConfig)
+	l.mux.HandleFunc("/dump-incidents", l.DumpIncidents)
 	return l
 }
 
@@ -455,12 +456,15 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	_, _ = fmt.Fprintln(w)
 }
 
-func (l *Listener) DumpConfig(w http.ResponseWriter, r *http.Request) {
+// checkDebugPassword checks if the valid debug password was provided. If there is no password configured or the
+// supplied password is incorrect, it sends an error code and returns false. True is returned if access is allowed.
+func (l *Listener) checkDebugPassword(w http.ResponseWriter, r *http.Request) bool {
 	expectedPassword := l.configFile.DebugPassword
 	if expectedPassword == "" {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = fmt.Fprintln(w, "config dump disables, no debug-password set in config")
-		return
+
+		return false
 	}
 
 	_, providedPassword, _ := r.BasicAuth()
@@ -468,10 +472,52 @@ func (l *Listener) DumpConfig(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="debug"`)
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = fmt.Fprintln(w, "please provide the debug-password as basic auth credentials (user is ignored)")
+		return false
+	}
+
+	return true
+}
+
+func (l *Listener) DumpConfig(w http.ResponseWriter, r *http.Request) {
+	if !l.checkDebugPassword(w, r) {
 		return
 	}
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(&l.runtimeConfig.ConfigSet)
+}
+
+func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
+	if !l.checkDebugPassword(w, r) {
+		return
+	}
+
+	incidents := incident.GetCurrentIncidents()
+	encodedIncidents := make(map[int64]json.RawMessage)
+
+	// Extra function to ensure that unlocking happens in all cases, including panic.
+	encode := func(incident *incident.Incident) json.RawMessage {
+		incident.Lock()
+		defer incident.Unlock()
+
+		encoded, err := json.Marshal(incident)
+		if err != nil {
+			encoded, err = json.Marshal(err.Error())
+			if err != nil {
+				// If a string can't be marshalled, something is very wrong.
+				panic(err)
+			}
+		}
+
+		return encoded
+	}
+
+	for id, incident := range incidents {
+		encodedIncidents[id] = encode(incident)
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(encodedIncidents)
 }
