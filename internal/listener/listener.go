@@ -400,6 +400,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				Time:                      state.TriggeredAt,
 				EventID:                   utils.ToDBInt(ev.ID),
 				RuleEscalationID:          utils.ToDBInt(state.RuleEscalationID),
+				RuleID:                    utils.ToDBInt(r.ID),
 				Type:                      incident.EscalationTriggered,
 				CausedByIncidentHistoryID: causedByIncidentHistoryId,
 			}
