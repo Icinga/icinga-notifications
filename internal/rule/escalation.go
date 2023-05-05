@@ -63,9 +63,9 @@ func (e *Escalation) TableName() string {
 }
 
 type EscalationRecipient struct {
-	ID            int64  `db:"id"`
-	EscalationID  int64  `db:"rule_escalation_id"`
-	ChannelType   string `db:"channel_type"`
+	ID            int64          `db:"id"`
+	EscalationID  int64          `db:"rule_escalation_id"`
+	ChannelType   sql.NullString `db:"channel_type"`
 	recipient.Key `db:",inline"`
 	Recipient     recipient.Recipient
 }
@@ -76,5 +76,5 @@ func (r *EscalationRecipient) TableName() string {
 
 type ContactChannelPair struct {
 	Contact     *recipient.Contact
-	ChannelType string
+	ChannelType sql.NullString
 }

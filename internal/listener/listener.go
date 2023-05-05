@@ -369,9 +369,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		currentIncident.Recipients = make(map[recipient.Key]*incident.RecipientState)
 	}
 
+	managed := currentIncident.HasManager()
+
+	contactChannels := make(map[*recipient.Contact]map[string]struct{})
+
+	escalationRecipients := make(map[recipient.Key]bool)
 	for escalationID, state := range currentIncident.EscalationState {
+		escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
 		if state.TriggeredAt.Time().IsZero() {
-			escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
 			if escalation == nil {
 				continue
 			}
@@ -404,29 +409,43 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				return
 			}
 		}
-	}
 
-	managed := currentIncident.HasManager()
-
-	contactChannels := make(map[*recipient.Contact]map[string]struct{})
-
-	for escalationID := range currentIncident.EscalationState {
-		escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
 		for _, escalationRecipient := range escalation.Recipients {
-			if state := currentIncident.Recipients[escalationRecipient.Key]; state != nil {
-				r := l.runtimeConfig.GetRecipient(escalationRecipient.Key)
-				if r == nil {
-					continue
-				}
+			state := currentIncident.Recipients[escalationRecipient.Key]
+			if state == nil {
+				continue
+			}
 
-				if !managed || state.Role > incident.RoleRecipient {
-					for _, c := range r.GetContactsAt(ev.Time) {
-						if contactChannels[c] == nil {
-							contactChannels[c] = make(map[string]struct{})
-						}
-						contactChannels[c][escalationRecipient.ChannelType] = struct{}{}
+			escalationRecipients[escalationRecipient.Key] = true
+
+			if !managed || state.Role > incident.RoleRecipient {
+				for _, c := range escalationRecipient.Recipient.GetContactsAt(ev.Time) {
+					if contactChannels[c] == nil {
+						contactChannels[c] = make(map[string]struct{})
+					}
+					if escalationRecipient.ChannelType.Valid {
+						contactChannels[c][escalationRecipient.ChannelType.String] = struct{}{}
+					} else {
+						contactChannels[c][c.DefaultChannel] = struct{}{}
 					}
 				}
+			}
+		}
+	}
+
+	for recipientKey, state := range currentIncident.Recipients {
+		r := l.runtimeConfig.GetRecipient(recipientKey)
+		if r == nil {
+			continue
+		}
+
+		isEscalationRecipient := escalationRecipients[recipientKey]
+		if !isEscalationRecipient && (!managed || state.Role > incident.RoleRecipient) {
+			for _, contact := range r.GetContactsAt(ev.Time) {
+				if contactChannels[contact] == nil {
+					contactChannels[contact] = make(map[string]struct{})
+				}
+				contactChannels[contact][contact.DefaultChannel] = struct{}{}
 			}
 		}
 	}

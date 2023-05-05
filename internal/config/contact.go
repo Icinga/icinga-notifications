@@ -55,6 +55,7 @@ func (r *RuntimeConfig) applyPendingContacts(logger *logging.Logger) {
 		} else if currentContact := r.Contacts[id]; currentContact != nil {
 			currentContact.FullName = pendingContact.FullName
 			currentContact.Username = pendingContact.Username
+			currentContact.DefaultChannel = pendingContact.DefaultChannel
 		} else {
 			r.Contacts[id] = pendingContact
 		}
