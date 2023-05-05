@@ -6,6 +6,7 @@ CREATE TABLE contact (
     id bigserial,
     full_name text NOT NULL,
     username text, -- reference to web user
+    default_channel text NOT NULL,
     color varchar(7), -- hex color codes e.g #000000
 
     CONSTRAINT pk_contact PRIMARY KEY (id),
@@ -184,7 +185,7 @@ CREATE TABLE rule_escalation_recipient (
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),
     schedule_id bigint REFERENCES schedule(id),
-    channel_type text NOT NULL,
+    channel_type text,
 
     CONSTRAINT pk_rule_escalation_recipient PRIMARY KEY (id),
 

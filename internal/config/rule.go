@@ -113,7 +113,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 		recipientLogger := logger.With(
 			zap.Int64("id", recipient.ID),
 			zap.Int64("escalation_id", recipient.EscalationID),
-			zap.String("channel_type", recipient.ChannelType))
+			zap.String("channel_type", recipient.ChannelType.String))
 
 		escalation := escalationsByID[recipient.EscalationID]
 		if escalation == nil {
@@ -168,7 +168,7 @@ func (r *RuntimeConfig) applyPendingRules(logger *logging.Logger) {
 					recipientLogger := logger.With(
 						zap.Int64("id", recipient.ID),
 						zap.Int64("escalation_id", recipient.EscalationID),
-						zap.String("channel_type", recipient.ChannelType))
+						zap.String("channel_type", recipient.ChannelType.String))
 
 					if recipient.ContactID.Valid {
 						id := recipient.ContactID.Int64

@@ -115,6 +115,10 @@ func (r *RuntimeConfig) debugVerifyContact(id int64, contact *recipient.Contact)
 		return fmt.Errorf("contact %p is inconsistent with RuntimeConfig.Contacts[%d] = %p", contact, id, other)
 	}
 
+	if contact.DefaultChannel == "" {
+		return fmt.Errorf("contact %q doesn't specify a default channel", contact)
+	}
+
 	for i, address := range contact.Addresses {
 		if address == nil {
 			return fmt.Errorf("Addresses[%d] is nil", i)
@@ -283,10 +287,6 @@ func (r *RuntimeConfig) debugVerifyRule(id int64, rule *rule.Rule) error {
 			if escalationRecpient.EscalationID != escalation.ID {
 				return fmt.Errorf("Escalation[%d].Recipients[%d].EscalationID = %d does not match Escalations[%d].ID = %d",
 					escalationID, i, escalationRecpient.EscalationID, escalationID, escalation.ID)
-			}
-
-			if escalationRecpient.ChannelType == "" {
-				return fmt.Errorf("Escalations[%d].Recipients[%d].ChannelType is empty", escalationID, i)
 			}
 
 			switch rec := escalationRecpient.Recipient.(type) {
