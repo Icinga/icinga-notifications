@@ -5,6 +5,7 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
 	"github.com/icinga/noma/internal/event"
+	"github.com/icinga/noma/internal/recipient"
 	"github.com/icinga/noma/internal/utils"
 )
 
@@ -74,9 +75,9 @@ func (e *EventRow) TableName() string {
 
 // ContactRow represents a single incident contact database entry.
 type ContactRow struct {
-	IncidentID   int64 `db:"incident_id"`
-	RecipientKey `db:",inline"`
-	Role         ContactRole `db:"role"`
+	IncidentID    int64 `db:"incident_id"`
+	recipient.Key `db:",inline"`
+	Role          ContactRole `db:"role"`
 }
 
 // TableName implements the contracts.TableNamer interface.
