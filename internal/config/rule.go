@@ -75,9 +75,13 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 		}
 
 		if escalation.ConditionExpr.Valid {
-			// TODO: implement condition parsing
-			escalationLogger.Warnw("ignoring escalation with condition (not yet implemented)")
-			continue
+			cond, err := filter.Parse(escalation.ConditionExpr.String)
+			if err != nil {
+				escalationLogger.Warnw("ignoring escalation, failed to parse condition", zap.Error(err))
+				continue
+			}
+
+			escalation.Condition = cond
 		}
 
 		if escalation.FallbackForID.Valid {
