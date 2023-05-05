@@ -305,19 +305,28 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		// Check if new escalation stages are reached
 		for _, escalation := range r.Escalations {
 			if _, ok := states[escalation.ID]; !ok {
-				filter := escalation.Condition
-				cond := &rule.EscalationFilter{
-					IncidentAge:      ev.Time.Sub(currentIncident.StartedAt),
-					IncidentSeverity: currentIncident.Severity(),
+				matched := false
+
+				if escalation.Condition == nil {
+					matched = true
+				} else {
+					cond := &rule.EscalationFilter{
+						IncidentAge:      ev.Time.Sub(currentIncident.StartedAt),
+						IncidentSeverity: currentIncident.Severity(),
+					}
+
+					matched, err = escalation.Condition.Eval(cond)
+					if err != nil {
+						log.Printf(
+							"[%s %s] rule %q failed to evaulte escalation %q condition: %s",
+							obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName(), err,
+						)
+
+						matched = false
+					}
 				}
 
-				matched, err := filter.Eval(cond)
-				if err != nil {
-					log.Printf(
-						"[%s %s] rule %q failed to evaulte escalation %q condition: %s",
-						obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName(), err,
-					)
-				} else if matched {
+				if matched {
 					states[escalation.ID] = new(incident.EscalationState)
 				}
 			}
