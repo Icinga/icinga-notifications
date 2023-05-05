@@ -76,7 +76,7 @@ func (i *Incident) AddHistory(history *HistoryEntry, historyRow *HistoryRow, fet
 	} else {
 		_, err := i.db.NamedExec(stmt, historyRow)
 		if err != nil {
-			return types.Int{}, fmt.Errorf("failed to insert incident history: %s\n", err)
+			return types.Int{}, fmt.Errorf("failed to insert incident history: %w", err)
 		}
 	}
 
@@ -89,7 +89,7 @@ func (i *Incident) AddEscalationTriggered(state *EscalationState, history *Histo
 	stmt, _ := i.db.BuildUpsertStmt(state)
 	_, err := i.db.NamedExec(stmt, state)
 	if err != nil {
-		return types.Int{}, fmt.Errorf("failed to insert incident rule escalation state: %s", err)
+		return types.Int{}, fmt.Errorf("failed to insert incident rule escalation state: %w", err)
 	}
 
 	hr := &HistoryRow{
@@ -107,7 +107,7 @@ func (i *Incident) AddEvent(db *icingadb.DB, ev *event.Event) error {
 	stmt, _ := db.BuildInsertStmt(ie)
 	_, err := db.NamedExec(stmt, ie)
 	if err != nil {
-		return fmt.Errorf("failed to insert incident event: %s", err)
+		return fmt.Errorf("failed to insert incident event: %w", err)
 	}
 
 	return nil
@@ -163,7 +163,7 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 		stmt, _ := i.db.BuildUpsertStmt(cr)
 		_, err := i.db.NamedExec(stmt, cr)
 		if err != nil {
-			return fmt.Errorf("failed to upsert incident contact %s: %s", r, err)
+			return fmt.Errorf("failed to upsert incident contact %s: %w", r, err)
 		}
 	}
 
@@ -203,7 +203,7 @@ func (i *Incident) AddRuleMatchedHistory(r *rule.Rule, history *HistoryEntry) (t
 	stmt, _ := i.db.BuildUpsertStmt(rr)
 	_, err := i.db.NamedExec(stmt, rr)
 	if err != nil {
-		return types.Int{}, fmt.Errorf("failed to insert incident rule: %s", err)
+		return types.Int{}, fmt.Errorf("failed to insert incident rule: %w", err)
 	}
 
 	hr := &HistoryRow{
@@ -328,7 +328,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 		incident := &Incident{Object: obj, db: db}
 		err := db.QueryRowx(db.Rebind(db.BuildSelectStmt(ir, ir)+` WHERE "object_id" = ? AND "recovered_at" IS NULL`), obj.ID).StructScan(ir)
 		if err != nil && err != sql.ErrNoRows {
-			return nil, false, fmt.Errorf("incident query failed with: %s", err)
+			return nil, false, fmt.Errorf("incident query failed with: %w", err)
 		} else if err == nil {
 			incident.SeverityBySource = make(map[int64]event.Severity)
 			incident.EscalationState = make(map[escalationID]*EscalationState)
@@ -344,7 +344,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 				ir.ID, event.SeverityOK,
 			)
 			if err != nil {
-				return nil, false, fmt.Errorf("failed to fetch incident sources Severity: %s", err)
+				return nil, false, fmt.Errorf("failed to fetch incident sources Severity: %w", err)
 			}
 
 			for _, source := range sources {
@@ -355,7 +355,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 			var states []*EscalationState
 			err = db.Select(&states, db.Rebind(db.BuildSelectStmt(state, state)+` WHERE "incident_id" = ?`), ir.ID)
 			if err != nil {
-				return nil, false, fmt.Errorf("failed to fetch incident rule escalation state: %s", err)
+				return nil, false, fmt.Errorf("failed to fetch incident rule escalation state: %w", err)
 			}
 
 			for _, state := range states {
@@ -366,7 +366,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 			var contacts []*ContactRow
 			err = db.Select(&contacts, db.Rebind(db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), ir.ID)
 			if err != nil {
-				return nil, false, fmt.Errorf("failed to fetch incident recipients: %s", err)
+				return nil, false, fmt.Errorf("failed to fetch incident recipients: %w", err)
 			}
 
 			for _, contact := range contacts {
@@ -403,12 +403,12 @@ func RemoveCurrent(obj *object.Object, history *HistoryEntry) error {
 	incidentRow := &IncidentRow{ID: currentIncident.incidentRowID, RecoveredAt: types.UnixMilli(currentIncident.RecoveredAt)}
 	_, err := currentIncident.db.NamedExec(`UPDATE "incident" SET "recovered_at" = :recovered_at WHERE id = :id`, incidentRow)
 	if err != nil {
-		return fmt.Errorf("failed to update current incident: %s", err)
+		return fmt.Errorf("failed to update current incident: %w", err)
 	}
 
 	_, err = currentIncident.AddHistory(history, &HistoryRow{Type: Closed}, false)
 	if err != nil {
-		return fmt.Errorf("failed to add incident closed history: %s", err)
+		return fmt.Errorf("failed to add incident closed history: %w", err)
 	}
 
 	return nil
