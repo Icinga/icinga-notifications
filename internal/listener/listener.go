@@ -100,19 +100,20 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if ev.Severity == event.SeverityNone {
+		if ev.Type != event.TypeAcknowledgement {
+			// It's neither a state nor an acknowledgement event.
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintf(w, "received not a state/acknowledgement event, ignoring\n")
+			return
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintln(w, "received event")
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintln(w, obj.String())
 	_, _ = fmt.Fprintln(w, ev.String())
-
-	if ev.Severity == event.SeverityNone {
-		if ev.Type != event.TypeAcknowledgement {
-			// not a state event
-			_, _ = fmt.Fprintf(w, "not a state/acknowledgement event, ignoring for now\n")
-			return
-		}
-	}
 
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
 	currentIncident, created, err := incident.GetCurrent(l.db, obj, createIncident)
