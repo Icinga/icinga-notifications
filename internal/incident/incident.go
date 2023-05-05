@@ -28,7 +28,6 @@ type Incident struct {
 	EscalationState map[escalationID]*EscalationState
 	Rules           map[ruleID]struct{}
 	Recipients      map[recipient.Key]*RecipientState
-	History         []*HistoryEntry
 
 	incidentRowID int64
 
@@ -61,13 +60,8 @@ func (i *Incident) HasManager() bool {
 	return false
 }
 
-func (i *Incident) AddHistory(history *HistoryEntry, historyRow *HistoryRow, fetchId bool) (types.Int, error) {
-	i.History = append(i.History, history)
-
+func (i *Incident) AddHistory(historyRow *HistoryRow, fetchId bool) (types.Int, error) {
 	historyRow.IncidentID = i.incidentRowID
-	historyRow.Message = utils.ToDBString(history.Message)
-	historyRow.Time = types.UnixMilli(history.Time)
-	historyRow.EventID = utils.ToDBInt(history.EventRowID)
 
 	stmt := utils.BuildInsertStmtWithout(i.db, historyRow, "id")
 	if fetchId {
@@ -87,7 +81,7 @@ func (i *Incident) AddHistory(history *HistoryEntry, historyRow *HistoryRow, fet
 	return types.Int{}, nil
 }
 
-func (i *Incident) AddEscalationTriggered(state *EscalationState, history *HistoryEntry) (types.Int, error) {
+func (i *Incident) AddEscalationTriggered(state *EscalationState, hr *HistoryRow) (types.Int, error) {
 	state.IncidentID = i.incidentRowID
 
 	stmt, _ := i.db.BuildUpsertStmt(state)
@@ -96,13 +90,7 @@ func (i *Incident) AddEscalationTriggered(state *EscalationState, history *Histo
 		return types.Int{}, fmt.Errorf("failed to insert incident rule escalation state: %w", err)
 	}
 
-	hr := &HistoryRow{
-		RuleEscalationID:          utils.ToDBInt(state.RuleEscalationID),
-		Type:                      EscalationTriggered,
-		CausedByIncidentHistoryID: history.CausedByIncidentHistoryId,
-	}
-
-	return i.AddHistory(history, hr, true)
+	return i.AddHistory(hr, true)
 }
 
 // AddEvent Inserts incident history record to the database and returns an error on db failure.
@@ -144,13 +132,15 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 
 				hr := &HistoryRow{
 					IncidentID:       i.incidentRowID,
+					EventID:          utils.ToDBInt(eventId),
 					Key:              cr.Key,
+					Time:             types.UnixMilli(t),
 					Type:             RecipientRoleChanged,
 					NewRecipientRole: newRole,
 					OldRecipientRole: oldRole,
 				}
 
-				_, err := i.AddHistory(&HistoryEntry{Time: t, EventRowID: eventId}, hr, false)
+				_, err := i.AddHistory(hr, false)
 				if err != nil {
 					return err
 				}
@@ -196,7 +186,7 @@ func (i *Incident) Sync() error {
 
 // AddRuleMatchedHistory syncs the given *rule.Rule and history entry to the database.
 // Returns an error on database failure.
-func (i *Incident) AddRuleMatchedHistory(r *rule.Rule, history *HistoryEntry) (types.Int, error) {
+func (i *Incident) AddRuleMatchedHistory(r *rule.Rule, hr *HistoryRow) (types.Int, error) {
 	rr := &RuleRow{IncidentID: i.incidentRowID, RuleID: r.ID}
 	stmt, _ := i.db.BuildUpsertStmt(rr)
 	_, err := i.db.NamedExec(stmt, rr)
@@ -204,13 +194,7 @@ func (i *Incident) AddRuleMatchedHistory(r *rule.Rule, history *HistoryEntry) (t
 		return types.Int{}, fmt.Errorf("failed to insert incident rule: %w", err)
 	}
 
-	hr := &HistoryRow{
-		RuleID:                    utils.ToDBInt(r.ID),
-		Type:                      RuleMatched,
-		CausedByIncidentHistoryID: history.CausedByIncidentHistoryId,
-	}
-
-	return i.AddHistory(history, hr, true)
+	return i.AddHistory(hr, true)
 }
 
 func (i *Incident) AddSourceSeverity(severity event.Severity, sourceID int64) error {
@@ -237,13 +221,6 @@ type EscalationState struct {
 // TableName implements the contracts.TableNamer interface.
 func (e *EscalationState) TableName() string {
 	return "incident_rule_escalation_state"
-}
-
-type HistoryEntry struct {
-	Time                      time.Time
-	Message                   string
-	CausedByIncidentHistoryId types.Int
-	EventRowID                int64
 }
 
 type ContactRole int
@@ -386,7 +363,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 	return currentIncident, created, nil
 }
 
-func RemoveCurrent(obj *object.Object, history *HistoryEntry) error {
+func RemoveCurrent(obj *object.Object, hr *HistoryRow) error {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
 
@@ -402,10 +379,7 @@ func RemoveCurrent(obj *object.Object, history *HistoryEntry) error {
 		return fmt.Errorf("failed to update current incident: %w", err)
 	}
 
-	_, err = currentIncident.AddHistory(history, &HistoryRow{Type: Closed}, false)
-	if err != nil {
-		return fmt.Errorf("failed to add incident closed history: %w", err)
-	}
+	_, err = currentIncident.AddHistory(hr, false)
 
 	return nil
 }
