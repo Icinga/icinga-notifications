@@ -6,7 +6,6 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/noma/internal/channel"
-	"github.com/icinga/noma/internal/incident"
 	"github.com/icinga/noma/internal/recipient"
 	"github.com/icinga/noma/internal/rule"
 	"github.com/icinga/noma/internal/timeperiod"
@@ -83,7 +82,7 @@ func (r *RuntimeConfig) RUnlock() {
 	r.mu.RUnlock()
 }
 
-func (r *RuntimeConfig) GetRecipient(k incident.RecipientKey) recipient.Recipient {
+func (r *RuntimeConfig) GetRecipient(k recipient.Key) recipient.Recipient {
 	// Note: be careful to return nil for non-existent IDs instead of (*T)(nil) as (*T)(nil) != nil.
 	if k.ContactID.Valid {
 		c := r.Contacts[k.ContactID.Int64]

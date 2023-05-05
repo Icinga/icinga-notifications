@@ -343,13 +343,13 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if currentIncident.Recipients == nil {
-		currentIncident.Recipients = make(map[incident.RecipientKey]*incident.RecipientState)
+		currentIncident.Recipients = make(map[recipient.Key]*incident.RecipientState)
 	}
 
 	for escalationID, state := range currentIncident.EscalationState {
 		escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
 		for _, escalationRecipient := range escalation.Recipients {
-			rk := incident.RecipientKey{ContactID: escalationRecipient.ContactID, GroupID: escalationRecipient.GroupID}
+			rk := recipient.Key{ContactID: escalationRecipient.ContactID, GroupID: escalationRecipient.GroupID}
 			for recipientKey, state := range currentIncident.Recipients {
 				if recipientKey == rk {
 					state.Channels[escalationRecipient.ChannelType] = struct{}{}

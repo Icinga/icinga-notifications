@@ -27,7 +27,7 @@ type Incident struct {
 
 	EscalationState map[escalationID]*EscalationState
 	Rules           map[ruleID]struct{}
-	Recipients      map[RecipientKey]*RecipientState
+	Recipients      map[recipient.Key]*RecipientState
 	History         []*HistoryEntry
 
 	incidentRowID int64
@@ -35,26 +35,6 @@ type Incident struct {
 	db *icingadb.DB
 
 	sync.Mutex
-}
-
-type RecipientKey struct {
-	// Only one of the members is allowed to be a non-zero value.
-	ContactID  types.Int `db:"contact_id"`
-	GroupID    types.Int `db:"contactgroup_id"`
-	ScheduleID types.Int `db:"schedule_id"`
-}
-
-func RecipientToKey(r recipient.Recipient) RecipientKey {
-	switch v := r.(type) {
-	case *recipient.Contact:
-		return RecipientKey{ContactID: utils.ToDBInt(v.ID)}
-	case *recipient.Group:
-		return RecipientKey{GroupID: utils.ToDBInt(v.ID)}
-	case *recipient.Schedule:
-		return RecipientKey{ScheduleID: utils.ToDBInt(v.ID)}
-	default:
-		panic(fmt.Sprintf("unexpected recipient type: %T", r))
-	}
 }
 
 func (i *Incident) Severity() event.Severity {
@@ -145,8 +125,8 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 		r := escalationRecipient.Recipient
 		cr := &ContactRow{IncidentID: i.incidentRowID, Role: newRole}
 
-		recipientKey := RecipientToKey(r)
-		cr.RecipientKey = recipientKey
+		recipientKey := recipient.ToKey(r)
+		cr.Key = recipientKey
 
 		state, ok := i.Recipients[recipientKey]
 		if !ok {
@@ -352,7 +332,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 		} else if err == nil {
 			incident.SeverityBySource = make(map[int64]event.Severity)
 			incident.EscalationState = make(map[escalationID]*EscalationState)
-			incident.Recipients = make(map[RecipientKey]*RecipientState)
+			incident.Recipients = make(map[recipient.Key]*RecipientState)
 			incident.incidentRowID = ir.ID
 			incident.StartedAt = ir.StartedAt.Time()
 
@@ -390,7 +370,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 			}
 
 			for _, contact := range contacts {
-				key := RecipientKey{ContactID: contact.ContactID, GroupID: contact.GroupID, ScheduleID: contact.ScheduleID}
+				key := recipient.Key{ContactID: contact.ContactID, GroupID: contact.GroupID, ScheduleID: contact.ScheduleID}
 				incident.Recipients[key] = &RecipientState{Role: contact.Role, Channels: map[string]struct{}{}}
 			}
 
