@@ -152,7 +152,7 @@ func (loe *LessThanOrEqual) Eval(filterable Filterable) (bool, error) {
 type GreaterThan Condition
 
 func (g *GreaterThan) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLess(g.column, g.value)
+	match, err := filterable.EvalLessOrEqual(g.column, g.value)
 	if err != nil {
 		return false, err
 	}
@@ -163,7 +163,7 @@ func (g *GreaterThan) Eval(filterable Filterable) (bool, error) {
 type GreaterThanOrEqual Condition
 
 func (goe *GreaterThanOrEqual) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLessOrEqual(goe.column, goe.value)
+	match, err := filterable.EvalLess(goe.column, goe.value)
 	if err != nil {
 		return false, err
 	}
