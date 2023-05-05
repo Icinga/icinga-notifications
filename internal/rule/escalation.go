@@ -2,7 +2,6 @@ package rule
 
 import (
 	"database/sql"
-	"github.com/icinga/icingadb/pkg/types"
 	"github.com/icinga/noma/internal/filter"
 	"github.com/icinga/noma/internal/recipient"
 	"strings"
@@ -64,13 +63,11 @@ func (e *Escalation) TableName() string {
 }
 
 type EscalationRecipient struct {
-	ID           int64     `db:"id"`
-	EscalationID int64     `db:"rule_escalation_id"`
-	ChannelType  string    `db:"channel_type"`
-	ContactID    types.Int `db:"contact_id"`
-	GroupID      types.Int `db:"contactgroup_id"`
-	ScheduleID   types.Int `db:"schedule_id"`
-	Recipient    recipient.Recipient
+	ID            int64  `db:"id"`
+	EscalationID  int64  `db:"rule_escalation_id"`
+	ChannelType   string `db:"channel_type"`
+	recipient.Key `db:",inline"`
+	Recipient     recipient.Recipient
 }
 
 func (r *EscalationRecipient) TableName() string {

@@ -130,10 +130,7 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 
 		state, ok := i.Recipients[recipientKey]
 		if !ok {
-			i.Recipients[recipientKey] = &RecipientState{
-				Role:     newRole,
-				Channels: map[string]struct{}{escalationRecipient.ChannelType: {}},
-			}
+			i.Recipients[recipientKey] = &RecipientState{Role: newRole}
 		} else {
 			if state.Role < newRole {
 				oldRole := state.Role
@@ -156,7 +153,6 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 					return err
 				}
 			}
-			state.Channels[escalationRecipient.ChannelType] = struct{}{}
 			cr.Role = state.Role
 		}
 
@@ -312,8 +308,7 @@ func (c *ContactRole) String() string {
 }
 
 type RecipientState struct {
-	Role     ContactRole
-	Channels map[string]struct{}
+	Role ContactRole
 }
 
 func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bool, error) {
@@ -370,8 +365,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 			}
 
 			for _, contact := range contacts {
-				key := recipient.Key{ContactID: contact.ContactID, GroupID: contact.GroupID, ScheduleID: contact.ScheduleID}
-				incident.Recipients[key] = &RecipientState{Role: contact.Role, Channels: map[string]struct{}{}}
+				incident.Recipients[contact.Key] = &RecipientState{Role: contact.Role}
 			}
 
 			currentIncident = incident

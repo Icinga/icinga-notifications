@@ -348,17 +348,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	for escalationID, state := range currentIncident.EscalationState {
-		escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
-		for _, escalationRecipient := range escalation.Recipients {
-			rk := recipient.Key{ContactID: escalationRecipient.ContactID, GroupID: escalationRecipient.GroupID}
-			for recipientKey, state := range currentIncident.Recipients {
-				if recipientKey == rk {
-					state.Channels[escalationRecipient.ChannelType] = struct{}{}
-				}
-			}
-		}
-
 		if state.TriggeredAt.Time().IsZero() {
+			escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
 			if escalation == nil {
 				continue
 			}
@@ -397,21 +388,22 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	contactChannels := make(map[*recipient.Contact]map[string]struct{})
 
-	for recipientKey, state := range currentIncident.Recipients {
-		if !managed || state.Role > incident.RoleRecipient {
-			r := l.runtimeConfig.GetRecipient(recipientKey)
-			if r == nil {
-				continue
-			}
-
-			for _, c := range r.GetContactsAt(ev.Time) {
-				channels := contactChannels[c]
-				if channels == nil {
-					channels = make(map[string]struct{})
-					contactChannels[c] = channels
+	for escalationID := range currentIncident.EscalationState {
+		escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
+		for _, escalationRecipient := range escalation.Recipients {
+			if state := currentIncident.Recipients[escalationRecipient.Key]; state != nil {
+				r := l.runtimeConfig.GetRecipient(escalationRecipient.Key)
+				if r == nil {
+					continue
 				}
-				for channel := range state.Channels {
-					channels[channel] = struct{}{}
+
+				if !managed || state.Role > incident.RoleRecipient {
+					for _, c := range r.GetContactsAt(ev.Time) {
+						if contactChannels[c] == nil {
+							contactChannels[c] = make(map[string]struct{})
+						}
+						contactChannels[c][escalationRecipient.ChannelType] = struct{}{}
+					}
 				}
 			}
 		}
