@@ -414,6 +414,18 @@ func RemoveCurrent(obj *object.Object, history *HistoryEntry) error {
 	return nil
 }
 
+// GetCurrentIncidents returns a map of all incidents for debugging purposes.
+func GetCurrentIncidents() map[int64]*Incident {
+	currentIncidentsMu.Lock()
+	defer currentIncidentsMu.Unlock()
+
+	m := make(map[int64]*Incident)
+	for _, incident := range currentIncidents {
+		m[incident.incidentRowID] = incident
+	}
+	return m
+}
+
 var (
 	currentIncidents   = make(map[*object.Object]*Incident)
 	currentIncidentsMu sync.Mutex
