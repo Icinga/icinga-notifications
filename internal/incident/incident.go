@@ -37,6 +37,10 @@ type Incident struct {
 	sync.Mutex
 }
 
+func (i *Incident) ID() int64 {
+	return i.incidentRowID
+}
+
 func (i *Incident) Severity() event.Severity {
 	maxSeverity := event.SeverityOK
 	for _, s := range i.SeverityBySource {

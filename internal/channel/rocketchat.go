@@ -32,11 +32,13 @@ func NewRocketChat(config string) (Plugin, error) {
 	return r, nil
 }
 
-func (r *RocketChat) Send(contact *recipient.Contact, incident *incident.Incident, event *event.Event) error {
+func (r *RocketChat) Send(contact *recipient.Contact, incident *incident.Incident, event *event.Event, icingaweb2Url string) error {
 	log.Printf("rocketchat: contact=%v incident=%v event=%v", contact, incident, event)
 
 	var output bytes.Buffer
-	FormatMessage(&output, incident, event)
+	_, _ = fmt.Fprintf(&output, "[#%d] %s %s is %s\n\n", incident.ID(), event.Type, incident.Object.DisplayName(), event.Severity.String())
+
+	FormatMessage(&output, incident, event, icingaweb2Url)
 
 	var roomId string
 	for _, address := range contact.Addresses {
