@@ -118,13 +118,11 @@ func (r *RuleRow) TableName() string {
 
 // HistoryRow represents a single incident history database entry.
 type HistoryRow struct {
-	ID                        int64            `db:"id"`
-	IncidentID                int64            `db:"incident_id"`
-	RuleEscalationID          types.Int        `db:"rule_escalation_id"`
-	EventID                   types.Int        `db:"event_id"`
-	ContactID                 types.Int        `db:"contact_id"`
-	ContactGroupID            types.Int        `db:"contactgroup_id"`
-	ScheduleID                types.Int        `db:"schedule_id"`
+	ID                        int64     `db:"id"`
+	IncidentID                int64     `db:"incident_id"`
+	RuleEscalationID          types.Int `db:"rule_escalation_id"`
+	EventID                   types.Int `db:"event_id"`
+	recipient.Key             `db:",inline"`
 	RuleID                    types.Int        `db:"rule_id"`
 	CausedByIncidentHistoryID types.Int        `db:"caused_by_incident_history_id"`
 	Time                      types.UnixMilli  `db:"time"`

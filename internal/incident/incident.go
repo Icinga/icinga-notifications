@@ -140,9 +140,7 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 
 				hr := &HistoryRow{
 					IncidentID:       i.incidentRowID,
-					ContactID:        cr.ContactID,
-					ContactGroupID:   cr.GroupID,
-					ScheduleID:       cr.ScheduleID,
+					Key:              cr.Key,
 					Type:             RecipientRoleChanged,
 					NewRecipientRole: newRole,
 					OldRecipientRole: oldRole,
