@@ -57,7 +57,7 @@ func NewEMail(config string) (Plugin, error) {
 	return e, nil
 }
 
-func (e *EMail) Send(contact *recipient.Contact, incident *incident.Incident, event *event.Event) error {
+func (e *EMail) Send(contact *recipient.Contact, incident *incident.Incident, event *event.Event, icingaweb2Url string) error {
 	log.Printf("email: contact=%v incident=%v event=%v", contact, incident, event)
 
 	var to []string
@@ -73,9 +73,9 @@ func (e *EMail) Send(contact *recipient.Contact, incident *incident.Incident, ev
 
 	var msg bytes.Buffer
 	_, _ = fmt.Fprintf(&msg, "To: %s\n", strings.Join(to, ","))
-	_, _ = fmt.Fprintf(&msg, "Subject: %s %s is %s\n\n", event.Type, incident.Object.DisplayName(), event.Severity.String())
+	_, _ = fmt.Fprintf(&msg, "Subject: [#%d] %s %s is %s\n\n", incident.ID(), event.Type, incident.Object.DisplayName(), event.Severity.String())
 
-	FormatMessage(&msg, incident, event)
+	FormatMessage(&msg, incident, event, icingaweb2Url)
 
 	err := smtp.SendMail(e.GetServer(), nil, e.config.From, to, bytes.ReplaceAll(msg.Bytes(), []byte("\n"), []byte("\r\n")))
 	if err != nil {

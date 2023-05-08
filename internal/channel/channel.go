@@ -39,7 +39,7 @@ func (c *Channel) ResetPlugin() {
 }
 
 type Plugin interface {
-	Send(contact *recipient.Contact, incident *incident.Incident, event *event.Event) error
+	Send(contact *recipient.Contact, incident *incident.Incident, event *event.Event, icingaweb2Url string) error
 }
 
 type NewFunc func(config string) (Plugin, error)

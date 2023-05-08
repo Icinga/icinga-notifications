@@ -459,7 +459,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				continue
 			}
 
-			err = plugin.Send(contact, currentIncident, &ev)
+			err = plugin.Send(contact, currentIncident, &ev, l.configFile.Icingaweb2URL)
 			if err != nil {
 				log.Printf("ERROR: failed to send via channel type %q: %v", chType, err)
 				continue
