@@ -412,7 +412,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	for contact, channels := range contactChannels {
 		for chType := range channels {
 			hr := &incident.HistoryRow{
-				ContactID:                 utils.ToDBInt(contact.ID),
+				Key:                       recipient.ToKey(contact),
 				Type:                      incident.Notified,
 				ChannelType:               utils.ToDBString(chType),
 				CausedByIncidentHistoryID: causedByIncidentHistoryId,
