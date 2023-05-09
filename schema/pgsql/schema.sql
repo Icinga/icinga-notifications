@@ -7,7 +7,7 @@ CREATE TABLE contact (
     full_name text NOT NULL,
     username text, -- reference to web user
     default_channel text NOT NULL,
-    color varchar(7), -- hex color codes e.g #000000
+    color varchar(7) NOT NULL, -- hex color codes e.g #000000
 
     CONSTRAINT pk_contact PRIMARY KEY (id),
     UNIQUE (username)
@@ -26,7 +26,7 @@ CREATE TABLE contact_address (
 CREATE TABLE contactgroup (
     id bigserial,
     name text NOT NULL,
-    color varchar(7), -- hex color codes e.g #000000
+    color varchar(7) NOT NULL, -- hex color codes e.g #000000
 
     CONSTRAINT pk_contactgroup PRIMARY KEY (id)
 );
