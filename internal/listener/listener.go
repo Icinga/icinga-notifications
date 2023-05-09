@@ -74,6 +74,15 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
+	if ev.Severity == event.SeverityNone {
+		if ev.Type != event.TypeAcknowledgement {
+			// It's neither a state nor an acknowledgement event.
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprintf(w, "received not a state/acknowledgement event, ignoring\n")
+			return
+		}
+	}
+
 	obj, err := object.FromTags(l.db, ev.Tags)
 	if err != nil {
 		log.Println(err)
@@ -98,15 +107,6 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err.Error())
 		return
-	}
-
-	if ev.Severity == event.SeverityNone {
-		if ev.Type != event.TypeAcknowledgement {
-			// It's neither a state nor an acknowledgement event.
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = fmt.Fprintf(w, "received not a state/acknowledgement event, ignoring\n")
-			return
-		}
 	}
 
 	w.WriteHeader(http.StatusOK)
