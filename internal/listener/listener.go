@@ -191,6 +191,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		oldSourceSeverity = event.SeverityOK
 	}
 
+	if oldSourceSeverity == ev.Severity {
+		msg := fmt.Sprintf("%s: ignoring superfluous %q state event from source %d", obj.DisplayName(), ev.Severity.String(), ev.SourceId)
+		_, _ = fmt.Fprintln(w, msg)
+
+		log.Println(msg)
+		return
+	}
+
 	var causedByIncidentHistoryId types.Int
 	if oldSourceSeverity != ev.Severity {
 		log.Printf(
