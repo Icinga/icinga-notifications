@@ -2,22 +2,19 @@ package config
 
 import (
 	"context"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/noma/internal/recipient"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"log"
 )
 
-func (r *RuntimeConfig) fetchContacts(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchContacts(ctx context.Context, tx *sqlx.Tx) error {
 	var contactPtr *recipient.Contact
-	stmt := db.BuildSelectStmt(contactPtr, contactPtr)
-	log.Println(stmt)
+	stmt := r.db.BuildSelectStmt(contactPtr, contactPtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var contacts []*recipient.Contact
 	if err := tx.SelectContext(ctx, &contacts, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 
@@ -25,7 +22,7 @@ func (r *RuntimeConfig) fetchContacts(ctx context.Context, db *icingadb.DB, tx *
 	for _, c := range contacts {
 		contactsByID[c.ID] = c
 
-		logger.Debugw("loaded contact config",
+		r.logger.Debugw("loaded contact config",
 			zap.Int64("id", c.ID),
 			zap.String("name", c.FullName))
 	}
@@ -44,7 +41,7 @@ func (r *RuntimeConfig) fetchContacts(ctx context.Context, db *icingadb.DB, tx *
 	return nil
 }
 
-func (r *RuntimeConfig) applyPendingContacts(logger *logging.Logger) {
+func (r *RuntimeConfig) applyPendingContacts() {
 	if r.Contacts == nil {
 		r.Contacts = make(map[int64]*recipient.Contact)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/icinga/icingadb/pkg/icingadb"
+	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/types"
 	"github.com/icinga/noma/internal/config"
 	"github.com/icinga/noma/internal/event"
@@ -13,7 +14,6 @@ import (
 	"github.com/icinga/noma/internal/recipient"
 	"github.com/icinga/noma/internal/rule"
 	"github.com/icinga/noma/internal/utils"
-	"log"
 	"net/http"
 	"time"
 )
@@ -21,14 +21,16 @@ import (
 type Listener struct {
 	configFile    *config.ConfigFile
 	db            *icingadb.DB
+	logger        *logging.Logger
 	runtimeConfig *config.RuntimeConfig
 	mux           http.ServeMux
 }
 
-func NewListener(db *icingadb.DB, configFile *config.ConfigFile, runtimeConfig *config.RuntimeConfig) *Listener {
+func NewListener(db *icingadb.DB, configFile *config.ConfigFile, runtimeConfig *config.RuntimeConfig, logger *logging.Logger) *Listener {
 	l := &Listener{
 		configFile:    configFile,
 		db:            db,
+		logger:        logger,
 		runtimeConfig: runtimeConfig,
 	}
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
@@ -38,7 +40,7 @@ func NewListener(db *icingadb.DB, configFile *config.ConfigFile, runtimeConfig *
 }
 
 func (l *Listener) Run() error {
-	log.Printf("Starting listener on http://%s", l.configFile.Listen)
+	l.logger.Infof("Starting listener on http://%s", l.configFile.Listen)
 	return http.ListenAndServe(l.configFile.Listen, &l.mux)
 }
 
@@ -85,7 +87,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	obj, err := object.FromTags(l.db, ev.Tags)
 	if err != nil {
-		log.Println(err)
+		l.logger.Errorln(err)
 
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err.Error())
@@ -94,7 +96,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	err = obj.UpdateMetadata(ev.SourceId, ev.Name, utils.ToDBString(ev.URL), ev.ExtraTags)
 	if err != nil {
-		log.Println(err)
+		l.logger.Errorln(err)
 
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err.Error())
@@ -102,7 +104,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if err = ev.Sync(l.db, obj.ID); err != nil {
-		log.Println(err)
+		l.logger.Errorln(err)
 
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err.Error())
@@ -120,7 +122,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		_, _ = fmt.Fprintln(w, err)
 
-		log.Println(err)
+		l.logger.Errorln(err)
 		return
 	}
 
@@ -129,7 +131,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			msg := fmt.Sprintf("%q doesn't have active incident. Ignoring acknowledgement event from source %d", obj.DisplayName(), ev.SourceId)
 			_, _ = fmt.Fprintln(w, msg)
 
-			log.Println(msg)
+			l.logger.Warnln(msg)
 			return
 		}
 
@@ -137,7 +139,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			panic("non-OK state but no incident was created")
 		}
 
-		log.Printf("%s: ignoring superfluous OK state event from source %d", obj.DisplayName(), ev.SourceId)
+		l.logger.Warnf("%s: ignoring superfluous OK state event from source %d", obj.DisplayName(), ev.SourceId)
 		return
 	}
 
@@ -151,11 +153,11 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			_, _ = fmt.Fprintln(w, err)
 
-			log.Println(err)
+			l.logger.Errorln(err)
 			return
 		}
 
-		log.Printf("[%s %s] opened incident", obj.DisplayName(), currentIncident.String())
+		l.logger.Infof("[%s %s] opened incident", obj.DisplayName(), currentIncident.String())
 
 		historyRow := &incident.HistoryRow{Type: incident.Opened}
 		_, err = currentIncident.AddHistory(&incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID}, historyRow, false)
@@ -163,18 +165,18 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	err = currentIncident.AddEvent(l.db, &ev)
 	if err != nil {
-		log.Println(err)
+		l.logger.Errorln(err)
 		return
 	}
 
-	log.Println("processing event")
+	l.logger.Infof("processing event")
 
 	if ev.Type == event.TypeAcknowledgement {
 		err := l.ProcessAcknowledgementEvent(currentIncident, ev)
 		if err != nil {
 			_, _ = fmt.Fprintln(w, err)
 
-			log.Println(err)
+			l.logger.Errorln(err)
 		}
 
 		return
@@ -195,13 +197,13 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		msg := fmt.Sprintf("%s: ignoring superfluous %q state event from source %d", obj.DisplayName(), ev.Severity.String(), ev.SourceId)
 		_, _ = fmt.Fprintln(w, msg)
 
-		log.Println(msg)
+		l.logger.Warnln(msg)
 		return
 	}
 
 	var causedByIncidentHistoryId types.Int
 	if oldSourceSeverity != ev.Severity {
-		log.Printf(
+		l.logger.Infof(
 			"[%s %s] source %d severity changed from %s to %s",
 			obj.DisplayName(), currentIncident.String(), ev.SourceId,
 			oldSourceSeverity.String(), ev.Severity.String(),
@@ -219,7 +221,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			_, _ = fmt.Fprintln(w, err)
 
-			log.Println(err)
+			l.logger.Errorln(err)
 			return
 		}
 
@@ -227,7 +229,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			_, _ = fmt.Fprintln(w, err)
 
-			log.Println(err)
+			l.logger.Errorln(err)
 			return
 		}
 
@@ -239,7 +241,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	newIncidentSeverity := currentIncident.Severity()
 
 	if newIncidentSeverity != oldIncidentSeverity {
-		log.Printf(
+		l.logger.Infof(
 			"[%s %s] incident severity changed from %s to %s",
 			obj.DisplayName(), currentIncident.String(),
 			oldIncidentSeverity.String(), newIncidentSeverity.String(),
@@ -249,7 +251,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			_, _ = fmt.Fprintln(w, err)
 
-			log.Println(err)
+			l.logger.Errorln(err)
 			return
 		}
 
@@ -264,20 +266,20 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			_, _ = fmt.Fprintln(w, err)
 
-			log.Println(err)
+			l.logger.Errorln(err)
 			return
 		}
 	}
 
 	if newIncidentSeverity == event.SeverityOK {
 		currentIncident.RecoveredAt = ev.Time
-		log.Printf("[%s %s] all sources recovered, closing incident", obj.DisplayName(), currentIncident.String())
+		l.logger.Infof("[%s %s] all sources recovered, closing incident", obj.DisplayName(), currentIncident.String())
 
 		err = incident.RemoveCurrent(obj, &incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID})
 		if err != nil {
 			_, _ = fmt.Fprintln(w, err)
 
-			log.Println(err)
+			l.logger.Errorln(err)
 			return
 		}
 	}
@@ -304,7 +306,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			if r.ObjectFilter != nil {
 				matched, err := r.ObjectFilter.Eval(obj)
 				if err != nil {
-					log.Printf("[%s %s] rule %q failed to evaulte object filter: %s", obj.DisplayName(), currentIncident.String(), r.Name, err)
+					l.logger.Warnf("[%s %s] rule %q failed to evaluate object filter: %s", obj.DisplayName(), currentIncident.String(), r.Name, err)
 				}
 
 				if err != nil || !matched {
@@ -313,7 +315,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			}
 
 			currentIncident.Rules[r.ID] = struct{}{}
-			log.Printf("[%s %s] rule %q matches", obj.DisplayName(), currentIncident.String(), r.Name)
+			l.logger.Infof("[%s %s] rule %q matches", obj.DisplayName(), currentIncident.String(), r.Name)
 
 			history := &incident.HistoryEntry{
 				Time:                      ev.Time,
@@ -325,7 +327,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			if err != nil {
 				_, _ = fmt.Fprintln(w, err)
 
-				log.Println(err)
+				l.logger.Errorln(err)
 				return
 			}
 
@@ -357,7 +359,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 					matched, err = escalation.Condition.Eval(cond)
 					if err != nil {
-						log.Printf(
+						l.logger.Infof(
 							"[%s %s] rule %q failed to evaulte escalation %q condition: %s",
 							obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName(), err,
 						)
@@ -393,7 +395,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			state.TriggeredAt = types.UnixMilli(ev.Time)
 
 			r := l.runtimeConfig.Rules[escalation.RuleID]
-			log.Printf("[%s %s] rule %q reached escalation %q", obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName())
+			l.logger.Infof("[%s %s] rule %q reached escalation %q", obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName())
 
 			history := &incident.HistoryEntry{
 				Time:                      ev.Time,
@@ -405,7 +407,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			if err != nil {
 				_, _ = fmt.Fprintln(w, err)
 
-				log.Println(err)
+				l.logger.Errorln(err)
 				return
 			}
 
@@ -413,7 +415,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			if err != nil {
 				_, _ = fmt.Fprintln(w, err)
 
-				log.Println(err)
+				l.logger.Errorln(err)
 				return
 			}
 		}
@@ -467,28 +469,28 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				CausedByIncidentHistoryID: causedByIncidentHistoryId,
 			}
 
-			log.Printf("[%s %s] notify %q via %q", obj.DisplayName(), currentIncident.String(), contact.FullName, chType)
+			l.logger.Infof("[%s %s] notify %q via %q", obj.DisplayName(), currentIncident.String(), contact.FullName, chType)
 
 			_, err = currentIncident.AddHistory(&incident.HistoryEntry{Time: ev.Time, EventRowID: ev.ID}, hr, false)
 			if err != nil {
-				log.Println(err)
+				l.logger.Errorln(err)
 			}
 
 			chConf := l.runtimeConfig.Channels[chType]
 			if chConf == nil {
-				log.Printf("ERROR: could not find config for channel type %q", chType)
+				l.logger.Errorw("ERROR: could not find config for channel type %q", chType)
 				continue
 			}
 
 			plugin, err := chConf.GetPlugin()
 			if err != nil {
-				log.Printf("ERROR: could initialize channel type %q: %v", chType, err)
+				l.logger.Errorw("ERROR: could initialize channel type %q: %v", chType, err)
 				continue
 			}
 
 			err = plugin.Send(contact, currentIncident, &ev, l.configFile.Icingaweb2URL)
 			if err != nil {
-				log.Printf("ERROR: failed to send via channel type %q: %v", chType, err)
+				l.logger.Errorw("ERROR: failed to send via channel type %q: %v", chType, err)
 				continue
 			}
 		}
@@ -587,7 +589,7 @@ func (l *Listener) ProcessAcknowledgementEvent(i *incident.Incident, ev event.Ev
 		i.Recipients[recipientKey] = &incident.RecipientState{Role: newRole}
 	}
 
-	log.Printf("[%s %s] contact %q role changed from %s to %s", i.Object.DisplayName(), i.String(), contact.String(), oldRole.String(), newRole.String())
+	l.logger.Infof("[%s %s] contact %q role changed from %s to %s", i.Object.DisplayName(), i.String(), contact.String(), oldRole.String(), newRole.String())
 
 	hr := &incident.HistoryRow{
 		Key:              recipientKey,

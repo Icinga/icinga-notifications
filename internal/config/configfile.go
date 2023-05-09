@@ -12,6 +12,7 @@ type ConfigFile struct {
 	DebugPassword string                  `yaml:"debug-password"`
 	Icingaweb2URL string                  `yaml:"icingaweb2-url"`
 	Database      icingadbConfig.Database `yaml:"database"`
+	Logging       icingadbConfig.Logging  `yaml:"logging"`
 }
 
 func FromFile(path string) (*ConfigFile, error) {
@@ -40,5 +41,12 @@ func FromFile(path string) (*ConfigFile, error) {
 }
 
 func (c *ConfigFile) Validate() error {
-	return c.Database.Validate()
+	if err := c.Database.Validate(); err != nil {
+		return err
+	}
+	if err := c.Logging.Validate(); err != nil {
+		return err
+	}
+
+	return nil
 }

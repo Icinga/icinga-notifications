@@ -2,28 +2,25 @@ package config
 
 import (
 	"context"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/noma/internal/channel"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"log"
 )
 
-func (r *RuntimeConfig) fetchChannels(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchChannels(ctx context.Context, tx *sqlx.Tx) error {
 	var channelPtr *channel.Channel
-	stmt := db.BuildSelectStmt(channelPtr, channelPtr)
-	log.Println(stmt)
+	stmt := r.db.BuildSelectStmt(channelPtr, channelPtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var channels []*channel.Channel
 	if err := tx.SelectContext(ctx, &channels, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 
 	channelsByType := make(map[string]*channel.Channel)
 	for _, c := range channels {
-		channelLogger := logger.With(
+		channelLogger := r.logger.With(
 			zap.Int64("id", c.ID),
 			zap.String("name", c.Name),
 			zap.String("type", c.Type),
@@ -51,7 +48,7 @@ func (r *RuntimeConfig) fetchChannels(ctx context.Context, db *icingadb.DB, tx *
 	return nil
 }
 
-func (r *RuntimeConfig) applyPendingChannels(logger *logging.Logger) {
+func (r *RuntimeConfig) applyPendingChannels() {
 	if r.Channels == nil {
 		r.Channels = make(map[string]*channel.Channel)
 	}

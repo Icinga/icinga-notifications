@@ -2,22 +2,19 @@ package config
 
 import (
 	"context"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/noma/internal/recipient"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"log"
 )
 
-func (r *RuntimeConfig) fetchSchedules(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchSchedules(ctx context.Context, tx *sqlx.Tx) error {
 	var schedulePtr *recipient.Schedule
-	stmt := db.BuildSelectStmt(schedulePtr, schedulePtr)
-	log.Println(stmt)
+	stmt := r.db.BuildSelectStmt(schedulePtr, schedulePtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var schedules []*recipient.Schedule
 	if err := tx.SelectContext(ctx, &schedules, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 
@@ -25,23 +22,23 @@ func (r *RuntimeConfig) fetchSchedules(ctx context.Context, db *icingadb.DB, tx 
 	for _, g := range schedules {
 		schedulesById[g.ID] = g
 
-		logger.Debugw("loaded schedule config",
+		r.logger.Debugw("loaded schedule config",
 			zap.Int64("id", g.ID),
 			zap.String("name", g.Name))
 	}
 
 	var memberPtr *recipient.ScheduleMemberRow
-	stmt = db.BuildSelectStmt(memberPtr, memberPtr)
-	log.Println(stmt)
+	stmt = r.db.BuildSelectStmt(memberPtr, memberPtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var members []*recipient.ScheduleMemberRow
 	if err := tx.SelectContext(ctx, &members, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 
 	for _, member := range members {
-		memberLogger := makeScheduleMemberLogger(logger.SugaredLogger, member)
+		memberLogger := makeScheduleMemberLogger(r.logger.SugaredLogger, member)
 
 		if s := schedulesById[member.ScheduleID]; s == nil {
 			memberLogger.Warnw("ignoring schedule member for unknown schedule_id")
@@ -66,7 +63,7 @@ func (r *RuntimeConfig) fetchSchedules(ctx context.Context, db *icingadb.DB, tx 
 	return nil
 }
 
-func (r *RuntimeConfig) applyPendingSchedules(logger *logging.Logger) {
+func (r *RuntimeConfig) applyPendingSchedules() {
 	if r.Schedules == nil {
 		r.Schedules = make(map[int64]*recipient.Schedule)
 	}
@@ -76,7 +73,7 @@ func (r *RuntimeConfig) applyPendingSchedules(logger *logging.Logger) {
 			delete(r.Schedules, id)
 		} else {
 			for _, memberRow := range pendingSchedule.MemberRows {
-				memberLogger := makeScheduleMemberLogger(logger.SugaredLogger, memberRow)
+				memberLogger := makeScheduleMemberLogger(r.logger.SugaredLogger, memberRow)
 
 				period := r.TimePeriods[memberRow.TimePeriodID]
 				if period == nil {

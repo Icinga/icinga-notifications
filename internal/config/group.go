@@ -2,22 +2,19 @@ package config
 
 import (
 	"context"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/noma/internal/recipient"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"log"
 )
 
-func (r *RuntimeConfig) fetchGroups(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchGroups(ctx context.Context, tx *sqlx.Tx) error {
 	var groupPtr *recipient.Group
-	stmt := db.BuildSelectStmt(groupPtr, groupPtr)
-	log.Println(stmt)
+	stmt := r.db.BuildSelectStmt(groupPtr, groupPtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var groups []*recipient.Group
 	if err := tx.SelectContext(ctx, &groups, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 
@@ -25,7 +22,7 @@ func (r *RuntimeConfig) fetchGroups(ctx context.Context, db *icingadb.DB, tx *sq
 	for _, g := range groups {
 		groupsById[g.ID] = g
 
-		logger.Debugw("loaded group config",
+		r.logger.Debugw("loaded group config",
 			zap.Int64("id", g.ID),
 			zap.String("name", g.Name))
 	}
@@ -36,17 +33,17 @@ func (r *RuntimeConfig) fetchGroups(ctx context.Context, db *icingadb.DB, tx *sq
 	}
 
 	var memberPtr *ContactgroupMember
-	stmt = db.BuildSelectStmt(memberPtr, memberPtr)
-	log.Println(stmt)
+	stmt = r.db.BuildSelectStmt(memberPtr, memberPtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var members []*ContactgroupMember
 	if err := tx.SelectContext(ctx, &members, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 
 	for _, m := range members {
-		memberLogger := logger.With(
+		memberLogger := r.logger.With(
 			zap.Int64("contact_id", m.ContactId),
 			zap.Int64("contactgroup_id", m.GroupId),
 		)
@@ -75,7 +72,7 @@ func (r *RuntimeConfig) fetchGroups(ctx context.Context, db *icingadb.DB, tx *sq
 	return nil
 }
 
-func (r *RuntimeConfig) applyPendingGroups(logger *logging.Logger) {
+func (r *RuntimeConfig) applyPendingGroups() {
 	if r.Groups == nil {
 		r.Groups = make(map[int64]*recipient.Group)
 	}

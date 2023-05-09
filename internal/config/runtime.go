@@ -24,8 +24,15 @@ type RuntimeConfig struct {
 	// pending contains changes to config objects that are to be applied to the embedded live config.
 	pending ConfigSet
 
+	logger *logging.Logger
+	db     *icingadb.DB
+
 	// mu is used to synchronize access to the live ConfigSet.
 	mu sync.RWMutex
+}
+
+func NewRuntimeConfig(db *icingadb.DB, logger *logging.Logger) *RuntimeConfig {
+	return &RuntimeConfig{db: db, logger: logger}
 }
 
 type ConfigSet struct {
@@ -38,13 +45,13 @@ type ConfigSet struct {
 	Rules            map[int64]*rule.Rule
 }
 
-func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
-	err := r.fetchFromDatabase(ctx, db, logger)
+func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context) error {
+	err := r.fetchFromDatabase(ctx)
 	if err != nil {
 		return err
 	}
 
-	r.applyPending(logger)
+	r.applyPending()
 
 	err = r.debugVerify()
 	if err != nil {
@@ -54,17 +61,17 @@ func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context, db *icingadb.DB,
 	return nil
 }
 
-func (r *RuntimeConfig) PeriodicUpdates(ctx context.Context, db *icingadb.DB, logger *logging.Logger, interval time.Duration) {
+func (r *RuntimeConfig) PeriodicUpdates(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			logger.Debug("periodically updating config")
-			err := r.UpdateFromDatabase(ctx, db, logger)
+			r.logger.Debug("periodically updating config")
+			err := r.UpdateFromDatabase(ctx)
 			if err != nil {
-				logger.Errorw("periodic config update failed, continuing with previous config", zap.Error(err))
+				r.logger.Errorw("periodic config update failed, continuing with previous config", zap.Error(err))
 			}
 		case <-ctx.Done():
 			break
@@ -129,14 +136,14 @@ func (r *RuntimeConfig) GetContact(username string) *recipient.Contact {
 	return nil
 }
 
-func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, logger *logging.Logger) error {
-	logger.Debug("fetching configuration from database")
+func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
+	r.logger.Debug("fetching configuration from database")
 	start := time.Now()
 
 	// Reset all pending state to start from a clean state.
 	r.pending = ConfigSet{}
 
-	tx, err := db.BeginTxx(ctx, &sql.TxOptions{
+	tx, err := r.db.BeginTxx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  true,
 	})
@@ -146,7 +153,7 @@ func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, 
 	// The transaction is only used for reading, never has to be committed.
 	defer func() { _ = tx.Rollback() }()
 
-	updateFuncs := []func(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error{
+	updateFuncs := []func(ctx context.Context, tx *sqlx.Tx) error{
 		r.fetchChannels,
 		r.fetchContacts,
 		r.fetchContactAddresses,
@@ -156,30 +163,30 @@ func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context, db *icingadb.DB, 
 		r.fetchRules,
 	}
 	for _, f := range updateFuncs {
-		if err := f(ctx, db, tx, logger); err != nil {
+		if err := f(ctx, tx); err != nil {
 			return err
 		}
 	}
 
-	logger.Debugw("fetched configuration from database", zap.Duration("took", time.Since(start)))
+	r.logger.Debugw("fetched configuration from database", zap.Duration("took", time.Since(start)))
 
 	return nil
 }
 
-func (r *RuntimeConfig) applyPending(logger *logging.Logger) {
+func (r *RuntimeConfig) applyPending() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	logger.Debug("applying pending configuration")
+	r.logger.Debug("applying pending configuration")
 	start := time.Now()
 
-	r.applyPendingChannels(logger)
-	r.applyPendingContacts(logger)
-	r.applyPendingContactAddresses(logger)
-	r.applyPendingGroups(logger)
-	r.applyPendingTimePeriods(logger)
-	r.applyPendingSchedules(logger)
-	r.applyPendingRules(logger)
+	r.applyPendingChannels()
+	r.applyPendingContacts()
+	r.applyPendingContactAddresses()
+	r.applyPendingGroups()
+	r.applyPendingTimePeriods()
+	r.applyPendingSchedules()
+	r.applyPendingRules()
 
-	logger.Debugw("applied pending configuration", zap.Duration("took", time.Since(start)))
+	r.logger.Debugw("applied pending configuration", zap.Duration("took", time.Since(start)))
 }

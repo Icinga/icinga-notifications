@@ -4,24 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/types"
 	"github.com/icinga/noma/internal/timeperiod"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"log"
 	"time"
 )
 
-func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, tx *sqlx.Tx) error {
 	var timePeriodPtr *timeperiod.TimePeriod
-	stmt := db.BuildSelectStmt(timePeriodPtr, timePeriodPtr)
-	log.Println(stmt)
+	stmt := r.db.BuildSelectStmt(timePeriodPtr, timePeriodPtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var timePeriods []*timeperiod.TimePeriod
 	if err := tx.SelectContext(ctx, &timePeriods, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 	timePeriodsById := make(map[int64]*timeperiod.TimePeriod)
@@ -40,19 +37,19 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 	}
 
 	var entryPtr *TimeperiodEntry
-	stmt = db.BuildSelectStmt(entryPtr, entryPtr)
-	log.Println(stmt)
+	stmt = r.db.BuildSelectStmt(entryPtr, entryPtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var entries []*TimeperiodEntry
 	if err := tx.SelectContext(ctx, &entries, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 
 	for _, row := range entries {
 		p := timePeriodsById[row.TimePeriodID]
 		if p == nil {
-			logger.Warnw("ignoring entry for unknown timeperiod_id",
+			r.logger.Warnw("ignoring entry for unknown timeperiod_id",
 				zap.Int64("timeperiod_entry_id", row.ID),
 				zap.Int64("timeperiod_id", row.TimePeriodID))
 			continue
@@ -67,7 +64,7 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 
 		loc, err := time.LoadLocation(row.Timezone)
 		if err != nil {
-			logger.Warnw("ignoring time period entry with unknown timezone",
+			r.logger.Warnw("ignoring time period entry with unknown timezone",
 				zap.Int64("timeperiod_entry_id", row.ID),
 				zap.String("timezone", row.Timezone),
 				zap.Error(err))
@@ -86,7 +83,7 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 
 		err = entry.Init()
 		if err != nil {
-			logger.Warnw("ignoring time period entry",
+			r.logger.Warnw("ignoring time period entry",
 				zap.Int64("timeperiod_entry_id", row.ID),
 				zap.String("rrule", entry.RecurrenceRule),
 				zap.Error(err))
@@ -95,7 +92,7 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 
 		p.Entries = append(p.Entries, entry)
 
-		logger.Debugw("loaded time period entry",
+		r.logger.Debugw("loaded time period entry",
 			zap.String("timeperiod", p.Name),
 			zap.Time("start", entry.Start),
 			zap.Time("end", entry.End),
@@ -122,7 +119,7 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, db *icingadb.DB, t
 	return nil
 }
 
-func (r *RuntimeConfig) applyPendingTimePeriods(logger *logging.Logger) {
+func (r *RuntimeConfig) applyPendingTimePeriods() {
 	if r.TimePeriods == nil {
 		r.TimePeriods = make(map[int64]*timeperiod.TimePeriod)
 	}

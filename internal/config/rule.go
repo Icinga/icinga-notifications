@@ -2,30 +2,27 @@ package config
 
 import (
 	"context"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/noma/internal/filter"
 	"github.com/icinga/noma/internal/rule"
 	"github.com/icinga/noma/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"log"
 )
 
-func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 	var rulePtr *rule.Rule
-	stmt := db.BuildSelectStmt(rulePtr, rulePtr)
-	log.Println(stmt)
+	stmt := r.db.BuildSelectStmt(rulePtr, rulePtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var rules []*rule.Rule
 	if err := tx.SelectContext(ctx, &rules, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 
 	rulesByID := make(map[int64]*rule.Rule)
 	for _, ru := range rules {
-		ruleLogger := logger.With(
+		ruleLogger := r.logger.With(
 			zap.Int64("id", ru.ID),
 			zap.String("name", ru.Name),
 			zap.String("object_filter", ru.ObjectFilterExpr.String),
@@ -49,18 +46,18 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 	}
 
 	var escalationPtr *rule.Escalation
-	stmt = db.BuildSelectStmt(escalationPtr, escalationPtr)
-	log.Println(stmt)
+	stmt = r.db.BuildSelectStmt(escalationPtr, escalationPtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var escalations []*rule.Escalation
 	if err := tx.SelectContext(ctx, &escalations, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 
 	escalationsByID := make(map[int64]*rule.Escalation)
 	for _, escalation := range escalations {
-		escalationLogger := logger.With(
+		escalationLogger := r.logger.With(
 			zap.Int64("id", escalation.ID),
 			zap.Int64("rule_id", escalation.RuleID),
 			zap.String("condition", escalation.ConditionExpr.String),
@@ -100,17 +97,17 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 	}
 
 	var recipientPtr *rule.EscalationRecipient
-	stmt = db.BuildSelectStmt(recipientPtr, recipientPtr)
-	log.Println(stmt)
+	stmt = r.db.BuildSelectStmt(recipientPtr, recipientPtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var recipients []*rule.EscalationRecipient
 	if err := tx.SelectContext(ctx, &recipients, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 
 	for _, recipient := range recipients {
-		recipientLogger := logger.With(
+		recipientLogger := r.logger.With(
 			zap.Int64("id", recipient.ID),
 			zap.Int64("escalation_id", recipient.EscalationID),
 			zap.String("channel_type", recipient.ChannelType.String))
@@ -138,7 +135,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, db *icingadb.DB, tx *sql
 	return nil
 }
 
-func (r *RuntimeConfig) applyPendingRules(logger *logging.Logger) {
+func (r *RuntimeConfig) applyPendingRules() {
 	if r.Rules == nil {
 		r.Rules = make(map[int64]*rule.Rule)
 	}
@@ -147,7 +144,7 @@ func (r *RuntimeConfig) applyPendingRules(logger *logging.Logger) {
 		if pendingRule == nil {
 			delete(r.Rules, id)
 		} else {
-			ruleLogger := logger.With(
+			ruleLogger := r.logger.With(
 				zap.Int64("id", pendingRule.ID),
 				zap.String("name", pendingRule.Name),
 				zap.String("object_filter", pendingRule.ObjectFilterExpr.String),
@@ -165,7 +162,7 @@ func (r *RuntimeConfig) applyPendingRules(logger *logging.Logger) {
 
 			for _, escalation := range pendingRule.Escalations {
 				for i, recipient := range escalation.Recipients {
-					recipientLogger := logger.With(
+					recipientLogger := r.logger.With(
 						zap.Int64("id", recipient.ID),
 						zap.Int64("escalation_id", recipient.EscalationID),
 						zap.String("channel_type", recipient.ChannelType.String))
