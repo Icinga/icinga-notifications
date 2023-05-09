@@ -6,6 +6,8 @@
 # Set credentials for some debug endpoints provided via HTTP. If not set, these are disabled.
 #debug-password: "put-something-secret-here"
 
+icingaweb2-url: http://localhost/icingaweb2/
+
 database:
   type: pgsql
   host: /run/postgresql
