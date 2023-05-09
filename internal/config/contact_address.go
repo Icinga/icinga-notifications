@@ -2,30 +2,27 @@ package config
 
 import (
 	"context"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/noma/internal/recipient"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
-	"log"
 )
 
-func (r *RuntimeConfig) fetchContactAddresses(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) error {
+func (r *RuntimeConfig) fetchContactAddresses(ctx context.Context, tx *sqlx.Tx) error {
 	var addressPtr *recipient.Address
-	stmt := db.BuildSelectStmt(addressPtr, addressPtr)
-	log.Println(stmt)
+	stmt := r.db.BuildSelectStmt(addressPtr, addressPtr)
+	r.logger.Debugf("Executing query %q", stmt)
 
 	var addresses []*recipient.Address
 	if err := tx.SelectContext(ctx, &addresses, stmt); err != nil {
-		log.Println(err)
+		r.logger.Errorln(err)
 		return err
 	}
 
 	addressesById := make(map[int64]*recipient.Address)
 	for _, a := range addresses {
 		addressesById[a.ID] = a
-		logger.Debugw("loaded contact_address config",
+		r.logger.Debugw("loaded contact_address config",
 			zap.Int64("id", a.ID),
 			zap.Int64("contact_id", a.ContactID),
 			zap.String("type", a.Type),
@@ -47,7 +44,7 @@ func (r *RuntimeConfig) fetchContactAddresses(ctx context.Context, db *icingadb.
 	return nil
 }
 
-func (r *RuntimeConfig) applyPendingContactAddresses(logger *logging.Logger) {
+func (r *RuntimeConfig) applyPendingContactAddresses() {
 	if r.ContactAddresses == nil {
 		r.ContactAddresses = make(map[int64]*recipient.Address)
 	}
@@ -56,24 +53,24 @@ func (r *RuntimeConfig) applyPendingContactAddresses(logger *logging.Logger) {
 		currentAddress := r.ContactAddresses[id]
 
 		if pendingAddress == nil {
-			r.removeContactAddress(logger, currentAddress)
+			r.removeContactAddress(currentAddress)
 		} else if currentAddress != nil {
-			r.updateContactAddress(logger, currentAddress, pendingAddress)
+			r.updateContactAddress(currentAddress, pendingAddress)
 		} else {
-			r.addContactAddress(logger, pendingAddress)
+			r.addContactAddress(pendingAddress)
 		}
 	}
 
 	r.pending.ContactAddresses = nil
 }
 
-func (r *RuntimeConfig) addContactAddress(logger *logging.Logger, addr *recipient.Address) {
+func (r *RuntimeConfig) addContactAddress(addr *recipient.Address) {
 	contact := r.Contacts[addr.ContactID]
 	if contact != nil {
 		if i := slices.Index(contact.Addresses, addr); i < 0 {
 			contact.Addresses = append(contact.Addresses, addr)
 
-			logger.Debugw("added new address to contact",
+			r.logger.Debugw("added new address to contact",
 				zap.Any("contact", contact),
 				zap.Any("address", addr))
 		}
@@ -82,11 +79,11 @@ func (r *RuntimeConfig) addContactAddress(logger *logging.Logger, addr *recipien
 	r.ContactAddresses[addr.ID] = addr
 }
 
-func (r *RuntimeConfig) updateContactAddress(logger *logging.Logger, addr, pending *recipient.Address) {
+func (r *RuntimeConfig) updateContactAddress(addr, pending *recipient.Address) {
 	contactChanged := addr.ContactID != pending.ContactID
 
 	if contactChanged {
-		r.removeContactAddress(logger, addr)
+		r.removeContactAddress(addr)
 	}
 
 	addr.ContactID = pending.ContactID
@@ -94,18 +91,18 @@ func (r *RuntimeConfig) updateContactAddress(logger *logging.Logger, addr, pendi
 	addr.Address = pending.Address
 
 	if contactChanged {
-		r.addContactAddress(logger, addr)
+		r.addContactAddress(addr)
 	}
 
-	logger.Debugw("updated contact address", zap.Any("address", addr))
+	r.logger.Debugw("updated contact address", zap.Any("address", addr))
 }
 
-func (r *RuntimeConfig) removeContactAddress(logger *logging.Logger, addr *recipient.Address) {
+func (r *RuntimeConfig) removeContactAddress(addr *recipient.Address) {
 	if contact := r.Contacts[addr.ContactID]; contact != nil {
 		if i := slices.Index(contact.Addresses, addr); i >= 0 {
 			contact.Addresses = slices.Delete(contact.Addresses, i, i+1)
 
-			logger.Debugw("removed address from contact",
+			r.logger.Debugw("removed address from contact",
 				zap.Any("contact", contact),
 				zap.Any("address", addr))
 		}

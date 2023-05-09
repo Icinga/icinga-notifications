@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/icinga/icingadb/pkg/logging"
+	"github.com/icinga/icingadb/pkg/utils"
 	"github.com/icinga/noma/internal/config"
 	"github.com/icinga/noma/internal/listener"
 	"go.uber.org/zap"
@@ -29,31 +30,39 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO: proper logging config
-	logs, err := logging.NewLogging("noma", zap.DebugLevel, logging.CONSOLE, logging.Options{}, 10*time.Second)
+	logs, err := logging.NewLogging(
+		"noma",
+		conf.Logging.Level,
+		conf.Logging.Output,
+		conf.Logging.Options,
+		conf.Logging.Interval,
+	)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "cannot initialize logging:", err)
 		os.Exit(1)
 	}
 
 	logger := logs.GetLogger()
-	logger.Info("connecting to database")
-	db, err := conf.Database.Open(logger)
+	db, err := conf.Database.Open(logs.GetChildLogger("database"))
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "cannot connect to database:", err)
-		os.Exit(1)
+		logger.Fatalw("cannot create database connection from config", zap.Error(err))
 	}
-	logger.Debugw("pinged database", zap.Error(db.Ping()))
 	defer db.Close()
+	{
+		logger.Infof("Connecting to database at '%s'", utils.JoinHostPort(conf.Database.Host, conf.Database.Port))
+		if err := db.Ping(); err != nil {
+			logger.Fatalw("cannot connect to database", zap.Error(err))
+		}
+	}
 
-	var runtimeConfig config.RuntimeConfig
-	if err := runtimeConfig.UpdateFromDatabase(context.TODO(), db, logger); err != nil {
+	runtimeConfig := config.NewRuntimeConfig(db, logs.GetChildLogger("runtime-updates"))
+	if err := runtimeConfig.UpdateFromDatabase(context.TODO()); err != nil {
 		logger.Fatalw("failed to load config from database", zap.Error(err))
 	}
 
-	go runtimeConfig.PeriodicUpdates(context.TODO(), db, logger, 1*time.Second)
+	go runtimeConfig.PeriodicUpdates(context.TODO(), 1*time.Second)
 
-	if err := listener.NewListener(db, conf, &runtimeConfig).Run(); err != nil {
+	if err := listener.NewListener(db, conf, runtimeConfig, logs.GetChildLogger("listener")).Run(); err != nil {
 		panic(err)
 	}
 }
