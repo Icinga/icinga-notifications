@@ -107,7 +107,7 @@ func (i *Incident) AddEvent(db *icingadb.DB, ev *event.Event) error {
 
 // AddRecipient adds recipient from the given *rule.Escalation to this incident.
 // Syncs also all the recipients with the database and returns an error on db failure.
-func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventId int64) error {
+func (i *Incident) AddRecipient(escalation *rule.Escalation, eventId int64) error {
 	newRole := RoleRecipient
 	if i.HasManager() {
 		newRole = RoleSubscriber
@@ -134,7 +134,7 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, t time.Time, eventI
 					IncidentID:       i.incidentRowID,
 					EventID:          utils.ToDBInt(eventId),
 					Key:              cr.Key,
-					Time:             types.UnixMilli(t),
+					Time:             types.UnixMilli(time.Now()),
 					Type:             RecipientRoleChanged,
 					NewRecipientRole: newRole,
 					OldRecipientRole: oldRole,
