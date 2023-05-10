@@ -37,3 +37,4 @@ logging:
     #database:
     runtime-updates: info
     #listener:
+    #incident:
