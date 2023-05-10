@@ -14,6 +14,7 @@ import (
 	"github.com/icinga/noma/internal/recipient"
 	"github.com/icinga/noma/internal/rule"
 	"github.com/icinga/noma/internal/utils"
+	"go.uber.org/zap"
 	"net/http"
 	"time"
 )
@@ -497,19 +498,19 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 			chConf := l.runtimeConfig.Channels[chType]
 			if chConf == nil {
-				l.logger.Errorw("ERROR: could not find config for channel type %q", chType)
+				l.logger.Errorf("could not find config for channel type %q", chType)
 				continue
 			}
 
 			plugin, err := chConf.GetPlugin()
 			if err != nil {
-				l.logger.Errorw("ERROR: could initialize channel type %q: %v", chType, err)
+				l.logger.Errorw("couldn't initialize channel", zap.String("type", chType), zap.Error(err))
 				continue
 			}
 
 			err = plugin.Send(contact, currentIncident, &ev, l.configFile.Icingaweb2URL)
 			if err != nil {
-				l.logger.Errorw("ERROR: failed to send via channel type %q: %v", chType, err)
+				l.logger.Errorw("failed to send via channel", zap.String("type", chType), zap.Error(err))
 				continue
 			}
 		}
