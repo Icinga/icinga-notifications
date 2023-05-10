@@ -33,6 +33,24 @@ func (r Key) MarshalText() (text []byte, err error) {
 	}
 }
 
+// CopyNonNil copies non-nil fields from the provided recipient.Key to the current one and
+// returns the modified recipient key.
+func (r Key) CopyNonNil(recipientKey Key) Key {
+	if !r.ContactID.Valid && recipientKey.ContactID.Valid {
+		r.ContactID = recipientKey.ContactID
+	}
+
+	if !r.GroupID.Valid && recipientKey.GroupID.Valid {
+		r.GroupID = recipientKey.GroupID
+	}
+
+	if !r.ScheduleID.Valid && recipientKey.ScheduleID.Valid {
+		r.ScheduleID = recipientKey.ScheduleID
+	}
+
+	return r
+}
+
 func ToKey(r Recipient) Key {
 	switch v := r.(type) {
 	case *Contact:
