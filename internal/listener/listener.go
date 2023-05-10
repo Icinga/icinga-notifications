@@ -217,7 +217,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		hr := &incident.HistoryRow{
 			EventID:     utils.ToDBInt(ev.ID),
 			Type:        incident.SourceSeverityChanged,
-			Time:        types.UnixMilli(ev.Time),
+			Time:        types.UnixMilli(time.Now()),
 			NewSeverity: ev.Severity,
 			OldSeverity: oldSourceSeverity,
 			Message:     utils.ToDBString(ev.Message),
@@ -263,7 +263,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 		hr := &incident.HistoryRow{
 			EventID:                   utils.ToDBInt(ev.ID),
-			Time:                      types.UnixMilli(ev.Time),
+			Time:                      types.UnixMilli(time.Now()),
 			Type:                      incident.SeverityChanged,
 			NewSeverity:               newIncidentSeverity,
 			OldSeverity:               oldIncidentSeverity,
@@ -280,12 +280,12 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if newIncidentSeverity == event.SeverityOK {
-		currentIncident.RecoveredAt = ev.Time
+		currentIncident.RecoveredAt = time.Now()
 		l.logger.Infof("[%s %s] all sources recovered, closing incident", obj.DisplayName(), currentIncident.String())
 
 		hr := &incident.HistoryRow{
 			EventID: utils.ToDBInt(ev.ID),
-			Time:    types.UnixMilli(ev.Time),
+			Time:    types.UnixMilli(time.Now()),
 			Type:    incident.Closed,
 		}
 		err = incident.RemoveCurrent(obj, hr)
@@ -331,7 +331,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			l.logger.Infof("[%s %s] rule %q matches", obj.DisplayName(), currentIncident.String(), r.Name)
 
 			history := &incident.HistoryRow{
-				Time:                      types.UnixMilli(ev.Time),
+				Time:                      types.UnixMilli(time.Now()),
 				EventID:                   utils.ToDBInt(ev.ID),
 				RuleID:                    utils.ToDBInt(r.ID),
 				Type:                      incident.RuleMatched,
@@ -407,7 +407,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			}
 
 			state.RuleEscalationID = escalationID
-			state.TriggeredAt = types.UnixMilli(ev.Time)
+			state.TriggeredAt = types.UnixMilli(time.Now())
 
 			r := l.runtimeConfig.Rules[escalation.RuleID]
 			l.logger.Infof("[%s %s] rule %q reached escalation %q", obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName())
@@ -429,7 +429,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				return
 			}
 
-			err = currentIncident.AddRecipient(escalation, ev.Time, ev.ID)
+			err = currentIncident.AddRecipient(escalation, ev.ID)
 			if err != nil {
 				_, _ = fmt.Fprintln(w, err)
 
@@ -483,7 +483,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			hr := &incident.HistoryRow{
 				Key:                       recipient.ToKey(contact),
 				EventID:                   utils.ToDBInt(ev.ID),
-				Time:                      types.UnixMilli(ev.Time),
+				Time:                      types.UnixMilli(time.Now()),
 				Type:                      incident.Notified,
 				ChannelType:               utils.ToDBString(chType),
 				CausedByIncidentHistoryID: causedByIncidentHistoryId,
@@ -615,7 +615,7 @@ func (l *Listener) ProcessAcknowledgementEvent(i *incident.Incident, ev event.Ev
 		Key:              recipientKey,
 		EventID:          utils.ToDBInt(ev.ID),
 		Type:             incident.RecipientRoleChanged,
-		Time:             types.UnixMilli(ev.Time),
+		Time:             types.UnixMilli(time.Now()),
 		NewRecipientRole: newRole,
 		OldRecipientRole: oldRole,
 		Message:          utils.ToDBString(ev.Message),
