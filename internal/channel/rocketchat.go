@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
-	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"log"
 	"net/http"
@@ -32,11 +32,11 @@ func NewRocketChat(config string) (Plugin, error) {
 	return r, nil
 }
 
-func (r *RocketChat) Send(contact *recipient.Contact, incident *incident.Incident, event *event.Event, icingaweb2Url string) error {
+func (r *RocketChat) Send(contact *recipient.Contact, incident contracts.Incident, event *event.Event, icingaweb2Url string) error {
 	log.Printf("rocketchat: contact=%v incident=%v event=%v", contact, incident, event)
 
 	var output bytes.Buffer
-	_, _ = fmt.Fprintf(&output, "[#%d] %s %s is %s\n\n", incident.ID(), event.Type, incident.Object.DisplayName(), event.Severity.String())
+	_, _ = fmt.Fprintf(&output, "[#%d] %s %s is %s\n\n", incident.ID(), event.Type, incident.ObjectDisplayName(), event.Severity.String())
 
 	FormatMessage(&output, incident, event, icingaweb2Url)
 

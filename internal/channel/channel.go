@@ -2,8 +2,8 @@ package channel
 
 import (
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
-	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 )
 
@@ -39,7 +39,7 @@ func (c *Channel) ResetPlugin() {
 }
 
 type Plugin interface {
-	Send(contact *recipient.Contact, incident *incident.Incident, event *event.Event, icingaweb2Url string) error
+	Send(contact *recipient.Contact, incident contracts.Incident, event *event.Event, icingaweb2Url string) error
 }
 
 type NewFunc func(config string) (Plugin, error)
