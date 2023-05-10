@@ -2,14 +2,14 @@ package channel
 
 import (
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
-	"github.com/icinga/icinga-notifications/internal/incident"
 	"io"
 	"strings"
 )
 
 // FormatMessage formats a notification message and adds to the given io.Writer
-func FormatMessage(writer io.Writer, incident *incident.Incident, event *event.Event, icingaweb2Url string) {
+func FormatMessage(writer io.Writer, incident contracts.Incident, event *event.Event, icingaweb2Url string) {
 	_, _ = fmt.Fprintf(writer, "Info: %s\n\n", event.Message)
 	_, _ = fmt.Fprintf(writer, "When: %s\n", event.Time.Format("2006-01-02 15:04:05 MST"))
 
