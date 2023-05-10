@@ -168,7 +168,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		_, err = currentIncident.AddHistory(historyRow, false)
 	}
 
-	err = currentIncident.AddEvent(l.db, &ev)
+	err = currentIncident.AddEvent(&ev)
 	if err != nil {
 		l.logger.Errorln(err)
 		return
