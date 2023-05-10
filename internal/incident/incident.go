@@ -336,17 +336,6 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 				incident.EscalationState[state.RuleEscalationID] = state
 			}
 
-			contact := &ContactRow{}
-			var contacts []*ContactRow
-			err = db.Select(&contacts, db.Rebind(db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), ir.ID)
-			if err != nil {
-				return nil, false, fmt.Errorf("failed to fetch incident recipients: %w", err)
-			}
-
-			for _, contact := range contacts {
-				incident.Recipients[contact.Key] = &RecipientState{Role: contact.Role}
-			}
-
 			currentIncident = incident
 		}
 
@@ -358,6 +347,25 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 		if currentIncident != nil {
 			currentIncidents[obj] = currentIncident
 		}
+	}
+
+	if !created && currentIncident != nil {
+		currentIncident.Lock()
+		defer currentIncident.Unlock()
+
+		contact := &ContactRow{}
+		var contacts []*ContactRow
+		err := db.Select(&contacts, db.Rebind(db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), currentIncident.ID())
+		if err != nil {
+			return nil, false, fmt.Errorf("failed to fetch incident recipients: %w", err)
+		}
+
+		recipients := make(map[recipient.Key]*RecipientState)
+		for _, contact := range contacts {
+			recipients[contact.Key] = &RecipientState{Role: contact.Role}
+		}
+
+		currentIncident.Recipients = recipients
 	}
 
 	return currentIncident, created, nil
