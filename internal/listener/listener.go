@@ -288,11 +288,9 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			Time:    types.UnixMilli(time.Now()),
 			Type:    incident.Closed,
 		}
-		err = incident.RemoveCurrent(obj, hr)
+		err := incident.RemoveCurrent(obj, hr)
 		if err != nil {
 			_, _ = fmt.Fprintln(w, err)
-
-			l.logger.Errorln(err)
 			return
 		}
 	}
