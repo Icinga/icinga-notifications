@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
+	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/utils"
@@ -79,6 +80,11 @@ func main() {
 	}
 
 	go runtimeConfig.PeriodicUpdates(context.TODO(), 1*time.Second)
+
+	err = incident.Warmup(context.TODO(), db, logs.GetChildLogger("incident"), runtimeConfig, conf)
+	if err != nil {
+		logger.Fatalw("Can't load incidents from database", zap.Error(err))
+	}
 
 	if err := listener.NewListener(db, conf, runtimeConfig, logs).Run(); err != nil {
 		panic(err)
