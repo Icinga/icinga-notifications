@@ -31,6 +31,7 @@ type Event struct {
 const (
 	TypeState           = "state"
 	TypeAcknowledgement = "acknowledgement"
+	TypeInternal        = "internal"
 )
 
 func (e *Event) String() string {

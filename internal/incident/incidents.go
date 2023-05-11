@@ -5,18 +5,78 @@ import (
 	"database/sql"
 	"errors"
 	"github.com/icinga/icinga-notifications/internal/config"
+	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
-	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
+	"github.com/icinga/icingadb/pkg/types"
 	"go.uber.org/zap"
 	"sync"
+	"time"
 )
 
 var (
 	currentIncidents   = make(map[*object.Object]*Incident)
 	currentIncidentsMu sync.Mutex
 )
+
+// LoadOpenIncidents loads all active (not yet closed) incidents from the database and restores all their states.
+// Returns error ony database failure.
+func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Logger, runtimeConfig *config.RuntimeConfig) error {
+	logger.Info("Loading all active incidents from database")
+
+	var objectIDs []types.Binary
+	err := db.SelectContext(ctx, &objectIDs, `SELECT object_id FROM incident WHERE "recovered_at" IS NULL`)
+	if err != nil {
+		logger.Errorw("Failed to load active incidents from database", zap.Error(err))
+
+		return errors.New("failed to fetch open incidents")
+	}
+
+	for _, objectID := range objectIDs {
+		obj, err := object.LoadFromDB(ctx, db, objectID)
+		if err != nil {
+			logger.Errorw("Failed to retrieve incident object from database", zap.Error(err))
+			continue
+		}
+
+		incident, _, err := GetCurrent(ctx, db, obj, logger, runtimeConfig, false)
+		if err != nil {
+			continue
+		}
+
+		evaluateRulesAndEscalations := func(ctx context.Context) error {
+			ev := &event.Event{Time: time.Now(), Type: event.TypeEscalation}
+			if !incident.evaluateEscalations() {
+				return nil
+			}
+
+			tx, err := db.BeginTxx(ctx, nil)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback() }()
+
+			err = incident.notifyContacts(ctx, tx, ev, types.Int{})
+			if err != nil {
+				return err
+			}
+
+			if err = tx.Commit(); err != nil {
+				incident.logger.Errorw("Failed to commit database transaction", zap.Error(err))
+				return err
+			}
+
+			return nil
+		}
+
+		if evaluateRulesAndEscalations(ctx) != nil {
+			continue
+		}
+	}
+
+	return nil
+}
 
 func GetCurrent(
 	ctx context.Context, db *icingadb.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
@@ -30,15 +90,8 @@ func GetCurrent(
 
 	if currentIncident == nil {
 		ir := &IncidentRow{}
-		incident := &Incident{
-			Object:          obj,
-			db:              db,
-			logger:          logger.With(zap.String("object", obj.DisplayName())),
-			runtimeConfig:   runtimeConfig,
-			Recipients:      map[recipient.Key]*RecipientState{},
-			EscalationState: map[escalationID]*EscalationState{},
-			Rules:           map[ruleID]struct{}{},
-		}
+		incidentLogger := logger.With(zap.String("object", obj.DisplayName()))
+		incident := NewIncident(db, obj, runtimeConfig, incidentLogger)
 
 		err := db.QueryRowxContext(ctx, db.Rebind(db.BuildSelectStmt(ir, ir)+` WHERE "object_id" = ? AND "recovered_at" IS NULL`), obj.ID).StructScan(ir)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -48,22 +101,12 @@ func GetCurrent(
 		} else if err == nil {
 			incident.incidentRowID = ir.ID
 			incident.StartedAt = ir.StartedAt.Time()
+			incident.Severity = ir.Severity
 			incident.logger = logger.With(zap.String("object", obj.DisplayName()), zap.String("incident", incident.String()))
 
-			state := &EscalationState{}
-			var states []*EscalationState
-			err = db.SelectContext(ctx, &states, db.Rebind(db.BuildSelectStmt(state, state)+` WHERE "incident_id" = ?`), ir.ID)
-			if err != nil {
-				incident.logger.Errorw("Failed to load incident rule escalation states", zap.Error(err))
-
-				return nil, false, errors.New("failed to load incident rule escalation states")
+			if err := incident.restoreEscalationsState(ctx); err != nil {
+				return nil, false, err
 			}
-
-			for _, state := range states {
-				incident.EscalationState[state.RuleEscalationID] = state
-			}
-
-			incident.RestoreEscalationStateRules(states)
 
 			currentIncident = incident
 		}
@@ -82,21 +125,9 @@ func GetCurrent(
 		currentIncident.Lock()
 		defer currentIncident.Unlock()
 
-		contact := &ContactRow{}
-		var contacts []*ContactRow
-		err := db.SelectContext(ctx, &contacts, db.Rebind(db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), currentIncident.ID())
-		if err != nil {
-			currentIncident.logger.Errorw("Failed to reload incident recipients", zap.Error(err))
-
-			return nil, false, errors.New("failed to load incident recipients")
+		if err := currentIncident.restoreRecipients(ctx); err != nil {
+			return nil, false, err
 		}
-
-		recipients := make(map[recipient.Key]*RecipientState)
-		for _, contact := range contacts {
-			recipients[contact.Key] = &RecipientState{Role: contact.Role}
-		}
-
-		currentIncident.Recipients = recipients
 	}
 
 	return currentIncident, created, nil
