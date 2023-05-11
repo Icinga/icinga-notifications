@@ -42,6 +42,20 @@ type Incident struct {
 	sync.Mutex
 }
 
+func NewIncident(
+	db *icingadb.DB, obj *object.Object, runtimeConfig *config.RuntimeConfig, logger *zap.SugaredLogger,
+) *Incident {
+	return &Incident{
+		db:              db,
+		Object:          obj,
+		logger:          logger,
+		runtimeConfig:   runtimeConfig,
+		EscalationState: map[escalationID]*EscalationState{},
+		Rules:           map[ruleID]struct{}{},
+		Recipients:      map[recipient.Key]*RecipientState{},
+	}
+}
+
 func (i *Incident) ObjectDisplayName() string {
 	return i.Object.DisplayName()
 }
@@ -133,7 +147,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 	}
 
 	// Re-evaluate escalations based on the newly evaluated rules.
-	if err := i.evaluateEscalations(ctx, tx, ev, causedBy); err != nil {
+	if _, err := i.evaluateEscalations(ctx, tx, ev, causedBy); err != nil {
 		return err
 	}
 
@@ -299,11 +313,13 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 }
 
 // evaluateEscalations evaluates this incidents rule escalations if they aren't already.
-// Returns error on database failure.
-func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, causedBy types.Int) error {
+// Returns whether a new escalation triggered or an error on database failure.
+func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, causedBy types.Int) (bool, error) {
 	if i.EscalationState == nil {
 		i.EscalationState = make(map[int64]*EscalationState)
 	}
+
+	newEscalationMatched := false
 
 	for rID := range i.Rules {
 		r := i.runtimeConfig.Rules[rID]
@@ -338,6 +354,8 @@ func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *eve
 				}
 
 				if matched {
+					newEscalationMatched = true
+
 					state := &EscalationState{RuleEscalationID: escalation.ID, TriggeredAt: types.UnixMilli(time.Now())}
 					i.EscalationState[escalation.ID] = state
 
@@ -349,7 +367,7 @@ func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *eve
 							zap.String("escalation", escalation.DisplayName()), zap.Error(err),
 						)
 
-						return errors.New("failed to upsert escalation state")
+						return false, errors.New("failed to upsert escalation state")
 					}
 
 					history := &HistoryRow{
@@ -367,18 +385,18 @@ func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *eve
 							zap.String("escalation", escalation.DisplayName()), zap.Error(err),
 						)
 
-						return errors.New("failed to insert escalation triggered incident history")
+						return false, errors.New("failed to insert escalation triggered incident history")
 					}
 
 					if err := i.AddRecipient(ctx, tx, escalation, ev.ID); err != nil {
-						return err
+						return false, err
 					}
 				}
 			}
 		}
 	}
 
-	return nil
+	return newEscalationMatched, nil
 }
 
 // notifyContacts executes all the given pending notifications of the current incident.
@@ -540,6 +558,52 @@ func (i *Incident) getRecipientsChannel(t time.Time) contactChannels {
 	}
 
 	return contactChs
+}
+
+// restoreRecipients reloads the current incident recipients from the database.
+// Returns error on database failure.
+func (i *Incident) restoreRecipients(ctx context.Context) error {
+	contact := &ContactRow{}
+	var contacts []*ContactRow
+	err := i.db.SelectContext(ctx, &contacts, i.db.Rebind(i.db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), i.ID())
+	if err != nil {
+		i.logger.Errorw(
+			"Failed to restore incident recipients from the database", zap.String("object", i.ObjectDisplayName()),
+			zap.String("incident", i.String()), zap.Error(err),
+		)
+
+		return errors.New("failed to restore incident recipients")
+	}
+
+	recipients := make(map[recipient.Key]*RecipientState)
+	for _, contact := range contacts {
+		recipients[contact.Key] = &RecipientState{Role: contact.Role}
+	}
+
+	i.Recipients = recipients
+
+	return nil
+}
+
+// restoreEscalationsState restores all escalation states matching the current incident id from the database.
+// Returns error on database failure.
+func (i *Incident) restoreEscalationsState(ctx context.Context) error {
+	state := &EscalationState{}
+	var states []*EscalationState
+	err := i.db.SelectContext(ctx, &states, i.db.Rebind(i.db.BuildSelectStmt(state, state)+` WHERE "incident_id" = ?`), i.ID())
+	if err != nil {
+		i.logger.Errorw("Failed to restore incident rule escalation states", zap.Error(err))
+
+		return errors.New("failed to restore incident rule escalation states")
+	}
+
+	for _, state := range states {
+		i.EscalationState[state.RuleEscalationID] = state
+	}
+
+	i.RestoreEscalationStateRules(states)
+
+	return nil
 }
 
 type EscalationState struct {

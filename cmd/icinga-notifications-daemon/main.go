@@ -8,6 +8,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
+	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/utils"
@@ -90,6 +91,11 @@ func main() {
 	}
 
 	go runtimeConfig.PeriodicUpdates(ctx, 1*time.Second)
+
+	err = incident.LoadOpenIncidents(ctx, db, logs.GetChildLogger("incident"), runtimeConfig)
+	if err != nil {
+		logger.Fatalw("Can't load incidents from database", zap.Error(err))
+	}
 
 	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {
 		logger.Errorw("Listener has finished with an error", zap.Error(err))
