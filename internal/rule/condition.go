@@ -11,7 +11,7 @@ type EscalationFilter struct {
 	IncidentSeverity event.Severity
 }
 
-func (c *EscalationFilter) EvalEqual(key string, value string) (bool, error) {
+func (e *EscalationFilter) EvalEqual(key string, value string) (bool, error) {
 	switch key {
 	case "incident_age":
 		age, err := time.ParseDuration(value)
@@ -19,20 +19,20 @@ func (c *EscalationFilter) EvalEqual(key string, value string) (bool, error) {
 			return false, err
 		}
 
-		return c.IncidentAge == age, nil
+		return e.IncidentAge == age, nil
 	case "incident_severity":
 		severity, err := event.GetSeverityByName(value)
 		if err != nil {
 			return false, err
 		}
 
-		return c.IncidentSeverity == severity, nil
+		return e.IncidentSeverity == severity, nil
 	default:
 		return false, nil
 	}
 }
 
-func (c *EscalationFilter) EvalLess(key string, value string) (bool, error) {
+func (e *EscalationFilter) EvalLess(key string, value string) (bool, error) {
 	switch key {
 	case "incident_age":
 		age, err := time.ParseDuration(value)
@@ -40,24 +40,24 @@ func (c *EscalationFilter) EvalLess(key string, value string) (bool, error) {
 			return false, err
 		}
 
-		return c.IncidentAge < age, nil
+		return e.IncidentAge < age, nil
 	case "incident_severity":
 		severity, err := event.GetSeverityByName(value)
 		if err != nil {
 			return false, err
 		}
 
-		return c.IncidentSeverity < severity, nil
+		return e.IncidentSeverity < severity, nil
 	default:
 		return false, nil
 	}
 }
 
-func (c *EscalationFilter) EvalLike(key string, value string) (bool, error) {
+func (e *EscalationFilter) EvalLike(key string, value string) (bool, error) {
 	return false, fmt.Errorf("escalation filter doesn't support wildcard matches")
 }
 
-func (c *EscalationFilter) EvalLessOrEqual(key string, value string) (bool, error) {
+func (e *EscalationFilter) EvalLessOrEqual(key string, value string) (bool, error) {
 	switch key {
 	case "incident_age":
 		age, err := time.ParseDuration(value)
@@ -65,20 +65,20 @@ func (c *EscalationFilter) EvalLessOrEqual(key string, value string) (bool, erro
 			return false, err
 		}
 
-		return c.IncidentAge <= age, nil
+		return e.IncidentAge <= age, nil
 	case "incident_severity":
 		severity, err := event.GetSeverityByName(value)
 		if err != nil {
 			return false, err
 		}
 
-		return c.IncidentSeverity <= severity, nil
+		return e.IncidentSeverity <= severity, nil
 	default:
 		return false, nil
 	}
 }
 
-func (c *EscalationFilter) EvalExists(key string) bool {
+func (e *EscalationFilter) EvalExists(key string) bool {
 	switch key {
 	case "incident_age":
 		fallthrough
