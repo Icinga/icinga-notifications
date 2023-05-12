@@ -20,6 +20,10 @@ func (a *All) Eval(filterable Filterable) (bool, error) {
 	return true, nil
 }
 
+func (a *All) ExtractConditions() []Condition {
+	return extractConditions(a.rules)
+}
+
 // Any represents a filter chain type that matches when at least one of its Rules matches.
 type Any struct {
 	rules []Filter
@@ -38,6 +42,10 @@ func (a *Any) Eval(filterable Filterable) (bool, error) {
 	}
 
 	return false, nil
+}
+
+func (a *Any) ExtractConditions() []Condition {
+	return extractConditions(a.rules)
 }
 
 // None represents a filter chain type that matches when none of its Rules matches.
@@ -60,33 +68,45 @@ func (n *None) Eval(filterable Filterable) (bool, error) {
 	return true, nil
 }
 
-// Condition represents a single filter condition.
-type Condition struct {
-	column string
-	value  string
+func (n *None) ExtractConditions() []Condition {
+	return extractConditions(n.rules)
 }
 
-func NewCondition(column string, value string) *Condition {
-	return &Condition{
-		column: column,
-		value:  value,
+// Condition represents a single filter condition.
+type Condition struct {
+	Column string
+	Value  string
+}
+
+func NewCondition(column string, value string) Condition {
+	return Condition{
+		Column: column,
+		Value:  value,
 	}
 }
 
-type Exists Condition
+func (e Condition) ExtractConditions() []Condition {
+	return []Condition{e}
+}
+
+type Exists struct {
+	Condition
+}
 
 func NewExists(column string) *Exists {
-	return &Exists{column: column}
+	return &Exists{Condition{Column: column}}
 }
 
 func (e *Exists) Eval(filterable Filterable) (bool, error) {
-	return filterable.EvalExists(e.column), nil
+	return filterable.EvalExists(e.Column), nil
 }
 
-type Equal Condition
+type Equal struct {
+	Condition
+}
 
 func (e *Equal) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalEqual(e.column, e.value)
+	match, err := filterable.EvalEqual(e.Column, e.Value)
 	if err != nil {
 		return false, err
 	}
@@ -94,21 +114,25 @@ func (e *Equal) Eval(filterable Filterable) (bool, error) {
 	return match, nil
 }
 
-type UnEqual Condition
+type UnEqual struct {
+	Condition
+}
 
 func (u *UnEqual) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalEqual(u.column, u.value)
+	match, err := filterable.EvalEqual(u.Column, u.Value)
 	if err != nil {
 		return false, err
 	}
 
-	return filterable.EvalExists(u.column) && !match, nil
+	return filterable.EvalExists(u.Column) && !match, nil
 }
 
-type Like Condition
+type Like struct {
+	Condition
+}
 
 func (l *Like) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLike(l.column, l.value)
+	match, err := filterable.EvalLike(l.Column, l.Value)
 	if err != nil {
 		return false, err
 	}
@@ -116,21 +140,25 @@ func (l *Like) Eval(filterable Filterable) (bool, error) {
 	return match, nil
 }
 
-type Unlike Condition
+type Unlike struct {
+	Condition
+}
 
 func (u *Unlike) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLike(u.column, u.value)
+	match, err := filterable.EvalLike(u.Column, u.Value)
 	if err != nil {
 		return false, err
 	}
 
-	return filterable.EvalExists(u.column) && !match, nil
+	return filterable.EvalExists(u.Column) && !match, nil
 }
 
-type LessThan Condition
+type LessThan struct {
+	Condition
+}
 
 func (less *LessThan) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLess(less.column, less.value)
+	match, err := filterable.EvalLess(less.Column, less.Value)
 	if err != nil {
 		return false, err
 	}
@@ -138,10 +166,12 @@ func (less *LessThan) Eval(filterable Filterable) (bool, error) {
 	return match, nil
 }
 
-type LessThanOrEqual Condition
+type LessThanOrEqual struct {
+	Condition
+}
 
 func (loe *LessThanOrEqual) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLessOrEqual(loe.column, loe.value)
+	match, err := filterable.EvalLessOrEqual(loe.Column, loe.Value)
 	if err != nil {
 		return false, err
 	}
@@ -149,26 +179,40 @@ func (loe *LessThanOrEqual) Eval(filterable Filterable) (bool, error) {
 	return match, nil
 }
 
-type GreaterThan Condition
-
-func (g *GreaterThan) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLessOrEqual(g.column, g.value)
-	if err != nil {
-		return false, err
-	}
-
-	return filterable.EvalExists(g.column) && !match, nil
+type GreaterThan struct {
+	Condition
 }
 
-type GreaterThanOrEqual Condition
-
-func (goe *GreaterThanOrEqual) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLess(goe.column, goe.value)
+func (g *GreaterThan) Eval(filterable Filterable) (bool, error) {
+	match, err := filterable.EvalLessOrEqual(g.Column, g.Value)
 	if err != nil {
 		return false, err
 	}
 
-	return filterable.EvalExists(goe.column) && !match, nil
+	return filterable.EvalExists(g.Column) && !match, nil
+}
+
+type GreaterThanOrEqual struct {
+	Condition
+}
+
+func (goe *GreaterThanOrEqual) Eval(filterable Filterable) (bool, error) {
+	match, err := filterable.EvalLess(goe.Column, goe.Value)
+	if err != nil {
+		return false, err
+	}
+
+	return filterable.EvalExists(goe.Column) && !match, nil
+}
+
+// extractConditions extracts filter conditions from the specified filter rules.
+func extractConditions(rules []Filter) []Condition {
+	var conditions []Condition
+	for _, rule := range rules {
+		conditions = append(conditions, rule.ExtractConditions()...)
+	}
+
+	return conditions
 }
 
 var (

@@ -118,12 +118,12 @@ func TestFilter(t *testing.T) {
 
 		expected := &All{rules: []Filter{
 			&None{rules: []Filter{
-				&Equal{column: "foo", value: "bar"},
-				&Equal{column: "bar", value: "foo"},
+				&Equal{Condition{Column: "foo", Value: "bar"}},
+				&Equal{Condition{Column: "bar", Value: "foo"}},
 			}},
 			&Any{rules: []Filter{
-				&Equal{column: "foo", value: "bar"},
-				&Equal{column: "bar", value: "foo"},
+				&Equal{Condition{Column: "foo", Value: "bar"}},
+				&Equal{Condition{Column: "bar", Value: "foo"}},
 			}},
 		}}
 		assert.Equal(t, expected, rule)
@@ -133,30 +133,30 @@ func TestFilter(t *testing.T) {
 		rule, err := Parse("foo=bar")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 
-		expected := &Equal{column: "foo", value: "bar"}
+		expected := &Equal{Condition{Column: "foo", Value: "bar"}}
 		assert.Equal(t, expected, rule, "Parser doesn't parse single condition correctly")
 	})
 
 	t.Run("UrlEncodedFilterExpression", func(t *testing.T) {
 		rule, err := Parse("col%3Cumn<val%3Cue")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		assert.Equal(t, &LessThan{column: "col<umn", value: "val<ue"}, rule)
+		assert.Equal(t, &LessThan{Condition{Column: "col<umn", Value: "val<ue"}}, rule)
 
 		rule, err = Parse("col%7Cumn=val%7Cue")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		assert.Equal(t, &Equal{column: "col|umn", value: "val|ue"}, rule)
+		assert.Equal(t, &Equal{Condition{Column: "col|umn", Value: "val|ue"}}, rule)
 
 		rule, err = Parse("col%26umn<=val%26ue")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		assert.Equal(t, &LessThanOrEqual{column: "col&umn", value: "val&ue"}, rule)
+		assert.Equal(t, &LessThanOrEqual{Condition{Column: "col&umn", Value: "val&ue"}}, rule)
 
 		rule, err = Parse("col%28umn>val%28ue")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		assert.Equal(t, &GreaterThan{column: "col(umn", value: "val(ue"}, rule)
+		assert.Equal(t, &GreaterThan{Condition{Column: "col(umn", Value: "val(ue"}}, rule)
 
 		rule, err = Parse("col%29umn>=val%29ue")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		assert.Equal(t, &GreaterThanOrEqual{column: "col)umn", value: "val)ue"}, rule)
+		assert.Equal(t, &GreaterThanOrEqual{Condition{Column: "col)umn", Value: "val)ue"}}, rule)
 	})
 }
 
