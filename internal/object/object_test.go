@@ -1,7 +1,7 @@
 package object
 
 import (
-	"github.com/icinga/noma/internal/filter"
+	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )

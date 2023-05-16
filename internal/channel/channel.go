@@ -2,9 +2,9 @@ package channel
 
 import (
 	"fmt"
-	"github.com/icinga/noma/internal/event"
-	"github.com/icinga/noma/internal/incident"
-	"github.com/icinga/noma/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/incident"
+	"github.com/icinga/icinga-notifications/internal/recipient"
 )
 
 type Channel struct {

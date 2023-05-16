@@ -3,10 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
-	"github.com/icinga/noma/internal/channel"
-	"github.com/icinga/noma/internal/recipient"
-	"github.com/icinga/noma/internal/rule"
-	"github.com/icinga/noma/internal/timeperiod"
+	"github.com/icinga/icinga-notifications/internal/channel"
+	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/rule"
+	"github.com/icinga/icinga-notifications/internal/timeperiod"
 )
 
 // debugVerify performs a set of config validity/consistency checks that can be used for debugging.

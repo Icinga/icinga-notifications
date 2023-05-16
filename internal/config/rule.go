@@ -2,9 +2,9 @@ package config
 
 import (
 	"context"
-	"github.com/icinga/noma/internal/filter"
-	"github.com/icinga/noma/internal/rule"
-	"github.com/icinga/noma/internal/utils"
+	"github.com/icinga/icinga-notifications/internal/filter"
+	"github.com/icinga/icinga-notifications/internal/rule"
+	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )

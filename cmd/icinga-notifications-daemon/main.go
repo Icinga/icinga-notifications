@@ -4,10 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/config"
+	"github.com/icinga/icinga-notifications/internal/listener"
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/utils"
-	"github.com/icinga/noma/internal/config"
-	"github.com/icinga/noma/internal/listener"
 	"go.uber.org/zap"
 	"os"
 	"time"
@@ -31,7 +31,7 @@ func main() {
 	}
 
 	logs, err := logging.NewLogging(
-		"noma",
+		"icinga-notifications",
 		conf.Logging.Level,
 		conf.Logging.Output,
 		conf.Logging.Options,

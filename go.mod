@@ -1,4 +1,4 @@
-module github.com/icinga/noma
+module github.com/icinga/icinga-notifications
 
 go 1.20
 

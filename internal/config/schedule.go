@@ -2,7 +2,7 @@ package config
 
 import (
 	"context"
-	"github.com/icinga/noma/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )

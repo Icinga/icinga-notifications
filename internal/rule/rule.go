@@ -1,9 +1,9 @@
 package rule
 
 import (
+	"github.com/icinga/icinga-notifications/internal/filter"
+	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"github.com/icinga/icingadb/pkg/types"
-	"github.com/icinga/noma/internal/filter"
-	"github.com/icinga/noma/internal/timeperiod"
 )
 
 type Rule struct {

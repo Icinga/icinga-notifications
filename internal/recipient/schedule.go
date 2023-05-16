@@ -2,7 +2,7 @@ package recipient
 
 import (
 	"database/sql"
-	"github.com/icinga/noma/internal/timeperiod"
+	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"time"
 )
 

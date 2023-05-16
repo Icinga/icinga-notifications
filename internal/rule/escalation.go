@@ -2,8 +2,8 @@ package rule
 
 import (
 	"database/sql"
-	"github.com/icinga/noma/internal/filter"
-	"github.com/icinga/noma/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/filter"
+	"github.com/icinga/icinga-notifications/internal/recipient"
 	"strings"
 	"time"
 )
