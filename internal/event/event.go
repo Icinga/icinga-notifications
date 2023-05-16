@@ -3,9 +3,9 @@ package event
 import (
 	"bytes"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
-	"github.com/icinga/noma/internal/utils"
 	"time"
 )
 

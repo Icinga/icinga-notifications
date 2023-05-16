@@ -2,7 +2,7 @@ package rule
 
 import (
 	"fmt"
-	"github.com/icinga/noma/internal/event"
+	"github.com/icinga/icinga-notifications/internal/event"
 	"time"
 )
 

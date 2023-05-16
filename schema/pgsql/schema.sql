@@ -71,7 +71,7 @@ CREATE TABLE timeperiod_entry (
     timeperiod_id bigint NOT NULL REFERENCES timeperiod(id),
     start_time bigint NOT NULL,
     end_time bigint NOT NULL,
-    -- Is needed by noma-web to prefilter entries, which matches until this time and should be ignored by the daemon.
+    -- Is needed by icinga-notifications-web to prefilter entries, which matches until this time and should be ignored by the daemon.
     until_time bigint,
     timezone text NOT NULL, -- e.g. 'Europe/Berlin', relevant for evaluating rrule (DST changes differ between zones)
     rrule text, -- recurrence rule (RFC5545)

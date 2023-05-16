@@ -1,6 +1,6 @@
 package filter
 
-// Filterable is implemented by every filterable noma types.
+// Filterable is implemented by every filterable type.
 type Filterable interface {
 	EvalEqual(key string, value string) (bool, error)
 	EvalLess(key string, value string) (bool, error)

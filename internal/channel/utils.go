@@ -2,8 +2,8 @@ package channel
 
 import (
 	"fmt"
-	"github.com/icinga/noma/internal/event"
-	"github.com/icinga/noma/internal/incident"
+	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/incident"
 	"io"
 	"strings"
 )
@@ -20,9 +20,9 @@ func FormatMessage(writer io.Writer, incident *incident.Incident, event *event.E
 	_, _ = writer.Write([]byte(event.URL + "\n\n"))
 	incidentUrl := icingaweb2Url
 	if strings.HasSuffix(incidentUrl, "/") {
-		incidentUrl = fmt.Sprintf("Incident: %snoma/incident?id=%d\n", icingaweb2Url, incident.ID())
+		incidentUrl = fmt.Sprintf("Incident: %snotifications/incident?id=%d\n", icingaweb2Url, incident.ID())
 	} else {
-		incidentUrl = fmt.Sprintf("Incident: %s/noma/incident?id=%d\n", icingaweb2Url, incident.ID())
+		incidentUrl = fmt.Sprintf("Incident: %s/notifications/incident?id=%d\n", icingaweb2Url, incident.ID())
 	}
 
 	_, _ = writer.Write([]byte(incidentUrl))
