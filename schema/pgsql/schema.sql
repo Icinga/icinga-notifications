@@ -40,7 +40,7 @@ CREATE TABLE available_channel_type (
 
 CREATE TABLE channel (
     id bigserial,
-    name text NOT NULL,
+    name citext NOT NULL,
     type text NOT NULL REFERENCES available_channel_type(type), -- 'email', 'sms', ...
     config text, -- JSON with channel-specific attributes
     -- for now type determines the implementation, in the future, this will need a reference to a concrete
@@ -51,8 +51,8 @@ CREATE TABLE channel (
 
 CREATE TABLE contact (
     id bigserial,
-    full_name text NOT NULL,
-    username text, -- reference to web user
+    full_name citext NOT NULL,
+    username citext, -- reference to web user
     default_channel_id bigint NOT NULL REFERENCES channel(id),
     color varchar(7) NOT NULL, -- hex color codes e.g #000000
 
@@ -72,7 +72,7 @@ CREATE TABLE contact_address (
 
 CREATE TABLE contactgroup (
     id bigserial,
-    name text NOT NULL,
+    name citext NOT NULL,
     color varchar(7) NOT NULL, -- hex color codes e.g #000000
 
     CONSTRAINT pk_contactgroup PRIMARY KEY (id)
@@ -87,7 +87,7 @@ CREATE TABLE contactgroup_member (
 
 CREATE TABLE schedule (
     id bigserial,
-    name text NOT NULL,
+    name citext NOT NULL,
 
     CONSTRAINT pk_schedule PRIMARY KEY (id)
 );
@@ -163,7 +163,7 @@ CREATE TABLE source (
     id bigserial,
     -- The type "icinga2" is special and requires (at least some of) the icinga2_ prefixed columns.
     type text NOT NULL,
-    name text NOT NULL,
+    name citext NOT NULL,
     -- will likely need a distinguishing value for multiple sources of the same type in the future, like for example
     -- the Icinga DB environment ID for Icinga 2 sources
 
@@ -230,14 +230,14 @@ CREATE TABLE event (
     type text NOT NULL,
     severity severity,
     message text,
-    username text,
+    username citext,
 
     CONSTRAINT pk_event PRIMARY KEY (id)
 );
 
 CREATE TABLE rule (
     id bigserial,
-    name text NOT NULL,
+    name citext NOT NULL,
     timeperiod_id bigint REFERENCES timeperiod(id),
     object_filter text,
     is_active boolenum NOT NULL DEFAULT 'y',
@@ -250,7 +250,7 @@ CREATE TABLE rule_escalation (
     rule_id bigint NOT NULL REFERENCES rule(id),
     position integer NOT NULL,
     condition text,
-    name text, -- if not set, recipients are used as a fallback for display purposes
+    name citext, -- if not set, recipients are used as a fallback for display purposes
     fallback_for bigint REFERENCES rule_escalation(id),
 
     CONSTRAINT pk_rule_escalation PRIMARY KEY (id),
