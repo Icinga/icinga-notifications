@@ -7,6 +7,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
+	"github.com/jmoiron/sqlx"
 )
 
 type IncidentRow struct {
@@ -32,15 +33,15 @@ func (i *IncidentRow) Upsert() interface{} {
 // Sync synchronizes incidents to the database.
 // Fetches the last inserted incident id and modifies this incident's id.
 // Returns an error on database failure.
-func (i *IncidentRow) Sync(db *icingadb.DB, upsert bool) error {
+func (i *IncidentRow) Sync(tx *sqlx.Tx, db *icingadb.DB, upsert bool) error {
 	if upsert {
 		stmt, _ := db.BuildUpsertStmt(i)
-		_, err := db.NamedExec(stmt, i)
+		_, err := tx.NamedExec(stmt, i)
 		if err != nil {
 			return fmt.Errorf("failed to upsert incident: %s", err)
 		}
 	} else {
-		incidentId, err := utils.InsertAndFetchId(db, utils.BuildInsertStmtWithout(db, i, "id"), i)
+		incidentId, err := utils.InsertAndFetchId(tx, utils.BuildInsertStmtWithout(db, i, "id"), i)
 		if err != nil {
 			return err
 		}

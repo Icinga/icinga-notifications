@@ -6,6 +6,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
+	"github.com/jmoiron/sqlx"
 	"time"
 )
 
@@ -73,25 +74,16 @@ func (e *Event) FullString() string {
 	return b.String()
 }
 
-// Sync transforms this event to *event.EventRow and calls its sync method.
-func (e *Event) Sync(db *icingadb.DB, objectId types.Binary) error {
+// Sync transforms this event to *event.EventRow and synchronises with the database.
+func (e *Event) Sync(tx *sqlx.Tx, db *icingadb.DB, objectId types.Binary) error {
 	if e.ID != 0 {
 		return nil
 	}
 
-	eventRow := &EventRow{
-		Time:     types.UnixMilli(e.Time),
-		SourceID: e.SourceId,
-		ObjectID: objectId,
-		Type:     utils.ToDBString(e.Type),
-		Severity: e.Severity,
-		Username: utils.ToDBString(e.Username),
-		Message:  utils.ToDBString(e.Message),
-	}
-
-	err := eventRow.Sync(db)
+	eventRow := NewEventRow(e, objectId)
+	eventID, err := utils.InsertAndFetchId(tx, utils.BuildInsertStmtWithout(db, eventRow, "id"), eventRow)
 	if err == nil {
-		e.ID = eventRow.ID
+		e.ID = eventID
 	}
 
 	return err
@@ -114,15 +106,14 @@ func (er *EventRow) TableName() string {
 	return "event"
 }
 
-// Sync synchronizes this types data to the database.
-// Returns an error when any of the database operation fails.
-func (er *EventRow) Sync(db *icingadb.DB) error {
-	eventId, err := utils.InsertAndFetchId(db, utils.BuildInsertStmtWithout(db, er, "id"), er)
-	if err != nil {
-		return err
+func NewEventRow(e *Event, objectId types.Binary) *EventRow {
+	return &EventRow{
+		Time:     types.UnixMilli(e.Time),
+		SourceID: e.SourceId,
+		ObjectID: objectId,
+		Type:     utils.ToDBString(e.Type),
+		Severity: e.Severity,
+		Username: utils.ToDBString(e.Username),
+		Message:  utils.ToDBString(e.Message),
 	}
-
-	er.ID = eventId
-
-	return nil
 }

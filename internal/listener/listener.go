@@ -1,6 +1,7 @@
 package listener
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
@@ -95,20 +96,29 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	err = obj.UpdateMetadata(ev.SourceId, ev.Name, utils.ToDBString(ev.URL), ev.ExtraTags)
+	tx, err := l.db.BeginTxx(context.Background(), nil)
 	if err != nil {
-		l.logger.Errorln(err)
+		l.logger.Errorw("Can't start a db transaction", zap.Error(err))
 
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprintln(w, err.Error())
+		_, _ = fmt.Fprintln(w, "can't start a db transaction")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := obj.UpdateMetadata(tx, ev.SourceId, ev.Name, utils.ToDBString(ev.URL), ev.ExtraTags); err != nil {
+		l.logger.Errorw("Can't update object metadata", zap.String("object", obj.DisplayName()), zap.Error(err))
+
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprintln(w, "can't update object metadata")
 		return
 	}
 
-	if err = ev.Sync(l.db, obj.ID); err != nil {
-		l.logger.Errorln(err)
+	if err := ev.Sync(tx, l.db, obj.ID); err != nil {
+		l.logger.Errorw("Failed to insert event and fetch its ID", zap.String("event", ev.String()), zap.Error(err))
 
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprintln(w, err.Error())
+		_, _ = fmt.Fprintln(w, "can't insert event and fetch its ID")
 		return
 	}
 
@@ -144,9 +154,20 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	l.logger.Infof("Processing event")
 
-	if err := currentIncident.ProcessEvent(ev, created); err != nil {
+	if err := currentIncident.ProcessEvent(tx, ev, created); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err)
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		l.logger.Errorw(
+			"Can't commit db transaction", zap.String("object", obj.DisplayName()),
+			zap.String("incident", currentIncident.String()), zap.Error(err),
+		)
+
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprintln(w, "can't commit db transaction")
 		return
 	}
 
