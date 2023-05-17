@@ -7,6 +7,7 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
 	"github.com/icinga/icingadb/pkg/utils"
+	"github.com/jmoiron/sqlx"
 	"strings"
 )
 
@@ -29,10 +30,10 @@ func BuildInsertStmtWithout(db *icingadb.DB, into interface{}, withoutColumn str
 }
 
 // InsertAndFetchId executes the given query and fetches the last inserted ID.
-func InsertAndFetchId(db *icingadb.DB, stmt string, args any) (int64, error) {
+func InsertAndFetchId(tx *sqlx.Tx, stmt string, args any) (int64, error) {
 	var lastInsertId int64
-	if db.DriverName() == driver.PostgreSQL {
-		preparedStmt, err := db.PrepareNamed(stmt + " RETURNING id")
+	if tx.DriverName() == driver.PostgreSQL {
+		preparedStmt, err := tx.PrepareNamed(stmt + " RETURNING id")
 		if err != nil {
 			return 0, err
 		}
@@ -43,7 +44,7 @@ func InsertAndFetchId(db *icingadb.DB, stmt string, args any) (int64, error) {
 			return 0, fmt.Errorf("failed to insert entry for type %T: %s", args, err)
 		}
 	} else {
-		result, err := db.NamedExec(stmt, args)
+		result, err := tx.NamedExec(stmt, args)
 		if err != nil {
 			return 0, fmt.Errorf("failed to insert entry for type %T: %s", args, err)
 		}

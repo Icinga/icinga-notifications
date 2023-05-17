@@ -2,7 +2,6 @@ package object
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,6 +9,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
+	"github.com/jmoiron/sqlx"
 	"regexp"
 	"sort"
 	"strings"
@@ -104,7 +104,7 @@ func (o *Object) String() string {
 	return b.String()
 }
 
-func (o *Object) UpdateMetadata(source int64, name string, url types.String, extraTags map[string]string) error {
+func (o *Object) UpdateMetadata(tx *sqlx.Tx, source int64, name string, url types.String, extraTags map[string]string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -117,33 +117,23 @@ func (o *Object) UpdateMetadata(source int64, name string, url types.String, ext
 	}
 
 	stmt, _ := o.db.BuildUpsertStmt(&SourceMetadata{})
-	_, err := o.db.NamedExec(stmt, sourceMetadata)
+	_, err := tx.NamedExec(stmt, sourceMetadata)
 	if err != nil {
-		return fmt.Errorf("failed to upsert object metadata: %s", err)
+		return err
 	}
-
-	tx, err := o.db.BeginTxx(context.TODO(), nil)
-	if err != nil {
-		return fmt.Errorf("failed to start transaction for object extra tags: %s", err)
-	}
-	defer tx.Rollback()
 
 	extraTag := &ExtraTagRow{ObjectId: o.ID, SourceId: source}
 	_, err = tx.NamedExec(`DELETE FROM "object_extra_tag" WHERE "object_id" = :object_id AND "source_id" = :source_id`, extraTag)
 	if err != nil {
-		return fmt.Errorf("failed to delete object extra tags: %s", err)
+		return err
 	}
 
 	if len(extraTags) > 0 {
 		stmt, _ = o.db.BuildInsertStmt(extraTag)
 		_, err = tx.NamedExec(stmt, sourceMetadata.mapToExtraTags())
 		if err != nil {
-			return fmt.Errorf("failed to insert object extra tags: %s", err)
+			return err
 		}
-	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit object extrag tags transaction: %s", err)
 	}
 
 	if o.Metadata == nil {
