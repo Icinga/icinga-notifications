@@ -2,6 +2,7 @@ package object
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -31,7 +32,7 @@ var (
 	cacheMu sync.Mutex
 )
 
-func FromTags(db *icingadb.DB, tags map[string]string) (*Object, error) {
+func FromTags(ctx context.Context, db *icingadb.DB, tags map[string]string) (*Object, error) {
 	id := ID(tags)
 
 	cacheMu.Lock()
@@ -55,7 +56,7 @@ func FromTags(db *icingadb.DB, tags map[string]string) (*Object, error) {
 		dbObj.Service = utils.ToDBString(service)
 	}
 
-	_, err := object.db.NamedExec(stmt, dbObj)
+	_, err := object.db.NamedExecContext(ctx, stmt, dbObj)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert object: %s", err)
 	}
@@ -104,7 +105,9 @@ func (o *Object) String() string {
 	return b.String()
 }
 
-func (o *Object) UpdateMetadata(tx *sqlx.Tx, source int64, name string, url types.String, extraTags map[string]string) error {
+func (o *Object) UpdateMetadata(
+	ctx context.Context, tx *sqlx.Tx, source int64, name string, url types.String, extraTags map[string]string,
+) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -117,20 +120,20 @@ func (o *Object) UpdateMetadata(tx *sqlx.Tx, source int64, name string, url type
 	}
 
 	stmt, _ := o.db.BuildUpsertStmt(&SourceMetadata{})
-	_, err := tx.NamedExec(stmt, sourceMetadata)
+	_, err := tx.NamedExecContext(ctx, stmt, sourceMetadata)
 	if err != nil {
 		return err
 	}
 
 	extraTag := &ExtraTagRow{ObjectId: o.ID, SourceId: source}
-	_, err = tx.NamedExec(`DELETE FROM "object_extra_tag" WHERE "object_id" = :object_id AND "source_id" = :source_id`, extraTag)
+	_, err = tx.NamedExecContext(ctx, `DELETE FROM "object_extra_tag" WHERE "object_id" = :object_id AND "source_id" = :source_id`, extraTag)
 	if err != nil {
 		return err
 	}
 
 	if len(extraTags) > 0 {
 		stmt, _ = o.db.BuildInsertStmt(extraTag)
-		_, err = tx.NamedExec(stmt, sourceMetadata.mapToExtraTags())
+		_, err = tx.NamedExecContext(ctx, stmt, sourceMetadata.mapToExtraTags())
 		if err != nil {
 			return err
 		}
@@ -140,13 +143,7 @@ func (o *Object) UpdateMetadata(tx *sqlx.Tx, source int64, name string, url type
 		o.Metadata = make(map[int64]*SourceMetadata)
 	}
 
-	if m := o.Metadata[source]; m != nil {
-		m.Name = name
-		m.URL = url
-		m.ExtraTags = extraTags
-	} else {
-		o.Metadata[source] = sourceMetadata
-	}
+	o.Metadata[source] = sourceMetadata
 
 	return nil
 }

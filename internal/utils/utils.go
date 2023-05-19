@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"github.com/icinga/icingadb/pkg/driver"
@@ -30,21 +31,21 @@ func BuildInsertStmtWithout(db *icingadb.DB, into interface{}, withoutColumn str
 }
 
 // InsertAndFetchId executes the given query and fetches the last inserted ID.
-func InsertAndFetchId(tx *sqlx.Tx, stmt string, args any) (int64, error) {
+func InsertAndFetchId(ctx context.Context, tx *sqlx.Tx, stmt string, args any) (int64, error) {
 	var lastInsertId int64
 	if tx.DriverName() == driver.PostgreSQL {
-		preparedStmt, err := tx.PrepareNamed(stmt + " RETURNING id")
+		preparedStmt, err := tx.PrepareNamedContext(ctx, stmt+" RETURNING id")
 		if err != nil {
 			return 0, err
 		}
-		defer preparedStmt.Close()
+		defer func() { _ = preparedStmt.Close() }()
 
 		err = preparedStmt.Get(&lastInsertId, args)
 		if err != nil {
 			return 0, fmt.Errorf("failed to insert entry for type %T: %s", args, err)
 		}
 	} else {
-		result, err := tx.NamedExec(stmt, args)
+		result, err := tx.NamedExecContext(ctx, stmt, args)
 		if err != nil {
 			return 0, fmt.Errorf("failed to insert entry for type %T: %s", args, err)
 		}

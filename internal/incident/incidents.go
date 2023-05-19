@@ -1,6 +1,7 @@
 package incident
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -19,7 +20,7 @@ var (
 )
 
 func GetCurrent(
-	db *icingadb.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
+	ctx context.Context, db *icingadb.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
 	configFile *config.ConfigFile, create bool,
 ) (*Incident, bool, error) {
 	currentIncidentsMu.Lock()
@@ -42,8 +43,8 @@ func GetCurrent(
 			Rules:            map[ruleID]struct{}{},
 		}
 
-		err := db.QueryRowx(db.Rebind(db.BuildSelectStmt(ir, ir)+` WHERE "object_id" = ? AND "recovered_at" IS NULL`), obj.ID).StructScan(ir)
-		if err != nil && err != sql.ErrNoRows {
+		err := db.QueryRowxContext(ctx, db.Rebind(db.BuildSelectStmt(ir, ir)+` WHERE "object_id" = ? AND "recovered_at" IS NULL`), obj.ID).StructScan(ir)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			logger.Errorw("Failed to load incident from database", zap.String("object", obj.DisplayName()), zap.Error(err))
 
 			return nil, false, errors.New("failed to load incident from database")
@@ -54,8 +55,8 @@ func GetCurrent(
 
 			sourceSeverity := &SourceSeverity{IncidentID: ir.ID}
 			var sources []SourceSeverity
-			err := db.Select(
-				&sources,
+			err := db.SelectContext(
+				ctx, &sources,
 				db.Rebind(db.BuildSelectStmt(sourceSeverity, sourceSeverity)+` WHERE "incident_id" = ? AND "severity" != ?`),
 				ir.ID, event.SeverityOK,
 			)
@@ -71,7 +72,7 @@ func GetCurrent(
 
 			state := &EscalationState{}
 			var states []*EscalationState
-			err = db.Select(&states, db.Rebind(db.BuildSelectStmt(state, state)+` WHERE "incident_id" = ?`), ir.ID)
+			err = db.SelectContext(ctx, &states, db.Rebind(db.BuildSelectStmt(state, state)+` WHERE "incident_id" = ?`), ir.ID)
 			if err != nil {
 				incident.logger.Errorw("Failed to load incident rule escalation states", zap.Error(err))
 
@@ -103,7 +104,7 @@ func GetCurrent(
 
 		contact := &ContactRow{}
 		var contacts []*ContactRow
-		err := db.Select(&contacts, db.Rebind(db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), currentIncident.ID())
+		err := db.SelectContext(ctx, &contacts, db.Rebind(db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), currentIncident.ID())
 		if err != nil {
 			currentIncident.logger.Errorw("Failed to reload incident recipients", zap.Error(err))
 
