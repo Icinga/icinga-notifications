@@ -1,6 +1,7 @@
 package incident
 
 import (
+	"context"
 	"errors"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -15,7 +16,7 @@ import (
 // Sync initiates an *incident.IncidentRow from the current incident state and syncs it with the database.
 // Before syncing any incident related database entries, this method should be called at least once.
 // Returns an error on db failure.
-func (i *Incident) Sync(tx *sqlx.Tx) error {
+func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 	incidentRow := &IncidentRow{
 		ID:          i.incidentRowID,
 		ObjectID:    i.Object.ID,
@@ -24,7 +25,7 @@ func (i *Incident) Sync(tx *sqlx.Tx) error {
 		Severity:    i.Severity(),
 	}
 
-	err := incidentRow.Sync(tx, i.db, i.incidentRowID != 0)
+	err := incidentRow.Sync(ctx, tx, i.db, i.incidentRowID != 0)
 	if err != nil {
 		return err
 	}
@@ -34,19 +35,19 @@ func (i *Incident) Sync(tx *sqlx.Tx) error {
 	return nil
 }
 
-func (i *Incident) AddHistory(tx *sqlx.Tx, historyRow *HistoryRow, fetchId bool) (types.Int, error) {
+func (i *Incident) AddHistory(ctx context.Context, tx *sqlx.Tx, historyRow *HistoryRow, fetchId bool) (types.Int, error) {
 	historyRow.IncidentID = i.incidentRowID
 
 	stmt := utils.BuildInsertStmtWithout(i.db, historyRow, "id")
 	if fetchId {
-		historyId, err := utils.InsertAndFetchId(tx, stmt, historyRow)
+		historyId, err := utils.InsertAndFetchId(ctx, tx, stmt, historyRow)
 		if err != nil {
 			return types.Int{}, err
 		}
 
 		return utils.ToDBInt(historyId), nil
 	} else {
-		_, err := tx.NamedExec(stmt, historyRow)
+		_, err := tx.NamedExecContext(ctx, stmt, historyRow)
 		if err != nil {
 			return types.Int{}, err
 		}
@@ -55,27 +56,27 @@ func (i *Incident) AddHistory(tx *sqlx.Tx, historyRow *HistoryRow, fetchId bool)
 	return types.Int{}, nil
 }
 
-func (i *Incident) AddEscalationTriggered(tx *sqlx.Tx, state *EscalationState) error {
+func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, state *EscalationState) error {
 	state.IncidentID = i.incidentRowID
 
 	stmt, _ := i.db.BuildUpsertStmt(state)
-	_, err := tx.NamedExec(stmt, state)
+	_, err := tx.NamedExecContext(ctx, stmt, state)
 
 	return err
 }
 
 // AddEvent Inserts incident history record to the database and returns an error on db failure.
-func (i *Incident) AddEvent(tx *sqlx.Tx, ev *event.Event) error {
+func (i *Incident) AddEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
 	ie := &EventRow{IncidentID: i.incidentRowID, EventID: ev.ID}
 	stmt, _ := i.db.BuildInsertStmt(ie)
-	_, err := tx.NamedExec(stmt, ie)
+	_, err := tx.NamedExecContext(ctx, stmt, ie)
 
 	return err
 }
 
 // AddRecipient adds recipient from the given *rule.Escalation to this incident.
 // Syncs also all the recipients with the database and returns an error on db failure.
-func (i *Incident) AddRecipient(tx *sqlx.Tx, escalation *rule.Escalation, eventId int64) error {
+func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation, eventId int64) error {
 	newRole := RoleRecipient
 	if i.HasManager() {
 		newRole = RoleSubscriber
@@ -108,7 +109,7 @@ func (i *Incident) AddRecipient(tx *sqlx.Tx, escalation *rule.Escalation, eventI
 					OldRecipientRole: oldRole,
 				}
 
-				_, err := i.AddHistory(tx, hr, false)
+				_, err := i.AddHistory(ctx, tx, hr, false)
 				if err != nil {
 					i.logger.Errorw(
 						"Failed to insert recipient role changed incident history", zap.String("escalation", escalation.DisplayName()),
@@ -122,7 +123,7 @@ func (i *Incident) AddRecipient(tx *sqlx.Tx, escalation *rule.Escalation, eventI
 		}
 
 		stmt, _ := i.db.BuildUpsertStmt(cr)
-		_, err := tx.NamedExec(stmt, cr)
+		_, err := tx.NamedExecContext(ctx, stmt, cr)
 		if err != nil {
 			i.logger.Errorw(
 				"Failed to upsert incident recipient", zap.String("escalation", escalation.DisplayName()),
@@ -138,15 +139,15 @@ func (i *Incident) AddRecipient(tx *sqlx.Tx, escalation *rule.Escalation, eventI
 
 // AddRuleMatched syncs the given *rule.Rule to the database.
 // Returns an error on database failure.
-func (i *Incident) AddRuleMatched(tx *sqlx.Tx, r *rule.Rule) error {
+func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule) error {
 	rr := &RuleRow{IncidentID: i.incidentRowID, RuleID: r.ID}
 	stmt, _ := i.db.BuildUpsertStmt(rr)
-	_, err := tx.NamedExec(stmt, rr)
+	_, err := tx.NamedExecContext(ctx, stmt, rr)
 
 	return err
 }
 
-func (i *Incident) AddSourceSeverity(tx *sqlx.Tx, severity event.Severity, sourceID int64) error {
+func (i *Incident) AddSourceSeverity(ctx context.Context, tx *sqlx.Tx, severity event.Severity, sourceID int64) error {
 	i.SeverityBySource[sourceID] = severity
 
 	sourceSeverity := &SourceSeverity{
@@ -156,7 +157,7 @@ func (i *Incident) AddSourceSeverity(tx *sqlx.Tx, severity event.Severity, sourc
 	}
 
 	stmt, _ := i.db.BuildUpsertStmt(sourceSeverity)
-	_, err := tx.NamedExec(stmt, sourceSeverity)
+	_, err := tx.NamedExecContext(ctx, stmt, sourceSeverity)
 
 	return err
 }

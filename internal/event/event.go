@@ -2,6 +2,7 @@ package event
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
@@ -75,13 +76,13 @@ func (e *Event) FullString() string {
 }
 
 // Sync transforms this event to *event.EventRow and synchronises with the database.
-func (e *Event) Sync(tx *sqlx.Tx, db *icingadb.DB, objectId types.Binary) error {
+func (e *Event) Sync(ctx context.Context, tx *sqlx.Tx, db *icingadb.DB, objectId types.Binary) error {
 	if e.ID != 0 {
 		return nil
 	}
 
 	eventRow := NewEventRow(e, objectId)
-	eventID, err := utils.InsertAndFetchId(tx, utils.BuildInsertStmtWithout(db, eventRow, "id"), eventRow)
+	eventID, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, eventRow, "id"), eventRow)
 	if err == nil {
 		e.ID = eventID
 	}

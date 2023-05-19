@@ -87,7 +87,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	obj, err := object.FromTags(l.db, ev.Tags)
+	ctx := context.Background()
+	obj, err := object.FromTags(ctx, l.db, ev.Tags)
 	if err != nil {
 		l.logger.Errorln(err)
 
@@ -96,7 +97,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	tx, err := l.db.BeginTxx(context.Background(), nil)
+	tx, err := l.db.BeginTxx(ctx, nil)
 	if err != nil {
 		l.logger.Errorw("Can't start a db transaction", zap.Error(err))
 
@@ -106,7 +107,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := obj.UpdateMetadata(tx, ev.SourceId, ev.Name, utils.ToDBString(ev.URL), ev.ExtraTags); err != nil {
+	if err := obj.UpdateMetadata(ctx, tx, ev.SourceId, ev.Name, utils.ToDBString(ev.URL), ev.ExtraTags); err != nil {
 		l.logger.Errorw("Can't update object metadata", zap.String("object", obj.DisplayName()), zap.Error(err))
 
 		w.WriteHeader(http.StatusInternalServerError)
@@ -114,7 +115,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if err := ev.Sync(tx, l.db, obj.ID); err != nil {
+	if err := ev.Sync(ctx, tx, l.db, obj.ID); err != nil {
 		l.logger.Errorw("Failed to insert event and fetch its ID", zap.String("event", ev.String()), zap.Error(err))
 
 		w.WriteHeader(http.StatusInternalServerError)
@@ -123,7 +124,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
-	currentIncident, created, err := incident.GetCurrent(l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, l.configFile, createIncident)
+	currentIncident, created, err := incident.GetCurrent(ctx, l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, l.configFile, createIncident)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err)
@@ -154,7 +155,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	l.logger.Infof("Processing event")
 
-	if err := currentIncident.ProcessEvent(tx, ev, created); err != nil {
+	if err := currentIncident.ProcessEvent(ctx, tx, ev, created); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err)
 		return
