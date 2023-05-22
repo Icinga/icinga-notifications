@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -34,6 +35,10 @@ type Incident struct {
 	db *icingadb.DB
 
 	sync.Mutex
+}
+
+func (i *Incident) ObjectDisplayName() string {
+	return i.Object.DisplayName()
 }
 
 func (i *Incident) ID() int64 {
@@ -407,4 +412,8 @@ func GetCurrentIncidents() map[int64]*Incident {
 var (
 	currentIncidents   = make(map[*object.Object]*Incident)
 	currentIncidentsMu sync.Mutex
+)
+
+var (
+	_ contracts.Incident = (*Incident)(nil)
 )
