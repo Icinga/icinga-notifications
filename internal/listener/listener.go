@@ -24,14 +24,17 @@ type Listener struct {
 	db            *icingadb.DB
 	logger        *logging.Logger
 	runtimeConfig *config.RuntimeConfig
-	mux           http.ServeMux
+
+	logs *logging.Logging
+	mux  http.ServeMux
 }
 
-func NewListener(db *icingadb.DB, configFile *config.ConfigFile, runtimeConfig *config.RuntimeConfig, logger *logging.Logger) *Listener {
+func NewListener(db *icingadb.DB, configFile *config.ConfigFile, runtimeConfig *config.RuntimeConfig, logs *logging.Logging) *Listener {
 	l := &Listener{
 		configFile:    configFile,
 		db:            db,
-		logger:        logger,
+		logger:        logs.GetChildLogger("listener"),
+		logs:          logs,
 		runtimeConfig: runtimeConfig,
 	}
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
@@ -119,7 +122,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	_, _ = fmt.Fprintln(w, ev.String())
 
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
-	currentIncident, created, err := incident.GetCurrent(l.db, obj, createIncident)
+	currentIncident, created, err := incident.GetCurrent(l.db, obj, l.logs.GetChildLogger("incident"), createIncident)
 	if err != nil {
 		_, _ = fmt.Fprintln(w, err)
 
@@ -148,27 +151,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	currentIncident.Lock()
 	defer currentIncident.Unlock()
 
-	if created {
-		currentIncident.StartedAt = ev.Time
-		err = currentIncident.Sync()
-		if err != nil {
-			_, _ = fmt.Fprintln(w, err)
-
-			l.logger.Errorln(err)
-			return
-		}
-
-		l.logger.Infof("[%s %s] opened incident", obj.DisplayName(), currentIncident.String())
-
-		historyRow := &incident.HistoryRow{
-			Type:    incident.Opened,
-			Time:    types.UnixMilli(ev.Time),
-			EventID: utils.ToDBInt(ev.ID),
-		}
-		_, err = currentIncident.AddHistory(historyRow, false)
-	}
-
-	err = currentIncident.AddEvent(&ev)
+	err = currentIncident.ProcessIncidentOpenedEvent(ev, created)
 	if err != nil {
 		l.logger.Errorln(err)
 		return

@@ -7,6 +7,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icingadb/pkg/icingadb"
+	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/types"
 	"sync"
 )
@@ -16,7 +17,9 @@ var (
 	currentIncidentsMu sync.Mutex
 )
 
-func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bool, error) {
+func GetCurrent(
+	db *icingadb.DB, obj *object.Object, logger *logging.Logger, create bool,
+) (*Incident, bool, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
 
@@ -25,7 +28,7 @@ func GetCurrent(db *icingadb.DB, obj *object.Object, create bool) (*Incident, bo
 
 	if currentIncident == nil {
 		ir := &IncidentRow{}
-		incident := &Incident{Object: obj, db: db}
+		incident := &Incident{Object: obj, db: db, logger: logger}
 		incident.SeverityBySource = make(map[int64]event.Severity)
 		incident.EscalationState = make(map[escalationID]*EscalationState)
 		incident.Recipients = make(map[recipient.Key]*RecipientState)

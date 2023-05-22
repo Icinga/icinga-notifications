@@ -6,7 +6,9 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
+	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/types"
 	"sync"
 	"time"
@@ -27,7 +29,8 @@ type Incident struct {
 
 	incidentRowID int64
 
-	db *icingadb.DB
+	db     *icingadb.DB
+	logger *logging.Logger
 
 	sync.Mutex
 }
@@ -62,6 +65,38 @@ func (i *Incident) HasManager() bool {
 
 func (i *Incident) String() string {
 	return fmt.Sprintf("%d", i.incidentRowID)
+}
+
+func (i *Incident) ProcessIncidentOpenedEvent(ev event.Event, created bool) error {
+	if created {
+		i.StartedAt = ev.Time
+		if err := i.Sync(); err != nil {
+			i.logger.Errorln(err)
+
+			return err
+		}
+
+		i.logger.Infof("[%s %s] opened incident", i.Object.DisplayName(), i.String())
+		historyRow := &HistoryRow{
+			Type:    Opened,
+			Time:    types.UnixMilli(ev.Time),
+			EventID: utils.ToDBInt(ev.ID),
+		}
+
+		if _, err := i.AddHistory(historyRow, false); err != nil {
+			i.logger.Errorln(err)
+
+			return err
+		}
+	}
+
+	if err := i.AddEvent(&ev); err != nil {
+		i.logger.Errorln(err)
+
+		return err
+	}
+
+	return nil
 }
 
 type EscalationState struct {
