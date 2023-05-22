@@ -122,7 +122,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	_, _ = fmt.Fprintln(w, ev.String())
 
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
-	currentIncident, created, err := incident.GetCurrent(l.db, obj, l.logs.GetChildLogger("incident"), createIncident)
+	currentIncident, created, err := incident.GetCurrent(l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, createIncident)
 	if err != nil {
 		_, _ = fmt.Fprintln(w, err)
 
@@ -160,7 +160,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	l.logger.Infof("processing event")
 
 	if ev.Type == event.TypeAcknowledgement {
-		err := l.ProcessAcknowledgementEvent(currentIncident, ev)
+		err := currentIncident.ProcessAcknowledgementEvent(ev)
 		if err != nil {
 			_, _ = fmt.Fprintln(w, err)
 
@@ -564,56 +564,4 @@ func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(encodedIncidents)
-}
-
-func (l *Listener) ProcessAcknowledgementEvent(i *incident.Incident, ev event.Event) error {
-	l.runtimeConfig.RLock()
-	defer l.runtimeConfig.RUnlock()
-
-	contact := l.runtimeConfig.GetContact(ev.Username)
-	if contact == nil {
-		return fmt.Errorf("unknown acknowledgment author %q", ev.Username)
-	}
-
-	recipientKey := recipient.ToKey(contact)
-	state := i.Recipients[recipientKey]
-	oldRole := incident.RoleNone
-	newRole := incident.RoleManager
-	if state != nil {
-		oldRole = state.Role
-
-		if oldRole == incident.RoleManager {
-			// The user is already a manager
-			return nil
-		}
-	} else {
-		i.Recipients[recipientKey] = &incident.RecipientState{Role: newRole}
-	}
-
-	l.logger.Infof("[%s %s] contact %q role changed from %s to %s", i.Object.DisplayName(), i.String(), contact.String(), oldRole.String(), newRole.String())
-
-	hr := &incident.HistoryRow{
-		Key:              recipientKey,
-		EventID:          utils.ToDBInt(ev.ID),
-		Type:             incident.RecipientRoleChanged,
-		Time:             types.UnixMilli(time.Now()),
-		NewRecipientRole: newRole,
-		OldRecipientRole: oldRole,
-		Message:          utils.ToDBString(ev.Message),
-	}
-
-	_, err := i.AddHistory(hr, false)
-	if err != nil {
-		return err
-	}
-
-	cr := &incident.ContactRow{IncidentID: hr.IncidentID, Key: recipientKey, Role: newRole}
-
-	stmt, _ := l.db.BuildUpsertStmt(cr)
-	_, err = l.db.NamedExec(stmt, cr)
-	if err != nil {
-		return fmt.Errorf("failed to upsert incident contact %s: %s", contact.String(), err)
-	}
-
-	return nil
 }

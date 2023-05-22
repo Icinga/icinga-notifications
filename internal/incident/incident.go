@@ -2,6 +2,7 @@ package incident
 
 import (
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
@@ -29,8 +30,9 @@ type Incident struct {
 
 	incidentRowID int64
 
-	db     *icingadb.DB
-	logger *logging.Logger
+	db            *icingadb.DB
+	logger        *logging.Logger
+	runtimeConfig *config.RuntimeConfig
 
 	sync.Mutex
 }
@@ -94,6 +96,61 @@ func (i *Incident) ProcessIncidentOpenedEvent(ev event.Event, created bool) erro
 		i.logger.Errorln(err)
 
 		return err
+	}
+
+	return nil
+}
+
+// ProcessAcknowledgementEvent processes the given ack event.
+// Promotes the ack author to incident.RoleManager if it's not already the case and generates a history entry.
+// Returns error on database failure.
+func (i *Incident) ProcessAcknowledgementEvent(ev event.Event) error {
+	i.runtimeConfig.RLock()
+	defer i.runtimeConfig.RUnlock()
+
+	contact := i.runtimeConfig.GetContact(ev.Username)
+	if contact == nil {
+		return fmt.Errorf("unknown acknowledgment author %q", ev.Username)
+	}
+
+	recipientKey := recipient.ToKey(contact)
+	state := i.Recipients[recipientKey]
+	oldRole := RoleNone
+	newRole := RoleManager
+	if state != nil {
+		oldRole = state.Role
+
+		if oldRole == RoleManager {
+			// The user is already a manager
+			return nil
+		}
+	} else {
+		i.Recipients[recipientKey] = &RecipientState{Role: newRole}
+	}
+
+	i.logger.Infof("[%s %s] contact %q role changed from %s to %s", i.Object.DisplayName(), i.String(), contact.String(), oldRole.String(), newRole.String())
+
+	hr := &HistoryRow{
+		Key:              recipientKey,
+		EventID:          utils.ToDBInt(ev.ID),
+		Type:             RecipientRoleChanged,
+		Time:             types.UnixMilli(time.Now()),
+		NewRecipientRole: newRole,
+		OldRecipientRole: oldRole,
+		Message:          utils.ToDBString(ev.Message),
+	}
+
+	_, err := i.AddHistory(hr, false)
+	if err != nil {
+		return err
+	}
+
+	cr := &ContactRow{IncidentID: hr.IncidentID, Key: recipientKey, Role: newRole}
+
+	stmt, _ := i.db.BuildUpsertStmt(cr)
+	_, err = i.db.NamedExec(stmt, cr)
+	if err != nil {
+		return fmt.Errorf("failed to upsert incident contact %s: %s", contact.String(), err)
 	}
 
 	return nil
