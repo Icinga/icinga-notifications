@@ -62,7 +62,7 @@ func main() {
 
 	go runtimeConfig.PeriodicUpdates(context.TODO(), 1*time.Second)
 
-	if err := listener.NewListener(db, conf, runtimeConfig, logs.GetChildLogger("listener")).Run(); err != nil {
+	if err := listener.NewListener(db, conf, runtimeConfig, logs).Run(); err != nil {
 		panic(err)
 	}
 }
