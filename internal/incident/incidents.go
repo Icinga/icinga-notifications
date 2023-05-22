@@ -19,7 +19,7 @@ var (
 )
 
 func GetCurrent(
-	db *icingadb.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig, create bool,
+	db *icingadb.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig, configFile *config.ConfigFile, create bool,
 ) (*Incident, bool, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
@@ -29,7 +29,7 @@ func GetCurrent(
 
 	if currentIncident == nil {
 		ir := &IncidentRow{}
-		incident := &Incident{Object: obj, db: db, logger: logger, runtimeConfig: runtimeConfig}
+		incident := &Incident{Object: obj, db: db, logger: logger, runtimeConfig: runtimeConfig, configFile: configFile}
 		incident.SeverityBySource = make(map[int64]event.Severity)
 		incident.EscalationState = make(map[escalationID]*EscalationState)
 		incident.Recipients = make(map[recipient.Key]*RecipientState)

@@ -13,6 +13,7 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/types"
+	"go.uber.org/zap"
 	"sync"
 	"time"
 )
@@ -35,6 +36,7 @@ type Incident struct {
 	db            *icingadb.DB
 	logger        *logging.Logger
 	runtimeConfig *config.RuntimeConfig
+	configFile    *config.ConfigFile
 
 	sync.Mutex
 }
@@ -290,6 +292,140 @@ func (i *Incident) EvaluateEscalations() {
 			}
 		}
 	}
+}
+
+// NotifyContacts evaluates the incident.EscalationState and checks if escalations need to be triggered
+// as well as builds the incident recipients along with their channel types and sends notifications based on that.
+// Returns error on database failure.
+func (i *Incident) NotifyContacts(ev *event.Event, causedBy types.Int) error {
+	managed := i.HasManager()
+
+	contactChannels := make(map[*recipient.Contact]map[string]struct{})
+
+	if i.Recipients == nil {
+		i.Recipients = make(map[recipient.Key]*RecipientState)
+	}
+
+	escalationRecipients := make(map[recipient.Key]bool)
+	for escalationID, state := range i.EscalationState {
+		escalation := i.runtimeConfig.GetRuleEscalation(escalationID)
+		if state.TriggeredAt.Time().IsZero() {
+			if escalation == nil {
+				continue
+			}
+
+			state.RuleEscalationID = escalationID
+			state.TriggeredAt = types.UnixMilli(time.Now())
+
+			r := i.runtimeConfig.Rules[escalation.RuleID]
+			i.logger.Infof("[%s %s] rule %q reached escalation %q", i.Object.DisplayName(), i.String(), r.Name, escalation.DisplayName())
+
+			history := &HistoryRow{
+				Time:                      state.TriggeredAt,
+				EventID:                   utils.ToDBInt(ev.ID),
+				RuleEscalationID:          utils.ToDBInt(state.RuleEscalationID),
+				RuleID:                    utils.ToDBInt(r.ID),
+				Type:                      EscalationTriggered,
+				CausedByIncidentHistoryID: causedBy,
+			}
+
+			causedByHistoryId, err := i.AddEscalationTriggered(state, history)
+			if err != nil {
+				i.logger.Errorln(err)
+
+				return err
+			}
+
+			causedBy = causedByHistoryId
+
+			err = i.AddRecipient(escalation, ev.ID)
+			if err != nil {
+				i.logger.Errorln(err)
+
+				return err
+			}
+		}
+
+		for _, escalationRecipient := range escalation.Recipients {
+			state := i.Recipients[escalationRecipient.Key]
+			if state == nil {
+				continue
+			}
+
+			escalationRecipients[escalationRecipient.Key] = true
+
+			if !managed || state.Role > RoleRecipient {
+				for _, c := range escalationRecipient.Recipient.GetContactsAt(ev.Time) {
+					if contactChannels[c] == nil {
+						contactChannels[c] = make(map[string]struct{})
+					}
+					if escalationRecipient.ChannelType.Valid {
+						contactChannels[c][escalationRecipient.ChannelType.String] = struct{}{}
+					} else {
+						contactChannels[c][c.DefaultChannel] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+
+	for recipientKey, state := range i.Recipients {
+		r := i.runtimeConfig.GetRecipient(recipientKey)
+		if r == nil {
+			continue
+		}
+
+		isEscalationRecipient := escalationRecipients[recipientKey]
+		if !isEscalationRecipient && (!managed || state.Role > RoleRecipient) {
+			for _, contact := range r.GetContactsAt(ev.Time) {
+				if contactChannels[contact] == nil {
+					contactChannels[contact] = make(map[string]struct{})
+				}
+				contactChannels[contact][contact.DefaultChannel] = struct{}{}
+			}
+		}
+	}
+
+	for contact, channels := range contactChannels {
+		hr := &HistoryRow{
+			Key:                       recipient.ToKey(contact),
+			EventID:                   utils.ToDBInt(ev.ID),
+			Time:                      types.UnixMilli(time.Now()),
+			Type:                      Notified,
+			CausedByIncidentHistoryID: causedBy,
+		}
+
+		for chType := range channels {
+			i.logger.Infof("[%s %s] notify %q via %q", i.Object.DisplayName(), i.String(), contact.FullName, chType)
+
+			hr.ChannelType = utils.ToDBString(chType)
+
+			_, err := i.AddHistory(hr, false)
+			if err != nil {
+				i.logger.Errorln(err)
+			}
+
+			chConf := i.runtimeConfig.Channels[chType]
+			if chConf == nil {
+				i.logger.Errorf("could not find config for channel type %q", chType)
+				continue
+			}
+
+			plugin, err := chConf.GetPlugin()
+			if err != nil {
+				i.logger.Errorw("couldn't initialize channel", zap.String("type", chType), zap.Error(err))
+				continue
+			}
+
+			err = plugin.Send(contact, i, ev, i.configFile.Icingaweb2URL)
+			if err != nil {
+				i.logger.Errorw("failed to send via channel", zap.String("type", chType), zap.Error(err))
+				continue
+			}
+		}
+	}
+
+	return nil
 }
 
 // ProcessAcknowledgementEvent processes the given ack event.

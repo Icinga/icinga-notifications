@@ -8,12 +8,9 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/object"
-	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
-	"github.com/icinga/icingadb/pkg/types"
-	"go.uber.org/zap"
 	"net/http"
 	"time"
 )
@@ -121,7 +118,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	_, _ = fmt.Fprintln(w, ev.String())
 
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
-	currentIncident, created, err := incident.GetCurrent(l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, createIncident)
+	currentIncident, created, err := incident.GetCurrent(l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, l.configFile, createIncident)
 	if err != nil {
 		_, _ = fmt.Fprintln(w, err)
 
@@ -174,130 +171,11 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	currentIncident.EvaluateEscalations()
 
-	if currentIncident.Recipients == nil {
-		currentIncident.Recipients = make(map[recipient.Key]*incident.RecipientState)
-	}
+	if err := currentIncident.NotifyContacts(&ev, causedByIncidentHistoryId); err != nil {
+		_, _ = fmt.Fprintln(w, err)
 
-	managed := currentIncident.HasManager()
-
-	contactChannels := make(map[*recipient.Contact]map[string]struct{})
-
-	escalationRecipients := make(map[recipient.Key]bool)
-	for escalationID, state := range currentIncident.EscalationState {
-		escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
-		if state.TriggeredAt.Time().IsZero() {
-			if escalation == nil {
-				continue
-			}
-
-			state.RuleEscalationID = escalationID
-			state.TriggeredAt = types.UnixMilli(time.Now())
-
-			r := l.runtimeConfig.Rules[escalation.RuleID]
-			l.logger.Infof("[%s %s] rule %q reached escalation %q", obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName())
-
-			history := &incident.HistoryRow{
-				Time:                      state.TriggeredAt,
-				EventID:                   utils.ToDBInt(ev.ID),
-				RuleEscalationID:          utils.ToDBInt(state.RuleEscalationID),
-				RuleID:                    utils.ToDBInt(r.ID),
-				Type:                      incident.EscalationTriggered,
-				CausedByIncidentHistoryID: causedByIncidentHistoryId,
-			}
-
-			causedByIncidentHistoryId, err = currentIncident.AddEscalationTriggered(state, history)
-			if err != nil {
-				_, _ = fmt.Fprintln(w, err)
-
-				l.logger.Errorln(err)
-				return
-			}
-
-			err = currentIncident.AddRecipient(escalation, ev.ID)
-			if err != nil {
-				_, _ = fmt.Fprintln(w, err)
-
-				l.logger.Errorln(err)
-				return
-			}
-		}
-
-		for _, escalationRecipient := range escalation.Recipients {
-			state := currentIncident.Recipients[escalationRecipient.Key]
-			if state == nil {
-				continue
-			}
-
-			escalationRecipients[escalationRecipient.Key] = true
-
-			if !managed || state.Role > incident.RoleRecipient {
-				for _, c := range escalationRecipient.Recipient.GetContactsAt(ev.Time) {
-					if contactChannels[c] == nil {
-						contactChannels[c] = make(map[string]struct{})
-					}
-					if escalationRecipient.ChannelType.Valid {
-						contactChannels[c][escalationRecipient.ChannelType.String] = struct{}{}
-					} else {
-						contactChannels[c][c.DefaultChannel] = struct{}{}
-					}
-				}
-			}
-		}
-	}
-
-	for recipientKey, state := range currentIncident.Recipients {
-		r := l.runtimeConfig.GetRecipient(recipientKey)
-		if r == nil {
-			continue
-		}
-
-		isEscalationRecipient := escalationRecipients[recipientKey]
-		if !isEscalationRecipient && (!managed || state.Role > incident.RoleRecipient) {
-			for _, contact := range r.GetContactsAt(ev.Time) {
-				if contactChannels[contact] == nil {
-					contactChannels[contact] = make(map[string]struct{})
-				}
-				contactChannels[contact][contact.DefaultChannel] = struct{}{}
-			}
-		}
-	}
-
-	for contact, channels := range contactChannels {
-		for chType := range channels {
-			hr := &incident.HistoryRow{
-				Key:                       recipient.ToKey(contact),
-				EventID:                   utils.ToDBInt(ev.ID),
-				Time:                      types.UnixMilli(time.Now()),
-				Type:                      incident.Notified,
-				ChannelType:               utils.ToDBString(chType),
-				CausedByIncidentHistoryID: causedByIncidentHistoryId,
-			}
-
-			l.logger.Infof("[%s %s] notify %q via %q", obj.DisplayName(), currentIncident.String(), contact.FullName, chType)
-
-			_, err = currentIncident.AddHistory(hr, false)
-			if err != nil {
-				l.logger.Errorln(err)
-			}
-
-			chConf := l.runtimeConfig.Channels[chType]
-			if chConf == nil {
-				l.logger.Errorf("could not find config for channel type %q", chType)
-				continue
-			}
-
-			plugin, err := chConf.GetPlugin()
-			if err != nil {
-				l.logger.Errorw("couldn't initialize channel", zap.String("type", chType), zap.Error(err))
-				continue
-			}
-
-			err = plugin.Send(contact, currentIncident, &ev, l.configFile.Icingaweb2URL)
-			if err != nil {
-				l.logger.Errorw("failed to send via channel", zap.String("type", chType), zap.Error(err))
-				continue
-			}
-		}
+		l.logger.Errorln(err)
+		return
 	}
 
 	_, _ = fmt.Fprintln(w)
