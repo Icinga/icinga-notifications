@@ -7,7 +7,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/types"
-	"log"
 	"time"
 )
 
@@ -101,7 +100,7 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, eventId int64) erro
 				oldRole := state.Role
 				state.Role = newRole
 
-				log.Printf("[%s %s] contact %q role changed from %s to %s", i.Object.DisplayName(), i.String(), r, state.Role.String(), newRole.String())
+				i.logger.Infof("[%s %s] contact %q role changed from %s to %s", i.Object.DisplayName(), i.String(), r, state.Role.String(), newRole.String())
 
 				hr := &HistoryRow{
 					IncidentID:       i.incidentRowID,
