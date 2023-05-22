@@ -3,6 +3,7 @@ package incident
 import (
 	"database/sql"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -18,7 +19,7 @@ var (
 )
 
 func GetCurrent(
-	db *icingadb.DB, obj *object.Object, logger *logging.Logger, create bool,
+	db *icingadb.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig, create bool,
 ) (*Incident, bool, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
@@ -28,7 +29,7 @@ func GetCurrent(
 
 	if currentIncident == nil {
 		ir := &IncidentRow{}
-		incident := &Incident{Object: obj, db: db, logger: logger}
+		incident := &Incident{Object: obj, db: db, logger: logger, runtimeConfig: runtimeConfig}
 		incident.SeverityBySource = make(map[int64]event.Severity)
 		incident.EscalationState = make(map[escalationID]*EscalationState)
 		incident.Recipients = make(map[recipient.Key]*RecipientState)
