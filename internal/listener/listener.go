@@ -399,6 +399,9 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	contactChannels := make(map[*recipient.Contact]map[string]struct{})
 
 	escalationRecipients := make(map[recipient.Key]bool)
+	groupsOrSchedules := make(map[*recipient.Contact]recipient.Key)
+	groupsOrSchedulesWithoutMembers := make(map[recipient.Recipient]bool)
+
 	for escalationID, state := range currentIncident.EscalationState {
 		escalation := l.runtimeConfig.GetRuleEscalation(escalationID)
 		if state.TriggeredAt.Time().IsZero() {
@@ -447,7 +450,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			escalationRecipients[escalationRecipient.Key] = true
 
 			if !managed || state.Role > incident.RoleRecipient {
-				for _, c := range escalationRecipient.Recipient.GetContactsAt(ev.Time) {
+				r := escalationRecipient.Recipient
+				_, isContact := r.(*recipient.Contact)
+				contacts := r.GetContactsAt(ev.Time)
+				for _, c := range contacts {
+					if !isContact {
+						groupsOrSchedules[c] = recipient.ToKey(r)
+					}
+
 					if contactChannels[c] == nil {
 						contactChannels[c] = make(map[string]struct{})
 					}
@@ -456,6 +466,10 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 					} else {
 						contactChannels[c][c.DefaultChannel] = struct{}{}
 					}
+				}
+
+				if !isContact && len(contacts) == 0 {
+					groupsOrSchedulesWithoutMembers[r] = true
 				}
 			}
 		}
@@ -469,25 +483,43 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 		isEscalationRecipient := escalationRecipients[recipientKey]
 		if !isEscalationRecipient && (!managed || state.Role > incident.RoleRecipient) {
-			for _, contact := range r.GetContactsAt(ev.Time) {
+			_, isContact := r.(*recipient.Contact)
+			contacts := r.GetContactsAt(ev.Time)
+			for _, contact := range contacts {
+				if !isContact {
+					groupsOrSchedules[contact] = recipient.ToKey(r)
+				}
+
 				if contactChannels[contact] == nil {
 					contactChannels[contact] = make(map[string]struct{})
 				}
 				contactChannels[contact][contact.DefaultChannel] = struct{}{}
 			}
+
+			if !isContact && len(contacts) == 0 {
+				groupsOrSchedulesWithoutMembers[r] = true
+			}
 		}
 	}
 
 	for contact, channels := range contactChannels {
+		rk := recipient.ToKey(contact)
+		hr := &incident.HistoryRow{
+			EventID:                   utils.ToDBInt(ev.ID),
+			Time:                      types.UnixMilli(ev.Time),
+			Type:                      incident.Notified,
+			CausedByIncidentHistoryID: causedByIncidentHistoryId,
+		}
+
+		groupOrSchedule := groupsOrSchedules[contact]
+		if groupsOrSchedules != nil {
+			rk = rk.CopyNonNil(groupOrSchedule)
+		}
+
+		hr.Key = rk
+
 		for chType := range channels {
-			hr := &incident.HistoryRow{
-				Key:                       recipient.ToKey(contact),
-				EventID:                   utils.ToDBInt(ev.ID),
-				Time:                      types.UnixMilli(time.Now()),
-				Type:                      incident.Notified,
-				ChannelType:               utils.ToDBString(chType),
-				CausedByIncidentHistoryID: causedByIncidentHistoryId,
-			}
+			hr.ChannelType = utils.ToDBString(chType)
 
 			l.logger.Infof("[%s %s] notify %q via %q", obj.DisplayName(), currentIncident.String(), contact.FullName, chType)
 
@@ -513,6 +545,21 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 				l.logger.Errorw("failed to send via channel", zap.String("type", chType), zap.Error(err))
 				continue
 			}
+		}
+	}
+
+	for gs, _ := range groupsOrSchedulesWithoutMembers {
+		hr := &incident.HistoryRow{
+			Key:                       recipient.ToKey(gs),
+			EventID:                   utils.ToDBInt(ev.ID),
+			Time:                      types.UnixMilli(ev.Time),
+			Type:                      incident.Notified,
+			CausedByIncidentHistoryID: causedByIncidentHistoryId,
+		}
+
+		_, err = currentIncident.AddHistory(hr, false)
+		if err != nil {
+			l.logger.Errorln(err)
 		}
 	}
 
