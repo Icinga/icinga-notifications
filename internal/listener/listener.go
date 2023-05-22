@@ -151,131 +151,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	currentIncident.Lock()
 	defer currentIncident.Unlock()
 
-	err = currentIncident.ProcessIncidentOpenedEvent(ev, created)
-	if err != nil {
-		l.logger.Errorln(err)
-		return
-	}
-
 	l.logger.Infof("processing event")
 
-	if ev.Type == event.TypeAcknowledgement {
-		err := currentIncident.ProcessAcknowledgementEvent(ev)
-		if err != nil {
-			_, _ = fmt.Fprintln(w, err)
+	causedByIncidentHistoryId, err := currentIncident.ProcessEvent(ev, created)
+	if err != nil {
+		_, _ = fmt.Fprintln(w, err)
 
-			l.logger.Errorln(err)
-		}
-
+		l.logger.Errorln(err)
 		return
-	}
-
-	oldIncidentSeverity := currentIncident.Severity()
-
-	if currentIncident.SeverityBySource == nil {
-		currentIncident.SeverityBySource = make(map[int64]event.Severity)
-	}
-
-	oldSourceSeverity := currentIncident.SeverityBySource[ev.SourceId]
-	if oldSourceSeverity == event.SeverityNone {
-		oldSourceSeverity = event.SeverityOK
-	}
-
-	if oldSourceSeverity == ev.Severity {
-		msg := fmt.Sprintf("%s: ignoring superfluous %q state event from source %d", obj.DisplayName(), ev.Severity.String(), ev.SourceId)
-		_, _ = fmt.Fprintln(w, msg)
-
-		l.logger.Warnln(msg)
-		return
-	}
-
-	var causedByIncidentHistoryId types.Int
-	if oldSourceSeverity != ev.Severity {
-		l.logger.Infof(
-			"[%s %s] source %d severity changed from %s to %s",
-			obj.DisplayName(), currentIncident.String(), ev.SourceId,
-			oldSourceSeverity.String(), ev.Severity.String(),
-		)
-
-		hr := &incident.HistoryRow{
-			EventID:     utils.ToDBInt(ev.ID),
-			Type:        incident.SourceSeverityChanged,
-			Time:        types.UnixMilli(time.Now()),
-			NewSeverity: ev.Severity,
-			OldSeverity: oldSourceSeverity,
-			Message:     utils.ToDBString(ev.Message),
-		}
-
-		causedByIncidentHistoryId, err = currentIncident.AddHistory(hr, true)
-		if err != nil {
-			_, _ = fmt.Fprintln(w, err)
-
-			l.logger.Errorln(err)
-			return
-		}
-
-		err := currentIncident.AddSourceSeverity(ev.Severity, ev.SourceId)
-		if err != nil {
-			_, _ = fmt.Fprintln(w, err)
-
-			l.logger.Errorln(err)
-			return
-		}
-
-		if ev.Severity == event.SeverityOK {
-			delete(currentIncident.SeverityBySource, ev.SourceId)
-		}
-	}
-
-	newIncidentSeverity := currentIncident.Severity()
-
-	if newIncidentSeverity != oldIncidentSeverity {
-		l.logger.Infof(
-			"[%s %s] incident severity changed from %s to %s",
-			obj.DisplayName(), currentIncident.String(),
-			oldIncidentSeverity.String(), newIncidentSeverity.String(),
-		)
-
-		err = currentIncident.Sync()
-		if err != nil {
-			_, _ = fmt.Fprintln(w, err)
-
-			l.logger.Errorln(err)
-			return
-		}
-
-		hr := &incident.HistoryRow{
-			EventID:                   utils.ToDBInt(ev.ID),
-			Time:                      types.UnixMilli(time.Now()),
-			Type:                      incident.SeverityChanged,
-			NewSeverity:               newIncidentSeverity,
-			OldSeverity:               oldIncidentSeverity,
-			CausedByIncidentHistoryID: causedByIncidentHistoryId,
-		}
-
-		causedByIncidentHistoryId, err = currentIncident.AddHistory(hr, true)
-		if err != nil {
-			_, _ = fmt.Fprintln(w, err)
-
-			l.logger.Errorln(err)
-			return
-		}
-	}
-
-	if newIncidentSeverity == event.SeverityOK {
-		currentIncident.RecoveredAt = time.Now()
-		l.logger.Infof("[%s %s] all sources recovered, closing incident", obj.DisplayName(), currentIncident.String())
-
-		hr := &incident.HistoryRow{
-			EventID: utils.ToDBInt(ev.ID),
-			Time:    types.UnixMilli(time.Now()),
-			Type:    incident.Closed,
-		}
-		err := incident.RemoveCurrent(obj, hr)
-		if err != nil {
-			_, _ = fmt.Fprintln(w, err)
-			return
-		}
 	}
 
 	if currentIncident.EscalationState == nil {
