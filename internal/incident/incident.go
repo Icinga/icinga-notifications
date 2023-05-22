@@ -45,6 +45,10 @@ func (i *Incident) ObjectDisplayName() string {
 	return i.Object.DisplayName()
 }
 
+func (i *Incident) String() string {
+	return fmt.Sprintf("%d", i.incidentRowID)
+}
+
 func (i *Incident) ID() int64 {
 	return i.incidentRowID
 }
@@ -69,11 +73,38 @@ func (i *Incident) HasManager() bool {
 	return false
 }
 
-func (i *Incident) String() string {
-	return fmt.Sprintf("%d", i.incidentRowID)
+// ProcessEvent processes the given event for the current incident.
+func (i *Incident) ProcessEvent(ev event.Event, created bool) error {
+	i.Lock()
+	defer i.Unlock()
+
+	i.runtimeConfig.RLock()
+	defer i.runtimeConfig.RUnlock()
+
+	causedBy, err := i.processIncidentAndSourceSeverity(ev, created)
+	if err != nil {
+		return err
+	}
+
+	if ev.Type == event.TypeAcknowledgement {
+		// Ack events must not trigger escalations!
+		return nil
+	}
+
+	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
+	// to be checked again, these rules already matched and stay effective for the ongoing incident.
+	causedBy, err = i.evaluateRules(ev.ID, causedBy)
+	if err != nil {
+		return err
+	}
+
+	// Re-evaluate escalations based on the newly evaluated rules.
+	i.evaluateEscalations()
+
+	return i.notifyContacts(&ev, causedBy)
 }
 
-func (i *Incident) ProcessEvent(ev event.Event, created bool) (types.Int, error) {
+func (i *Incident) processIncidentAndSourceSeverity(ev event.Event, created bool) (types.Int, error) {
 	if created {
 		i.StartedAt = ev.Time
 		if err := i.Sync(); err != nil {
@@ -103,7 +134,7 @@ func (i *Incident) ProcessEvent(ev event.Event, created bool) (types.Int, error)
 	}
 
 	if ev.Type == event.TypeAcknowledgement {
-		return types.Int{}, i.ProcessAcknowledgementEvent(ev)
+		return types.Int{}, i.processAcknowledgementEvent(ev)
 	}
 
 	oldIncidentSeverity := i.Severity()
@@ -196,10 +227,10 @@ func (i *Incident) ProcessEvent(ev event.Event, created bool) (types.Int, error)
 	return causedByHistoryId, nil
 }
 
-// EvaluateRules evaluates all the configured rules for this *incident.Object and
+// evaluateRules evaluates all the configured rules for this *incident.Object and
 // generates history entries for each matched rule.
 // Returns error on database failure.
-func (i *Incident) EvaluateRules(eventID int64, causedBy types.Int) (types.Int, error) {
+func (i *Incident) evaluateRules(eventID int64, causedBy types.Int) (types.Int, error) {
 	if i.Rules == nil {
 		i.Rules = make(map[int64]struct{})
 	}
@@ -247,9 +278,9 @@ func (i *Incident) EvaluateRules(eventID int64, causedBy types.Int) (types.Int, 
 	return causedBy, nil
 }
 
-// EvaluateEscalations evaluates this incidents rule escalations if they aren't already.
+// evaluateEscalations evaluates this incidents rule escalations if they aren't already.
 // Returns error on database failure.
-func (i *Incident) EvaluateEscalations() {
+func (i *Incident) evaluateEscalations() {
 	if i.EscalationState == nil {
 		i.EscalationState = make(map[int64]*EscalationState)
 	}
@@ -294,10 +325,10 @@ func (i *Incident) EvaluateEscalations() {
 	}
 }
 
-// NotifyContacts evaluates the incident.EscalationState and checks if escalations need to be triggered
+// notifyContacts evaluates the incident.EscalationState and checks if escalations need to be triggered
 // as well as builds the incident recipients along with their channel types and sends notifications based on that.
 // Returns error on database failure.
-func (i *Incident) NotifyContacts(ev *event.Event, causedBy types.Int) error {
+func (i *Incident) notifyContacts(ev *event.Event, causedBy types.Int) error {
 	managed := i.HasManager()
 
 	contactChannels := make(map[*recipient.Contact]map[string]struct{})
@@ -428,13 +459,10 @@ func (i *Incident) NotifyContacts(ev *event.Event, causedBy types.Int) error {
 	return nil
 }
 
-// ProcessAcknowledgementEvent processes the given ack event.
+// processAcknowledgmentEvent processes the given ack event.
 // Promotes the ack author to incident.RoleManager if it's not already the case and generates a history entry.
 // Returns error on database failure.
-func (i *Incident) ProcessAcknowledgementEvent(ev event.Event) error {
-	i.runtimeConfig.RLock()
-	defer i.runtimeConfig.RUnlock()
-
+func (i *Incident) processAcknowledgementEvent(ev event.Event) error {
 	contact := i.runtimeConfig.GetContact(ev.Username)
 	if contact == nil {
 		return fmt.Errorf("unknown acknowledgment author %q", ev.Username)
