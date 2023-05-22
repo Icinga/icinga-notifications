@@ -143,38 +143,10 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// TODO: better move all this logic somewhere into incident.go
-	currentIncident.Lock()
-	defer currentIncident.Unlock()
-
 	l.logger.Infof("processing event")
 
-	causedByIncidentHistoryId, err := currentIncident.ProcessEvent(ev, created)
-	if err != nil {
+	if err := currentIncident.ProcessEvent(ev, created); err != nil {
 		_, _ = fmt.Fprintln(w, err)
-
-		l.logger.Errorln(err)
-		return
-	}
-
-	l.runtimeConfig.RLock()
-	defer l.runtimeConfig.RUnlock()
-
-	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
-	// to be checked again, these rules already matched and stay effective for the ongoing incident.
-	if causedByIncidentHistoryId, err = currentIncident.EvaluateRules(ev.ID, causedByIncidentHistoryId); err != nil {
-		_, _ = fmt.Fprintln(w, err)
-
-		l.logger.Errorln(err)
-		return
-	}
-
-	currentIncident.EvaluateEscalations()
-
-	if err := currentIncident.NotifyContacts(&ev, causedByIncidentHistoryId); err != nil {
-		_, _ = fmt.Fprintln(w, err)
-
-		l.logger.Errorln(err)
 		return
 	}
 
