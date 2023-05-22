@@ -165,55 +165,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		currentIncident.EscalationState = make(map[int64]*incident.EscalationState)
 	}
 
-	if currentIncident.Rules == nil {
-		currentIncident.Rules = make(map[int64]struct{})
-	}
-
 	l.runtimeConfig.RLock()
 	defer l.runtimeConfig.RUnlock()
 
 	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
 	// to be checked again, these rules already matched and stay effective for the ongoing incident.
-	for _, r := range l.runtimeConfig.Rules {
-		if !r.IsActive.Valid || !r.IsActive.Bool {
-			continue
-		}
-
-		if _, ok := currentIncident.Rules[r.ID]; !ok {
-			if r.ObjectFilter != nil {
-				matched, err := r.ObjectFilter.Eval(obj)
-				if err != nil {
-					l.logger.Warnf("[%s %s] rule %q failed to evaluate object filter: %s", obj.DisplayName(), currentIncident.String(), r.Name, err)
-				}
-
-				if err != nil || !matched {
-					continue
-				}
-			}
-
-			currentIncident.Rules[r.ID] = struct{}{}
-			l.logger.Infof("[%s %s] rule %q matches", obj.DisplayName(), currentIncident.String(), r.Name)
-
-			history := &incident.HistoryRow{
-				Time:                      types.UnixMilli(time.Now()),
-				EventID:                   utils.ToDBInt(ev.ID),
-				RuleID:                    utils.ToDBInt(r.ID),
-				Type:                      incident.RuleMatched,
-				CausedByIncidentHistoryID: causedByIncidentHistoryId,
-			}
-
-			insertedId, err := currentIncident.AddRuleMatchedHistory(r, history)
-			if err != nil {
-				_, _ = fmt.Fprintln(w, err)
-
-				l.logger.Errorln(err)
-				return
-			}
-
-			if insertedId.Valid && !causedByIncidentHistoryId.Valid {
-				causedByIncidentHistoryId = insertedId
-			}
-		}
+	if causedByIncidentHistoryId, err = currentIncident.EvaluateRules(ev.ID, causedByIncidentHistoryId); err != nil {
+		l.logger.Errorln(err)
+		return
 	}
 
 	for rID := range currentIncident.Rules {

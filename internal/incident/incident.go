@@ -193,6 +193,57 @@ func (i *Incident) ProcessEvent(ev event.Event, created bool) (types.Int, error)
 	return causedByHistoryId, nil
 }
 
+// EvaluateRules evaluates all the configured rules for this *incident.Object and
+// generates history entries for each matched rule.
+// Returns error on database failure.
+func (i *Incident) EvaluateRules(eventID int64, causedBy types.Int) (types.Int, error) {
+	if i.Rules == nil {
+		i.Rules = make(map[int64]struct{})
+	}
+
+	for _, r := range i.runtimeConfig.Rules {
+		if !r.IsActive.Valid || !r.IsActive.Bool {
+			continue
+		}
+
+		if _, ok := i.Rules[r.ID]; !ok {
+			if r.ObjectFilter != nil {
+				matched, err := r.ObjectFilter.Eval(i.Object)
+				if err != nil {
+					i.logger.Warnf("[%s %s] rule %q failed to evaluate object filter: %s", i.Object.DisplayName(), i.String(), r.Name, err)
+				}
+
+				if err != nil || !matched {
+					continue
+				}
+			}
+
+			i.Rules[r.ID] = struct{}{}
+			i.logger.Infof("[%s %s] rule %q matches", i.Object.DisplayName(), i.String(), r.Name)
+
+			history := &HistoryRow{
+				Time:                      types.UnixMilli(time.Now()),
+				EventID:                   utils.ToDBInt(eventID),
+				RuleID:                    utils.ToDBInt(r.ID),
+				Type:                      RuleMatched,
+				CausedByIncidentHistoryID: causedBy,
+			}
+			insertedID, err := i.AddRuleMatchedHistory(r, history)
+			if err != nil {
+				i.logger.Errorln(err)
+
+				return types.Int{}, err
+			}
+
+			if insertedID.Valid && !causedBy.Valid {
+				causedBy = insertedID
+			}
+		}
+	}
+
+	return causedBy, nil
+}
+
 // ProcessAcknowledgementEvent processes the given ack event.
 // Promotes the ack author to incident.RoleManager if it's not already the case and generates a history entry.
 // Returns error on database failure.
