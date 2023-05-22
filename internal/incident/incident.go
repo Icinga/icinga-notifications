@@ -8,6 +8,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
@@ -242,6 +243,53 @@ func (i *Incident) EvaluateRules(eventID int64, causedBy types.Int) (types.Int, 
 	}
 
 	return causedBy, nil
+}
+
+// EvaluateEscalations evaluates this incidents rule escalations if they aren't already.
+// Returns error on database failure.
+func (i *Incident) EvaluateEscalations() {
+	if i.EscalationState == nil {
+		i.EscalationState = make(map[int64]*EscalationState)
+	}
+
+	for rID := range i.Rules {
+		r := i.runtimeConfig.Rules[rID]
+
+		if r == nil || !r.IsActive.Valid || !r.IsActive.Bool {
+			continue
+		}
+
+		// Check if new escalation stages are reached
+		for _, escalation := range r.Escalations {
+			if _, ok := i.EscalationState[escalation.ID]; !ok {
+				matched := false
+
+				if escalation.Condition == nil {
+					matched = true
+				} else {
+					cond := &rule.EscalationFilter{
+						IncidentAge:      time.Now().Sub(i.StartedAt),
+						IncidentSeverity: i.Severity(),
+					}
+
+					var err error
+					matched, err = escalation.Condition.Eval(cond)
+					if err != nil {
+						i.logger.Warnf(
+							"[%s %s] rule %q failed to evaulte escalation %q condition: %s",
+							i.Object.DisplayName(), i.String(), r.Name, escalation.DisplayName(), err,
+						)
+
+						matched = false
+					}
+				}
+
+				if matched {
+					i.EscalationState[escalation.ID] = new(EscalationState)
+				}
+			}
+		}
+	}
 }
 
 // ProcessAcknowledgementEvent processes the given ack event.

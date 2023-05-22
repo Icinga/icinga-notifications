@@ -9,7 +9,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
-	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
@@ -161,57 +160,19 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if currentIncident.EscalationState == nil {
-		currentIncident.EscalationState = make(map[int64]*incident.EscalationState)
-	}
-
 	l.runtimeConfig.RLock()
 	defer l.runtimeConfig.RUnlock()
 
 	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
 	// to be checked again, these rules already matched and stay effective for the ongoing incident.
 	if causedByIncidentHistoryId, err = currentIncident.EvaluateRules(ev.ID, causedByIncidentHistoryId); err != nil {
+		_, _ = fmt.Fprintln(w, err)
+
 		l.logger.Errorln(err)
 		return
 	}
 
-	for rID := range currentIncident.Rules {
-		r := l.runtimeConfig.Rules[rID]
-
-		if r == nil || !r.IsActive.Valid || !r.IsActive.Bool {
-			continue
-		}
-
-		// Check if new escalation stages are reached
-		for _, escalation := range r.Escalations {
-			if _, ok := currentIncident.EscalationState[escalation.ID]; !ok {
-				matched := false
-
-				if escalation.Condition == nil {
-					matched = true
-				} else {
-					cond := &rule.EscalationFilter{
-						IncidentAge:      ev.Time.Sub(currentIncident.StartedAt),
-						IncidentSeverity: currentIncident.Severity(),
-					}
-
-					matched, err = escalation.Condition.Eval(cond)
-					if err != nil {
-						l.logger.Infof(
-							"[%s %s] rule %q failed to evaulte escalation %q condition: %s",
-							obj.DisplayName(), currentIncident.String(), r.Name, escalation.DisplayName(), err,
-						)
-
-						matched = false
-					}
-				}
-
-				if matched {
-					currentIncident.EscalationState[escalation.ID] = new(incident.EscalationState)
-				}
-			}
-		}
-	}
+	currentIncident.EvaluateEscalations()
 
 	if currentIncident.Recipients == nil {
 		currentIncident.Recipients = make(map[recipient.Key]*incident.RecipientState)
