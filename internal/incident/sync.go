@@ -46,7 +46,7 @@ func (i *Incident) AddHistory(historyRow *HistoryRow, fetchId bool) (types.Int, 
 	} else {
 		_, err := i.db.NamedExec(stmt, historyRow)
 		if err != nil {
-			return types.Int{}, fmt.Errorf("failed to insert incident history: %w", err)
+			return types.Int{}, err
 		}
 	}
 
@@ -59,7 +59,7 @@ func (i *Incident) AddEscalationTriggered(state *EscalationState, hr *HistoryRow
 	stmt, _ := i.db.BuildUpsertStmt(state)
 	_, err := i.db.NamedExec(stmt, state)
 	if err != nil {
-		return types.Int{}, fmt.Errorf("failed to insert incident rule escalation state: %w", err)
+		return types.Int{}, err
 	}
 
 	return i.AddHistory(hr, true)
@@ -70,11 +70,8 @@ func (i *Incident) AddEvent(ev *event.Event) error {
 	ie := &EventRow{IncidentID: i.incidentRowID, EventID: ev.ID}
 	stmt, _ := i.db.BuildInsertStmt(ie)
 	_, err := i.db.NamedExec(stmt, ie)
-	if err != nil {
-		return fmt.Errorf("failed to insert incident event: %w", err)
-	}
 
-	return nil
+	return err
 }
 
 // AddRecipient adds recipient from the given *rule.Escalation to this incident.
@@ -100,7 +97,7 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, eventId int64) erro
 				oldRole := state.Role
 				state.Role = newRole
 
-				i.logger.Infof("[%s %s] contact %q role changed from %s to %s", i.Object.DisplayName(), i.String(), r, state.Role.String(), newRole.String())
+				i.logger.Infof("Contact %q role changed from %s to %s", r, state.Role.String(), newRole.String())
 
 				hr := &HistoryRow{
 					IncidentID:       i.incidentRowID,
@@ -137,7 +134,7 @@ func (i *Incident) AddRuleMatchedHistory(r *rule.Rule, hr *HistoryRow) (types.In
 	stmt, _ := i.db.BuildUpsertStmt(rr)
 	_, err := i.db.NamedExec(stmt, rr)
 	if err != nil {
-		return types.Int{}, fmt.Errorf("failed to insert incident rule: %w", err)
+		return types.Int{}, err
 	}
 
 	return i.AddHistory(hr, true)

@@ -11,6 +11,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
+	"go.uber.org/zap"
 	"net/http"
 	"time"
 )
@@ -121,8 +122,6 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	currentIncident, created, err := incident.GetCurrent(l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, l.configFile, createIncident)
 	if err != nil {
 		_, _ = fmt.Fprintln(w, err)
-
-		l.logger.Errorln(err)
 		return
 	}
 
@@ -139,11 +138,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			panic("non-OK state but no incident was created")
 		}
 
-		l.logger.Warnf("%s: ignoring superfluous OK state event from source %d", obj.DisplayName(), ev.SourceId)
+		msg := fmt.Sprintf("Ignoring superfluous OK state event from source %d", ev.SourceId)
+		l.logger.Warnw(msg, zap.String("object", obj.DisplayName()))
+
+		_, _ = fmt.Fprintln(w, msg)
 		return
 	}
 
-	l.logger.Infof("processing event")
+	l.logger.Infof("Processing event")
 
 	if err := currentIncident.ProcessEvent(ev, created); err != nil {
 		_, _ = fmt.Fprintln(w, err)
