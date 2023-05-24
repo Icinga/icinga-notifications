@@ -2,13 +2,14 @@ package incident
 
 import (
 	"database/sql"
-	"fmt"
+	"errors"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
+	"go.uber.org/zap"
 	"sync"
 )
 
@@ -32,7 +33,7 @@ func GetCurrent(
 		incident := &Incident{
 			Object:           obj,
 			db:               db,
-			logger:           logger,
+			logger:           logger.With(zap.String("object", obj.DisplayName())),
 			runtimeConfig:    runtimeConfig,
 			configFile:       configFile,
 			Recipients:       map[recipient.Key]*RecipientState{},
@@ -42,10 +43,13 @@ func GetCurrent(
 
 		err := db.QueryRowx(db.Rebind(db.BuildSelectStmt(ir, ir)+` WHERE "object_id" = ? AND "recovered_at" IS NULL`), obj.ID).StructScan(ir)
 		if err != nil && err != sql.ErrNoRows {
-			return nil, false, fmt.Errorf("incident query failed with: %w", err)
+			logger.Errorw("Failed to load incident from database", zap.String("object", obj.DisplayName()), zap.Error(err))
+
+			return nil, false, errors.New("failed to load incident from database")
 		} else if err == nil {
 			incident.incidentRowID = ir.ID
 			incident.StartedAt = ir.StartedAt.Time()
+			incident.logger = logger.With(zap.String("object", obj.DisplayName()), zap.String("incident", incident.String()))
 
 			sourceSeverity := &SourceSeverity{IncidentID: ir.ID}
 			var sources []SourceSeverity
@@ -55,7 +59,9 @@ func GetCurrent(
 				ir.ID, event.SeverityOK,
 			)
 			if err != nil {
-				return nil, false, fmt.Errorf("failed to fetch incident sources Severity: %w", err)
+				incident.logger.Errorw("Failed to load incident source severities from database", zap.Error(err))
+
+				return nil, false, errors.New("failed to load incident source severities")
 			}
 
 			for _, source := range sources {
@@ -66,7 +72,9 @@ func GetCurrent(
 			var states []*EscalationState
 			err = db.Select(&states, db.Rebind(db.BuildSelectStmt(state, state)+` WHERE "incident_id" = ?`), ir.ID)
 			if err != nil {
-				return nil, false, fmt.Errorf("failed to fetch incident rule escalation state: %w", err)
+				incident.logger.Errorw("Failed to load incident rule escalation states", zap.Error(err))
+
+				return nil, false, errors.New("failed to load incident rule escalation states")
 			}
 
 			for _, state := range states {
@@ -94,7 +102,9 @@ func GetCurrent(
 		var contacts []*ContactRow
 		err := db.Select(&contacts, db.Rebind(db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), currentIncident.ID())
 		if err != nil {
-			return nil, false, fmt.Errorf("failed to fetch incident recipients: %w", err)
+			currentIncident.logger.Errorw("Failed to reload incident recipients", zap.Error(err))
+
+			return nil, false, errors.New("failed to load incident recipients")
 		}
 
 		recipients := make(map[recipient.Key]*RecipientState)
