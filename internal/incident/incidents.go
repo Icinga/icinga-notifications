@@ -9,7 +9,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
-	"github.com/icinga/icingadb/pkg/types"
 	"sync"
 )
 
@@ -102,7 +101,7 @@ func GetCurrent(
 	return currentIncident, created, nil
 }
 
-func RemoveCurrent(obj *object.Object, hr *HistoryRow) error {
+func RemoveCurrent(obj *object.Object) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
 
@@ -110,15 +109,7 @@ func RemoveCurrent(obj *object.Object, hr *HistoryRow) error {
 
 	if currentIncident != nil {
 		delete(currentIncidents, obj)
-
-		incidentRow := &IncidentRow{ID: currentIncident.incidentRowID, RecoveredAt: types.UnixMilli(currentIncident.RecoveredAt)}
-		_, err := currentIncident.db.NamedExec(`UPDATE "incident" SET "recovered_at" = :recovered_at WHERE id = :id`, incidentRow)
-
-		return err
 	}
-
-	_, err := currentIncident.AddHistory(hr, false)
-	return err
 }
 
 // GetCurrentIncidents returns a map of all incidents for debugging purposes.

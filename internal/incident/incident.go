@@ -212,12 +212,22 @@ func (i *Incident) processIncidentAndSourceSeverity(ev event.Event, created bool
 		i.RecoveredAt = time.Now()
 		i.logger.Infof("[%s %s] all sources recovered, closing incident", i.Object.DisplayName(), i.String())
 
+		RemoveCurrent(i.Object)
+
+		incidentRow := &IncidentRow{ID: i.incidentRowID, RecoveredAt: types.UnixMilli(i.RecoveredAt)}
+		_, err = i.db.NamedExec(`UPDATE "incident" SET "recovered_at" = :recovered_at WHERE id = :id`, incidentRow)
+		if err != nil {
+			i.logger.Errorw("failed to close incident", zap.String("incident", i.String()), zap.Error(err))
+
+			return types.Int{}, errors.New("failed to close incident")
+		}
+
 		history = &HistoryRow{
 			EventID: utils.ToDBInt(ev.ID),
 			Time:    types.UnixMilli(i.RecoveredAt),
 			Type:    Closed,
 		}
-		err := RemoveCurrent(i.Object, history)
+		_, err = i.AddHistory(history, false)
 		if err != nil {
 			i.logger.Errorln(err)
 			return types.Int{}, err
