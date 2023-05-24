@@ -46,7 +46,7 @@ func (i *Incident) ObjectDisplayName() string {
 }
 
 func (i *Incident) String() string {
-	return fmt.Sprintf("%d", i.incidentRowID)
+	return fmt.Sprintf("#%d", i.incidentRowID)
 }
 
 func (i *Incident) ID() int64 {
