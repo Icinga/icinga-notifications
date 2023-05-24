@@ -112,20 +112,17 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintln(w, "received event")
-	_, _ = fmt.Fprintln(w)
-	_, _ = fmt.Fprintln(w, obj.String())
-	_, _ = fmt.Fprintln(w, ev.String())
-
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
 	currentIncident, created, err := incident.GetCurrent(l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, l.configFile, createIncident)
 	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err)
 		return
 	}
 
 	if currentIncident == nil {
+		w.WriteHeader(http.StatusNotAcceptable)
+
 		if ev.Type == event.TypeAcknowledgement {
 			msg := fmt.Sprintf("%q doesn't have active incident. Ignoring acknowledgement event from source %d", obj.DisplayName(), ev.SourceId)
 			_, _ = fmt.Fprintln(w, msg)
@@ -148,10 +145,13 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	l.logger.Infof("Processing event")
 
 	if err := currentIncident.ProcessEvent(ev, created); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err)
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintln(w, "event processed successfully")
 	_, _ = fmt.Fprintln(w)
 }
 
