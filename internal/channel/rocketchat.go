@@ -8,7 +8,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
-	"log"
 	"net/http"
 	"time"
 )
@@ -33,8 +32,6 @@ func NewRocketChat(config string) (Plugin, error) {
 }
 
 func (r *RocketChat) Send(contact *recipient.Contact, incident contracts.Incident, event *event.Event, icingaweb2Url string) error {
-	log.Printf("rocketchat: contact=%v incident=%v event=%v", contact, incident, event)
-
 	var output bytes.Buffer
 	_, _ = fmt.Fprintf(&output, "[#%d] %s %s is %s\n\n", incident.ID(), event.Type, incident.ObjectDisplayName(), event.Severity.String())
 
@@ -85,8 +82,6 @@ func (r *RocketChat) Send(contact *recipient.Contact, incident contracts.Inciden
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(resp.Status)
 	}
-
-	log.Printf("Successfully sent a rocketchat message to user %s\n", contact.FullName)
 
 	return nil
 }

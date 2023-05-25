@@ -7,7 +7,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
-	"log"
 	"net"
 	"net/smtp"
 	"os"
@@ -58,8 +57,6 @@ func NewEMail(config string) (Plugin, error) {
 }
 
 func (e *EMail) Send(contact *recipient.Contact, incident contracts.Incident, event *event.Event, icingaweb2Url string) error {
-	log.Printf("email: contact=%v incident=%v event=%v", contact, incident, event)
-
 	var to []string
 	for _, address := range contact.Addresses {
 		if address.Type == "email" {
@@ -81,8 +78,6 @@ func (e *EMail) Send(contact *recipient.Contact, incident contracts.Incident, ev
 	if err != nil {
 		return err
 	}
-
-	log.Printf("Successfully sent mail to user %s\n", contact.FullName)
 
 	return nil
 }

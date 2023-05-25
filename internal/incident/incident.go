@@ -473,6 +473,10 @@ func (i *Incident) notifyContacts(ev *event.Event, causedBy types.Int) error {
 				i.logger.Errorw("Failed to send via channel", zap.String("type", chType), zap.Error(err))
 				continue
 			}
+
+			i.logger.Infow(
+				"Successfully sent a message via channel", zap.String("type", chType), zap.String("contact", contact.String()),
+			)
 		}
 	}
 
