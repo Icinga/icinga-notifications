@@ -81,14 +81,29 @@ func (i *Incident) ProcessEvent(ev event.Event, created bool) error {
 	i.runtimeConfig.RLock()
 	defer i.runtimeConfig.RUnlock()
 
-	causedBy, err := i.processIncidentAndSourceSeverity(ev, created)
-	if err != nil {
-		return err
+	if created {
+		err := i.processIncidentOpenedEvent(ev)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := i.AddEvent(&ev); err != nil {
+		i.logger.Errorw(
+			"can't insert incident event to the database", zap.String("object", i.ObjectDisplayName()),
+			zap.String("incident", i.String()), zap.Error(err),
+		)
+
+		return errors.New("can't insert incident event to the database")
 	}
 
 	if ev.Type == event.TypeAcknowledgement {
-		// Ack events must not trigger escalations!
-		return nil
+		return i.processAcknowledgementEvent(ev)
+	}
+
+	causedBy, err := i.processSeverityChangedEvent(ev)
+	if err != nil {
+		return err
 	}
 
 	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
@@ -104,39 +119,7 @@ func (i *Incident) ProcessEvent(ev event.Event, created bool) error {
 	return i.notifyContacts(&ev, causedBy)
 }
 
-func (i *Incident) processIncidentAndSourceSeverity(ev event.Event, created bool) (types.Int, error) {
-	if created {
-		i.StartedAt = ev.Time
-		if err := i.Sync(); err != nil {
-			i.logger.Errorln(err)
-
-			return types.Int{}, err
-		}
-
-		i.logger.Infof("[%s %s] opened incident", i.Object.DisplayName(), i.String())
-		historyRow := &HistoryRow{
-			Type:    Opened,
-			Time:    types.UnixMilli(ev.Time),
-			EventID: utils.ToDBInt(ev.ID),
-		}
-
-		if _, err := i.AddHistory(historyRow, false); err != nil {
-			i.logger.Errorln(err)
-
-			return types.Int{}, err
-		}
-	}
-
-	if err := i.AddEvent(&ev); err != nil {
-		i.logger.Errorln(err)
-
-		return types.Int{}, err
-	}
-
-	if ev.Type == event.TypeAcknowledgement {
-		return types.Int{}, i.processAcknowledgementEvent(ev)
-	}
-
+func (i *Incident) processSeverityChangedEvent(ev event.Event) (types.Int, error) {
 	oldIncidentSeverity := i.Severity()
 	oldSourceSeverity := i.SeverityBySource[ev.SourceId]
 	if oldSourceSeverity == event.SeverityNone {
@@ -235,6 +218,36 @@ func (i *Incident) processIncidentAndSourceSeverity(ev event.Event, created bool
 	}
 
 	return causedByHistoryId, nil
+}
+
+func (i *Incident) processIncidentOpenedEvent(ev event.Event) error {
+	i.StartedAt = ev.Time
+	if err := i.Sync(); err != nil {
+		i.logger.Errorw(
+			"can't insert incident to the database", zap.String("incident", i.String()),
+			zap.String("object", i.ObjectDisplayName()), zap.Error(err),
+		)
+
+		return errors.New("can't insert incident to the database")
+	}
+
+	i.logger.Infow("Opened incident", zap.String("object", i.ObjectDisplayName()), zap.String("incident", i.String()))
+	historyRow := &HistoryRow{
+		Type:    Opened,
+		Time:    types.UnixMilli(ev.Time),
+		EventID: utils.ToDBInt(ev.ID),
+	}
+
+	if _, err := i.AddHistory(historyRow, false); err != nil {
+		i.logger.Errorw(
+			"can't insert incident opened history event", zap.String("object", i.ObjectDisplayName()),
+			zap.String("incident", i.String()), zap.Error(err),
+		)
+
+		return errors.New("can't insert incident opened history event")
+	}
+
+	return nil
 }
 
 // evaluateRules evaluates all the configured rules for this *incident.Object and
