@@ -1,12 +1,13 @@
 package incident
 
 import (
-	"fmt"
+	"errors"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/types"
+	"go.uber.org/zap"
 	"time"
 )
 
@@ -53,16 +54,13 @@ func (i *Incident) AddHistory(historyRow *HistoryRow, fetchId bool) (types.Int, 
 	return types.Int{}, nil
 }
 
-func (i *Incident) AddEscalationTriggered(state *EscalationState, hr *HistoryRow) (types.Int, error) {
+func (i *Incident) AddEscalationTriggered(state *EscalationState) error {
 	state.IncidentID = i.incidentRowID
 
 	stmt, _ := i.db.BuildUpsertStmt(state)
 	_, err := i.db.NamedExec(stmt, state)
-	if err != nil {
-		return types.Int{}, err
-	}
 
-	return i.AddHistory(hr, true)
+	return err
 }
 
 // AddEvent Inserts incident history record to the database and returns an error on db failure.
@@ -111,7 +109,12 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, eventId int64) erro
 
 				_, err := i.AddHistory(hr, false)
 				if err != nil {
-					return err
+					i.logger.Errorw(
+						"Failed to insert recipient role changed incident history", zap.String("escalation", escalation.DisplayName()),
+						zap.String("recipients", r.String()), zap.Error(err),
+					)
+
+					return errors.New("failed to insert recipient role changed incident history")
 				}
 			}
 			cr.Role = state.Role
@@ -120,24 +123,26 @@ func (i *Incident) AddRecipient(escalation *rule.Escalation, eventId int64) erro
 		stmt, _ := i.db.BuildUpsertStmt(cr)
 		_, err := i.db.NamedExec(stmt, cr)
 		if err != nil {
-			return fmt.Errorf("failed to upsert incident contact %s: %w", r, err)
+			i.logger.Errorw(
+				"Failed to upsert incident recipient", zap.String("escalation", escalation.DisplayName()),
+				zap.String("recipient", r.String()), zap.Error(err),
+			)
+
+			return errors.New("failed to upsert incident recipient")
 		}
 	}
 
 	return nil
 }
 
-// AddRuleMatchedHistory syncs the given *rule.Rule and history entry to the database.
+// AddRuleMatched syncs the given *rule.Rule to the database.
 // Returns an error on database failure.
-func (i *Incident) AddRuleMatchedHistory(r *rule.Rule, hr *HistoryRow) (types.Int, error) {
+func (i *Incident) AddRuleMatched(r *rule.Rule) error {
 	rr := &RuleRow{IncidentID: i.incidentRowID, RuleID: r.ID}
 	stmt, _ := i.db.BuildUpsertStmt(rr)
 	_, err := i.db.NamedExec(stmt, rr)
-	if err != nil {
-		return types.Int{}, err
-	}
 
-	return i.AddHistory(hr, true)
+	return err
 }
 
 func (i *Incident) AddSourceSeverity(severity event.Severity, sourceID int64) error {
