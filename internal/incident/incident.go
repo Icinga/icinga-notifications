@@ -269,6 +269,13 @@ func (i *Incident) evaluateRules(eventID int64, causedBy types.Int) (types.Int, 
 			i.Rules[r.ID] = struct{}{}
 			i.logger.Infof("Rule %q matches", r.Name)
 
+			err := i.AddRuleMatched(r)
+			if err != nil {
+				i.logger.Errorw("Failed to upsert incident rule", zap.String("rule", r.Name), zap.Error(err))
+
+				return types.Int{}, errors.New("failed to insert incident rule")
+			}
+
 			history := &HistoryRow{
 				Time:                      types.UnixMilli(time.Now()),
 				EventID:                   utils.ToDBInt(eventID),
@@ -276,11 +283,11 @@ func (i *Incident) evaluateRules(eventID int64, causedBy types.Int) (types.Int, 
 				Type:                      RuleMatched,
 				CausedByIncidentHistoryID: causedBy,
 			}
-			insertedID, err := i.AddRuleMatchedHistory(r, history)
+			insertedID, err := i.AddHistory(history, true)
 			if err != nil {
-				i.logger.Errorw("Failed to add incident rule matched history", zap.String("rule", r.Name), zap.Error(err))
+				i.logger.Errorw("Failed to insert rule matched incident history", zap.String("rule", r.Name), zap.Error(err))
 
-				return types.Int{}, errors.New("failed to add incident rule matched history")
+				return types.Int{}, errors.New("failed to insert rule matched incident history")
 			}
 
 			if insertedID.Valid && !causedBy.Valid {
@@ -365,6 +372,16 @@ func (i *Incident) notifyContacts(ev *event.Event, causedBy types.Int) error {
 			r := i.runtimeConfig.Rules[escalation.RuleID]
 			i.logger.Infof("Rule %q reached escalation %q", r.Name, escalation.DisplayName())
 
+			err := i.AddEscalationTriggered(state)
+			if err != nil {
+				i.logger.Errorw(
+					"Failed to upsert escalation state", zap.String("rule", r.Name),
+					zap.String("escalation", escalation.DisplayName()), zap.Error(err),
+				)
+
+				return errors.New("failed to upsert escalation state")
+			}
+
 			history := &HistoryRow{
 				Time:                      state.TriggeredAt,
 				EventID:                   utils.ToDBInt(ev.ID),
@@ -373,27 +390,19 @@ func (i *Incident) notifyContacts(ev *event.Event, causedBy types.Int) error {
 				Type:                      EscalationTriggered,
 				CausedByIncidentHistoryID: causedBy,
 			}
-
-			causedByHistoryId, err := i.AddEscalationTriggered(state, history)
+			causedBy, err = i.AddHistory(history, true)
 			if err != nil {
 				i.logger.Errorw(
-					"Failed to add escalation triggered history", zap.String("rule", r.Name),
+					"Failed to insert escalation triggered incident history", zap.String("rule", r.Name),
 					zap.String("escalation", escalation.DisplayName()), zap.Error(err),
 				)
 
-				return errors.New("failed to add escalation triggered history")
+				return errors.New("failed to insert escalation triggered incident history")
 			}
-
-			causedBy = causedByHistoryId
 
 			err = i.AddRecipient(escalation, ev.ID)
 			if err != nil {
-				i.logger.Errorw(
-					"Failed to add incident recipients", zap.String("rule", r.Name), zap.String("escalation", escalation.DisplayName()),
-					zap.String("recipients", escalation.DisplayName()), zap.Error(err),
-				)
-
-				return errors.New("failed to add incident recipients")
+				return err
 			}
 		}
 
