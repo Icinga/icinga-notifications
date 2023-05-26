@@ -39,6 +39,7 @@ func GetCurrent(
 			Recipients:       map[recipient.Key]*RecipientState{},
 			EscalationState:  map[escalationID]*EscalationState{},
 			SeverityBySource: map[int64]event.Severity{},
+			Rules:            map[ruleID]struct{}{},
 		}
 
 		err := db.QueryRowx(db.Rebind(db.BuildSelectStmt(ir, ir)+` WHERE "object_id" = ? AND "recovered_at" IS NULL`), obj.ID).StructScan(ir)
@@ -80,6 +81,8 @@ func GetCurrent(
 			for _, state := range states {
 				incident.EscalationState[state.RuleEscalationID] = state
 			}
+
+			incident.RestoreEscalationStateRules(states)
 
 			currentIncident = incident
 		}

@@ -557,6 +557,17 @@ func (i *Incident) processAcknowledgementEvent(ev event.Event) error {
 	return nil
 }
 
+// RestoreEscalationStateRules restores this incident's rules based on the given escalation states.
+func (i *Incident) RestoreEscalationStateRules(states []*EscalationState) {
+	i.runtimeConfig.RLock()
+	defer i.runtimeConfig.RUnlock()
+
+	for _, state := range states {
+		escalation := i.runtimeConfig.GetRuleEscalation(state.RuleEscalationID)
+		i.Rules[escalation.RuleID] = struct{}{}
+	}
+}
+
 type EscalationState struct {
 	IncidentID       int64           `db:"incident_id"`
 	RuleEscalationID int64           `db:"rule_escalation_id"`
