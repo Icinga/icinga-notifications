@@ -86,7 +86,7 @@ func (i *Incident) ProcessEvent(ev event.Event, created bool) error {
 			return err
 		}
 
-		i.logger = i.logger.With(zap.String("object", i.ObjectDisplayName()), zap.String("incident", i.String()))
+		i.logger = i.logger.With(zap.String("incident", i.String()))
 	}
 
 	if err := i.AddEvent(&ev); err != nil {
