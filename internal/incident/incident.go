@@ -453,7 +453,10 @@ func (i *Incident) notifyContacts(ev *event.Event, causedBy types.Int) error {
 
 			_, err := i.AddHistory(hr, false)
 			if err != nil {
-				i.logger.Errorln(err)
+				i.logger.Errorw(
+					"Failed to insert contact notified incident history", zap.String("contact", contact.String()),
+					zap.Error(err),
+				)
 			}
 
 			chConf := i.runtimeConfig.Channels[chType]
