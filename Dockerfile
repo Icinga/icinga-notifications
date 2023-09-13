@@ -1,4 +1,4 @@
-# Icinga Notifications Docker Image | (c) 2023 Icinga GmbH | GPLv2+
+# Icinga Notifications | (c) 2023 Icinga GmbH | GPLv2+
 
 FROM docker.io/library/golang as build
 ENV CGO_ENABLED 0
