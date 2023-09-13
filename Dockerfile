@@ -10,9 +10,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go build -o bin/ ./cmd/icinga-notifications-daemon
 
+RUN mkdir bin/channel
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -o bin/channel/ ./cmd/channel/...
+
 FROM docker.io/library/alpine
 
 COPY --from=build /src/icinga-notifications/bin/icinga-notifications-daemon /usr/bin/icinga-notifications-daemon
+COPY --from=build /src/icinga-notifications/bin/channel /usr/libexec/icinga-notifications/channel
 
 RUN apk add tzdata
 
