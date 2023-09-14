@@ -89,6 +89,7 @@ CREATE TABLE schedule_member (
     timeperiod_id bigint NOT NULL REFERENCES timeperiod(id),
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),
+    membership_hash bytea DEFAULT NULL,
 
     -- There is no PRIMARY KEY in that table as either contact_id or contactgroup_id should be allowed to be NULL.
     -- Instead, there are two UNIQUE constraints that prevent duplicate entries. Multiple NULLs are not considered to
