@@ -60,7 +60,8 @@ func (r *RuntimeConfig) applyPendingChannels() {
 			currentChannel.ID = pendingChannel.ID
 			currentChannel.Name = pendingChannel.Name
 			currentChannel.Config = pendingChannel.Config
-			currentChannel.ResetPlugin()
+			//	currentChannel.ResetPlugin()
+			//TODO add func
 		} else {
 			r.Channels[typ] = pendingChannel
 		}
