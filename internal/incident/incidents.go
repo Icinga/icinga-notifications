@@ -3,7 +3,6 @@ package incident
 import (
 	"database/sql"
 	"errors"
-	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
@@ -21,7 +20,7 @@ var (
 
 func GetCurrent(
 	db *icingadb.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
-	configFile *config.ConfigFile, create bool, channelPool *channel.Pool,
+	configFile *config.ConfigFile, create bool,
 ) (*Incident, bool, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
@@ -40,7 +39,6 @@ func GetCurrent(
 			Recipients:       map[recipient.Key]*RecipientState{},
 			EscalationState:  map[escalationID]*EscalationState{},
 			SeverityBySource: map[int64]event.Severity{},
-			channelPool:      channelPool,
 		}
 
 		err := db.QueryRowx(db.Rebind(db.BuildSelectStmt(ir, ir)+` WHERE "object_id" = ? AND "recovered_at" IS NULL`), obj.ID).StructScan(ir)

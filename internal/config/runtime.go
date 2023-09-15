@@ -24,6 +24,7 @@ type RuntimeConfig struct {
 	// pending contains changes to config objects that are to be applied to the embedded live config.
 	pending ConfigSet
 
+	logs   *logging.Logging
 	logger *logging.Logger
 	db     *icingadb.DB
 
@@ -31,8 +32,8 @@ type RuntimeConfig struct {
 	mu sync.RWMutex
 }
 
-func NewRuntimeConfig(db *icingadb.DB, logger *logging.Logger) *RuntimeConfig {
-	return &RuntimeConfig{db: db, logger: logger}
+func NewRuntimeConfig(db *icingadb.DB, logs *logging.Logging) *RuntimeConfig {
+	return &RuntimeConfig{db: db, logs: logs, logger: logs.GetChildLogger("runtime-updates")}
 }
 
 type ConfigSet struct {

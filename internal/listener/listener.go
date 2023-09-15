@@ -4,7 +4,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
-	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
@@ -22,20 +21,18 @@ type Listener struct {
 	db            *icingadb.DB
 	logger        *logging.Logger
 	runtimeConfig *config.RuntimeConfig
-	channelPool   *channel.Pool
 
 	logs *logging.Logging
 	mux  http.ServeMux
 }
 
-func NewListener(db *icingadb.DB, configFile *config.ConfigFile, runtimeConfig *config.RuntimeConfig, logs *logging.Logging, channelPool *channel.Pool) *Listener {
+func NewListener(db *icingadb.DB, configFile *config.ConfigFile, runtimeConfig *config.RuntimeConfig, logs *logging.Logging) *Listener {
 	l := &Listener{
 		configFile:    configFile,
 		db:            db,
 		logger:        logs.GetChildLogger("listener"),
 		logs:          logs,
 		runtimeConfig: runtimeConfig,
-		channelPool:   channelPool,
 	}
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
 	l.mux.HandleFunc("/dump-config", l.DumpConfig)
@@ -116,7 +113,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
-	currentIncident, created, err := incident.GetCurrent(l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, l.configFile, createIncident, l.channelPool)
+	currentIncident, created, err := incident.GetCurrent(l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, l.configFile, createIncident)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err)

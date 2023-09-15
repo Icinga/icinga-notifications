@@ -28,6 +28,7 @@ func (r *RuntimeConfig) fetchChannels(ctx context.Context, tx *sqlx.Tx) error {
 		if channelsByType[c.Type] != nil {
 			channelLogger.Warnw("ignoring duplicate config for channel type")
 		} else {
+			c.Logger = r.logs.GetChildLogger("channel")
 			channelsByType[c.Type] = c
 
 			channelLogger.Debugw("loaded channel config")
@@ -57,11 +58,15 @@ func (r *RuntimeConfig) applyPendingChannels() {
 		if pendingChannel == nil {
 			delete(r.Channels, typ)
 		} else if currentChannel := r.Channels[typ]; currentChannel != nil {
-			currentChannel.ID = pendingChannel.ID
-			currentChannel.Name = pendingChannel.Name
-			currentChannel.Config = pendingChannel.Config
-			//	currentChannel.ResetPlugin()
-			//TODO add func
+			if currentChannel.ID != pendingChannel.ID || currentChannel.Name != pendingChannel.Name || currentChannel.Config != pendingChannel.Config {
+				currentChannel.ID = pendingChannel.ID
+				currentChannel.Name = pendingChannel.Name
+				currentChannel.Config = pendingChannel.Config
+
+				if err := currentChannel.ResetPlugin(); err != nil {
+					currentChannel.Logger.Errorw("Failed to reset plugin", zap.String("Name", currentChannel.Name), zap.Error(err))
+				}
+			}
 		} else {
 			r.Channels[typ] = pendingChannel
 		}

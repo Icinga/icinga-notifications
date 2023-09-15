@@ -7,20 +7,24 @@ import (
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/icinga/icinga-notifications/pluginLoader"
 	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
 	"io"
-	"log"
-	"os"
 	"os/exec"
 	"path/filepath"
 )
+
+const pluginDir = "/usr/libexec/icinga-notifications/channel"
 
 type Channel struct {
 	ID     int64  `db:"id"`
 	Name   string `db:"name"`
 	Type   string `db:"type"`
 	Config string `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
+
+	Plugin *Plugin
+	Logger *logging.Logger
 }
 
 type Plugin struct {
@@ -32,114 +36,113 @@ type Plugin struct {
 	Logger *logging.Logger
 }
 
-type Pool struct {
-	plugins map[string]*Plugin
-	Dir     string
-	Logger  *logging.Logger
+func SpawnPlugin(path string, config string, baseLogger *logging.Logger) (*Plugin, error) {
+	logger := baseLogger.With(zap.String("path", path))
+
+	cmd := exec.Command(path)
+
+	writer, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+
+	tempReader, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	reader := bufio.NewReader(tempReader)
+
+	errPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+	go forwardLogs(errPipe, logger)
+
+	if err = cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start cmd: %w", err)
+	}
+	logger.Debug("Cmd started successfully")
+
+	if _, err = fmt.Fprintln(writer, config); err != nil {
+		return nil, fmt.Errorf("failed to parse config to writer: %w", err)
+	}
+	logger.Debug("Successfully parsed config to writer")
+
+	return &Plugin{cmd: cmd, writer: writer, reader: reader, Logger: baseLogger}, nil
 }
 
-/*func dead() {
-	ch := ChannelPool{Dir: "/usr/libexec/icinga-notifications/channel"}
-
-	emails := []string{"{email: aa@aa.com}", "{email: bb@bb.com}"}
-	sms := []string{"{phone: 123}", "{phone: 9988}"}
-
-	pluginCollector := map[string][]string{
-		"email": emails,
-		"sms":   sms,
+func (p *Plugin) Send(contact *recipient.Contact, incident contracts.Incident, event *event.Event, icingaweb2Url string) error {
+	r := pluginLoader.NotificationRequest{
+		Contact:       contact,
+		Incident:      pluginLoader.Incident{Id: incident.ID(), ObjectDisplayName: incident.ObjectDisplayName()},
+		Event:         event,
+		IcingaWeb2Url: icingaweb2Url,
 	}
 
-	for pluginType, values := range pluginCollector {
-		for _, line := range values {
-			log.Println(ch.Run(pluginType, line))
-		}
-	}
-}*/
-
-func (n *Plugin) execPlugin(line string) error {
-	logger := n.Logger.With(zap.String("path", n.path))
-	if n.cmd == nil {
-		cmd := exec.Command(n.path)
-
-		writer, err := cmd.StdinPipe()
-		if err != nil {
-			return fmt.Errorf("stdin pipe failed: %w", err)
-		}
-
-		logger.Debug("stdin pipe pass")
-
-		tempReader, err := cmd.StdoutPipe()
-		if err != nil {
-			return fmt.Errorf("stdout pipe failed: %w", err)
-		}
-
-		logger.Debug("stdout pipe pass")
-
-		reader := bufio.NewReader(tempReader)
-
-		cmd.Stderr = os.Stderr
-
-		err = cmd.Start()
-		if err != nil {
-			return fmt.Errorf("cmd start failed: %w", err)
-		}
-		logger.Debug("cmd start pass")
-
-		_, err = fmt.Fprintln(writer, n.config)
-		if err != nil {
-			return fmt.Errorf("writing config failed: %w", err)
-		}
-		logger.Debug("writing config pass")
-
-		n.cmd = cmd
-		n.writer = writer
-		n.reader = reader
-	}
-
-	_, err := fmt.Fprintln(n.writer, line)
+	marshal, err := json.Marshal(r)
 	if err != nil {
-		return fmt.Errorf("writing line failed: %w", err)
+		return fmt.Errorf("json.Marschal failed: %w", err)
 	}
-	logger.Debugw("writing line pass", zap.String("line", line))
 
-	res, err := n.reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("reading output failed: %w", err)
-	}
-	logger.Debugw("reading output pass", zap.String("output", res))
+	line := string(marshal)
 
-	var response struct {
-		Success bool
-		Error   error
+	if _, err = fmt.Fprintln(p.writer, line); err != nil {
+		return fmt.Errorf("failed to parse line to writer: %w", err)
 	}
-	err = json.Unmarshal([]byte(res), &response)
+	p.Logger.Debugw("Successfully parsed line to writer:", zap.String("line", line))
+
+	res, err := p.reader.ReadString('\n')
 	if err != nil {
-		return fmt.Errorf("cant decode json response: %w", err)
+		return fmt.Errorf("failed to read responce: %w", err)
+	}
+
+	p.Logger.Debugw("Successfully read response", zap.String("output", res))
+
+	var response = pluginLoader.Response{}
+	if err = json.Unmarshal([]byte(res), &response); err != nil {
+		return fmt.Errorf("failed to decode json response: %w", err)
 	} else if !response.Success {
-		return fmt.Errorf("plugin reported error: %w", response.Error)
+		return fmt.Errorf("plugin response contains error: %s", response.Error)
 	}
 
 	return nil
 }
 
-func (c *Pool) Run(pluginType string, config string, line string) error {
-	if c.plugins == nil {
-		c.plugins = map[string]*Plugin{}
+func (c *Channel) GetPlugin() (*Plugin, error) {
+	if c.Plugin == nil {
+		p, err := SpawnPlugin(filepath.Join(pluginDir, c.Type), c.Config, c.Logger)
+		if err != nil {
+			return p, fmt.Errorf("unknown channel type %q", c.Type)
+		}
+
+		c.Plugin = p
 	}
 
-	if c.plugins[pluginType] == nil {
-		c.plugins[pluginType] = &Plugin{config: config, path: filepath.Join(c.Dir, pluginType), Logger: c.Logger}
-	}
-
-	return c.plugins[pluginType].execPlugin(line)
+	return c.Plugin, nil
 }
 
-func CreateJson(contact *recipient.Contact, incident contracts.Incident, event *event.Event, icingaweb2Url string) string {
-	i := Incident{incident.ID(), incident.ObjectDisplayName()}
-	marshal, err := json.Marshal(NotificationRequest{Contact: contact, Incident: i, Event: event, IcingaWeb2Url: icingaweb2Url})
-	if err != nil {
-		log.Println(err)
+func (c *Channel) ResetPlugin() error {
+	if c.Plugin != nil {
+		if err := c.Plugin.writer.Close(); err != nil {
+			return err
+		}
+
+		c.Plugin = nil
 	}
 
-	return string(marshal)
+	return nil
+}
+
+func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
+	reader := bufio.NewReader(errPipe)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			logger.Errorw("Failed to read stderr line", zap.Error(err))
+			return
+		}
+
+		logger.Info(line)
+	}
 }

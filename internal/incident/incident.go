@@ -3,7 +3,6 @@ package incident
 import (
 	"errors"
 	"fmt"
-	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
@@ -37,7 +36,6 @@ type Incident struct {
 	logger        *zap.SugaredLogger
 	runtimeConfig *config.RuntimeConfig
 	configFile    *config.ConfigFile
-	channelPool   *channel.Pool
 
 	sync.Mutex
 }
@@ -476,7 +474,13 @@ func (i *Incident) notifyContacts(ev *event.Event, causedBy types.Int) error {
 				continue
 			}
 
-			err = i.channelPool.Run(chType, chConf.Config, channel.CreateJson(contact, i, ev, i.configFile.Icingaweb2URL))
+			plugin, err := chConf.GetPlugin()
+			if err != nil {
+				i.logger.Errorw("Could not initialize channel", zap.String("type", chType), zap.Error(err))
+				continue
+			}
+
+			err = plugin.Send(contact, i, ev, i.configFile.Icingaweb2URL)
 			if err != nil {
 				i.logger.Errorw("Failed to send via channel", zap.String("type", chType), zap.Error(err))
 				continue

@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/listener"
 	"github.com/icinga/icingadb/pkg/logging"
@@ -56,19 +55,14 @@ func main() {
 		}
 	}
 
-	runtimeConfig := config.NewRuntimeConfig(db, logs.GetChildLogger("runtime-updates"))
+	runtimeConfig := config.NewRuntimeConfig(db, logs)
 	if err := runtimeConfig.UpdateFromDatabase(context.TODO()); err != nil {
 		logger.Fatalw("failed to load config from database", zap.Error(err))
 	}
 
 	go runtimeConfig.PeriodicUpdates(context.TODO(), 1*time.Second)
 
-	channelPool := &channel.Pool{
-		Dir:    "/usr/libexec/icinga-notifications/channel",
-		Logger: logs.GetChildLogger("channel"),
-	}
-
-	if err := listener.NewListener(db, conf, runtimeConfig, logs, channelPool).Run(); err != nil {
+	if err := listener.NewListener(db, conf, runtimeConfig, logs).Run(); err != nil {
 		panic(err)
 	}
 }
