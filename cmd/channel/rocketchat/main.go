@@ -21,9 +21,9 @@ func main() {
 	pluginLoader.RunPlugin(&RocketChat{})
 }
 
-func (ch *RocketChat) Send(req pluginLoader.NotificationRequest) error {
+func (ch *RocketChat) Send(req *pluginLoader.NotificationRequest) error {
 	var output bytes.Buffer
-	_, _ = fmt.Fprintf(&output, "[#%d] %s %s is %s\n\n", req.Incident.Id, req.Event.Type, req.Incident.ObjectDisplayName, req.Event.Severity.String())
+	_, _ = fmt.Fprintf(&output, "[#%d] %s %s is %s\n\n", req.Incident.Id, req.Event.Type, req.Incident.ObjectDisplayName, req.Event.Severity)
 
 	pluginLoader.FormatMessage(&output, req)
 
@@ -76,9 +76,9 @@ func (ch *RocketChat) Send(req pluginLoader.NotificationRequest) error {
 	return nil
 }
 
-func (ch *RocketChat) LoadConfig(config string) {
-	err := json.Unmarshal([]byte(config), ch)
+func (ch *RocketChat) LoadConfig(jsonStr string) {
+	err := json.Unmarshal([]byte(jsonStr), ch)
 	if err != nil {
-		log.Fatal("Rocketchat: Failed to load config:", err)
+		log.Fatal("Failed to load config:", err)
 	}
 }

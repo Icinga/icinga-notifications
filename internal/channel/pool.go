@@ -4,9 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/icinga/icinga-notifications/internal/contracts"
-	"github.com/icinga/icinga-notifications/internal/event"
-	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/pluginLoader"
 	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
@@ -33,7 +30,7 @@ type Plugin struct {
 	cmd    *exec.Cmd
 	writer io.WriteCloser
 	reader *bufio.Reader
-	Logger *logging.Logger
+	Logger *zap.SugaredLogger
 }
 
 func SpawnPlugin(path string, config string, baseLogger *logging.Logger) (*Plugin, error) {
@@ -65,22 +62,15 @@ func SpawnPlugin(path string, config string, baseLogger *logging.Logger) (*Plugi
 	logger.Debug("Cmd started successfully")
 
 	if _, err = fmt.Fprintln(writer, config); err != nil {
-		return nil, fmt.Errorf("failed to parse config to writer: %w", err)
+		return nil, fmt.Errorf("failed to pass config to writer: %w", err)
 	}
-	logger.Debug("Successfully parsed config to writer")
+	logger.Debug("Successfully pass config to writer")
 
-	return &Plugin{cmd: cmd, writer: writer, reader: reader, Logger: baseLogger}, nil
+	return &Plugin{cmd: cmd, writer: writer, reader: reader, Logger: logger}, nil
 }
 
-func (p *Plugin) Send(contact *recipient.Contact, incident contracts.Incident, event *event.Event, icingaweb2Url string) error {
-	r := pluginLoader.NotificationRequest{
-		Contact:       contact,
-		Incident:      pluginLoader.Incident{Id: incident.ID(), ObjectDisplayName: incident.ObjectDisplayName()},
-		Event:         event,
-		IcingaWeb2Url: icingaweb2Url,
-	}
-
-	marshal, err := json.Marshal(r)
+func (p *Plugin) Run(req *pluginLoader.NotificationRequest) error {
+	marshal, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("json.Marschal failed: %w", err)
 	}
@@ -88,9 +78,9 @@ func (p *Plugin) Send(contact *recipient.Contact, incident contracts.Incident, e
 	line := string(marshal)
 
 	if _, err = fmt.Fprintln(p.writer, line); err != nil {
-		return fmt.Errorf("failed to parse line to writer: %w", err)
+		return fmt.Errorf("failed to pass line to writer: %w", err)
 	}
-	p.Logger.Debugw("Successfully parsed line to writer:", zap.String("line", line))
+	p.Logger.Debugw("Successfully pass line to writer:", zap.String("line", line))
 
 	res, err := p.reader.ReadString('\n')
 	if err != nil {
