@@ -1,6 +1,6 @@
 module github.com/icinga/icinga-notifications
 
-go 1.20
+go 1.21
 
 require (
 	github.com/creasty/defaults v1.7.0
