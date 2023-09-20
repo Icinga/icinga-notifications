@@ -3,7 +3,7 @@ module github.com/icinga/icinga-notifications
 go 1.20
 
 require (
-	github.com/creasty/defaults v1.6.0
+	github.com/creasty/defaults v1.7.0
 	github.com/goccy/go-yaml v1.9.6
 	github.com/icinga/icingadb v1.1.1-0.20230418113126-7c4b947aad3a
 	github.com/jmoiron/sqlx v1.3.5
