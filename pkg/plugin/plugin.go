@@ -1,4 +1,4 @@
-package pluginLoader
+package plugin
 
 import (
 	"bufio"
@@ -10,6 +10,11 @@ import (
 	"strings"
 	"time"
 )
+
+type Info struct {
+	Name             string          `json:"display_name"`
+	ConfigAttributes json.RawMessage `json:"config_attrs"`
+}
 
 type Contact struct {
 	FullName  string     `json:"full_name"`
@@ -42,25 +47,26 @@ type NotificationRequest struct {
 	IcingaWeb2Url string   `json:"icingaWeb2Url"`
 }
 
-type Response struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error"`
+type JsonRpcRequest struct {
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
+	Id     string          `json:"id"`
 }
 
-type PluginLoader interface {
+type JsonRpcResponse struct {
+	Result json.RawMessage `json:"result"`
+	Error  string          `json:"error"`
+	Id     string          `json:"id"`
+}
+
+type Plugin interface {
 	Send(req *NotificationRequest) error
-	LoadConfig(jsonStr string)
+	LoadConfig(jsonStr string) error
+	GetInfo() *Info
 }
 
-func RunPlugin(plugin PluginLoader) {
+func RunPlugin(plugin Plugin) {
 	reader := bufio.NewReader(os.Stdin)
-
-	configStr, err := reader.ReadString('\n')
-	if err != nil {
-		log.Fatal("Failed to read config:", err)
-	}
-
-	plugin.LoadConfig(configStr)
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -68,25 +74,47 @@ func RunPlugin(plugin PluginLoader) {
 			log.Fatal("Failed to read request:", err)
 		}
 
-		var req NotificationRequest
-		if err = json.Unmarshal([]byte(line), &req); err != nil {
-			log.Fatal("Failed to json.Unmarshal request:", err)
-		}
+		go func(req string) {
+			request := JsonRpcRequest{}
+			if err = json.Unmarshal([]byte(req), &request); err != nil {
+				log.Fatal("Failed to json.Unmarshal request:", err)
+			}
+			var response = JsonRpcResponse{Id: request.Id}
+			switch request.Method {
+			case "GetInfo":
+				result, err := json.Marshal(plugin.GetInfo())
+				if err != nil {
+					response.Error = fmt.Errorf("failed to collect plugin info: %w", err).Error()
+				} else {
+					response.Result = result
+				}
 
-		var response = Response{Success: true, Error: ""}
-		if err = plugin.Send(&req); err != nil {
-			response.Success = false
-			response.Error = err.Error()
-		}
+			case "SetConfig":
+				if err = plugin.LoadConfig(string(request.Params)); err != nil {
+					response.Error = fmt.Errorf("failed to set plugin config: %w", err).Error()
+				}
 
-		marshal, err := json.Marshal(response)
-		if err != nil {
-			log.Fatal("Failed to prepare json response:", err)
-		}
-		_, err = fmt.Fprintln(os.Stdout, string(marshal))
-		if err != nil {
-			panic(err)
-		}
+			case "SendNotification":
+				var nr NotificationRequest
+				if err = json.Unmarshal(request.Params, &nr); err != nil {
+					response.Error = fmt.Errorf("failed to json.Unmarshal request: %w", err).Error()
+				} else if err = plugin.Send(&nr); err != nil {
+					response.Error = err.Error()
+				}
+
+			default:
+				response.Error = "unknown json-rpc method given"
+			}
+
+			marshal, err := json.Marshal(response)
+			if err != nil {
+				panic(fmt.Errorf("failed to prepare json response: %w", err))
+			}
+
+			if _, err = fmt.Fprintln(os.Stdout, string(marshal)); err != nil {
+				panic(fmt.Errorf("failed to write json response: %w", err))
+			}
+		}(line)
 	}
 }
 

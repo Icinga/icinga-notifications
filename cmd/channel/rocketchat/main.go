@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/icinga/icinga-notifications/pluginLoader"
-	"log"
+	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"net/http"
 	"time"
 )
@@ -18,14 +17,14 @@ type RocketChat struct {
 }
 
 func main() {
-	pluginLoader.RunPlugin(&RocketChat{})
+	plugin.RunPlugin(&RocketChat{})
 }
 
-func (ch *RocketChat) Send(req *pluginLoader.NotificationRequest) error {
+func (ch *RocketChat) Send(req *plugin.NotificationRequest) error {
 	var output bytes.Buffer
 	_, _ = fmt.Fprintf(&output, "[#%d] %s %s is %s\n\n", req.Incident.Id, req.Event.Type, req.Incident.ObjectDisplayName, req.Event.Severity)
 
-	pluginLoader.FormatMessage(&output, req)
+	plugin.FormatMessage(&output, req)
 
 	var roomId string
 	for _, address := range req.Contact.Addresses {
@@ -76,9 +75,15 @@ func (ch *RocketChat) Send(req *pluginLoader.NotificationRequest) error {
 	return nil
 }
 
-func (ch *RocketChat) LoadConfig(jsonStr string) {
+func (ch *RocketChat) LoadConfig(jsonStr string) error {
 	err := json.Unmarshal([]byte(jsonStr), ch)
 	if err != nil {
-		log.Fatal("Failed to load config:", err)
+		return err
 	}
+
+	return nil
+}
+
+func (ch *RocketChat) GetInfo() *plugin.Info {
+	return &plugin.Info{Name: "Rocket.Chat"}
 }

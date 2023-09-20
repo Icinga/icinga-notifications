@@ -10,7 +10,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/icinga/icinga-notifications/pluginLoader"
+	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
 	"go.uber.org/zap"
@@ -475,13 +475,13 @@ func (i *Incident) notifyContacts(ev *event.Event, causedBy types.Int) error {
 				continue
 			}
 
-			plugin, err := chConf.GetPlugin()
+			p, err := chConf.GetPlugin()
 			if err != nil {
 				i.logger.Errorw("Could not initialize channel", zap.String("type", chType), zap.Error(err))
 				continue
 			}
 
-			err = plugin.Run(prepareReq(contact, i, ev, i.configFile.Icingaweb2URL))
+			err = p.SendNotification(prepareReq(contact, i, ev, i.configFile.Icingaweb2URL))
 			if err != nil {
 				i.logger.Errorw("Failed to send via channel", zap.String("type", chType), zap.Error(err))
 				continue
@@ -577,16 +577,16 @@ var (
 	_ contracts.Incident = (*Incident)(nil)
 )
 
-func prepareReq(contact *recipient.Contact, i contracts.Incident, ev *event.Event, icingaweb2Url string) *pluginLoader.NotificationRequest {
-	c := &pluginLoader.Contact{FullName: contact.FullName}
+func prepareReq(contact *recipient.Contact, i contracts.Incident, ev *event.Event, icingaweb2Url string) *plugin.NotificationRequest {
+	c := &plugin.Contact{FullName: contact.FullName}
 	for _, addr := range contact.Addresses {
-		c.Addresses = append(c.Addresses, &pluginLoader.Address{Type: addr.Type, Address: addr.Address})
+		c.Addresses = append(c.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
 	}
 
-	return &pluginLoader.NotificationRequest{
+	return &plugin.NotificationRequest{
 		Contact:       c,
-		Incident:      pluginLoader.Incident{Id: i.ID(), ObjectDisplayName: i.ObjectDisplayName()},
-		Event:         &pluginLoader.Event{Time: ev.Time, URL: ev.URL, Type: ev.Type, Severity: ev.Severity.String(), Username: ev.Username, Message: ev.Message},
+		Incident:      plugin.Incident{Id: i.ID(), ObjectDisplayName: i.ObjectDisplayName()},
+		Event:         &plugin.Event{Time: ev.Time, URL: ev.URL, Type: ev.Type, Severity: ev.Severity.String(), Username: ev.Username, Message: ev.Message},
 		IcingaWeb2Url: icingaweb2Url,
 	}
 }

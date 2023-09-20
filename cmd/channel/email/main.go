@@ -4,8 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/icinga/icinga-notifications/pluginLoader"
-	"log"
+	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"net"
 	"net/smtp"
 	"os"
@@ -20,10 +19,10 @@ type Email struct {
 }
 
 func main() {
-	pluginLoader.RunPlugin(&Email{})
+	plugin.RunPlugin(&Email{})
 }
 
-func (ch *Email) Send(req *pluginLoader.NotificationRequest) error {
+func (ch *Email) Send(req *plugin.NotificationRequest) error {
 	var to []string
 	for _, address := range req.Contact.Addresses {
 		if address.Type == "email" {
@@ -39,7 +38,7 @@ func (ch *Email) Send(req *pluginLoader.NotificationRequest) error {
 	_, _ = fmt.Fprintf(&msg, "To: %s\n", strings.Join(to, ","))
 	_, _ = fmt.Fprintf(&msg, "Subject: [#%d] %s %s is %s\n\n", req.Incident.Id, req.Event.Type, req.Incident.ObjectDisplayName, req.Event.Severity)
 
-	pluginLoader.FormatMessage(&msg, req)
+	plugin.FormatMessage(&msg, req)
 
 	err := smtp.SendMail(ch.GetServer(), nil, ch.From, to, bytes.ReplaceAll(msg.Bytes(), []byte("\n"), []byte("\r\n")))
 	if err != nil {
@@ -49,14 +48,10 @@ func (ch *Email) Send(req *pluginLoader.NotificationRequest) error {
 	return nil
 }
 
-func (ch *Email) GetServer() string {
-	return net.JoinHostPort(ch.Host, ch.Port)
-}
-
-func (ch *Email) LoadConfig(jsonStr string) {
+func (ch *Email) LoadConfig(jsonStr string) error {
 	err := json.Unmarshal([]byte(jsonStr), ch)
 	if err != nil {
-		log.Fatal("Failed to load config:", err)
+		return fmt.Errorf("failed to load config:%s %w", jsonStr, err)
 	}
 
 	if ch.Host == "" {
@@ -70,14 +65,24 @@ func (ch *Email) LoadConfig(jsonStr string) {
 	if ch.From == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
-			log.Fatal("Failed to get the os's hostname:", err)
+			return fmt.Errorf("failed to get the os's hostname: %w", err)
 		}
 
 		usr, err := user.Current()
 		if err != nil {
-			log.Fatal("Failed to get the os's current user:", err)
+			return fmt.Errorf("failed to get the os's current user: %w", err)
 		}
 
 		ch.From = usr.Username + "@" + hostname
 	}
+
+	return nil
+}
+
+func (ch *Email) GetInfo() *plugin.Info {
+	return &plugin.Info{Name: "Email"}
+}
+
+func (ch *Email) GetServer() string {
+	return net.JoinHostPort(ch.Host, ch.Port)
 }
