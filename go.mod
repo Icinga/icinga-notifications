@@ -7,7 +7,7 @@ require (
 	github.com/goccy/go-yaml v1.9.6
 	github.com/icinga/icingadb v1.1.1-0.20230418113126-7c4b947aad3a
 	github.com/jmoiron/sqlx v1.3.5
-	github.com/stretchr/testify v1.8.2
+	github.com/stretchr/testify v1.8.4
 	github.com/teambition/rrule-go v1.8.2
 	go.uber.org/zap v1.23.0
 	golang.org/x/exp v0.0.0-20220613132600-b0d781184e0d
