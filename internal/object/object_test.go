@@ -11,14 +11,10 @@ func TestFilter(t *testing.T) {
 		Tags: map[string]string{
 			"host": "db1.example.com",
 		},
-		Metadata: map[int64]*SourceMetadata{
-			1: {ExtraTags: map[string]string{
-				"hostgroup/database-server":     "",
-				"hostgroup/Nuremberg (Germany)": "",
-			}},
-			2: {ExtraTags: map[string]string{
-				"country": "DE",
-			}},
+		ExtraTags: map[string]string{
+			"hostgroup/database-server":     "",
+			"hostgroup/Nuremberg (Germany)": "",
+			"country":                       "DE",
 		},
 	}
 

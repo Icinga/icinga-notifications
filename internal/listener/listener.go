@@ -9,7 +9,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/object"
-	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
@@ -88,9 +87,9 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	ctx := context.Background()
-	obj, err := object.FromTags(ctx, l.db, ev.SourceId, ev.Tags)
+	obj, err := object.FromEvent(ctx, l.db, &ev)
 	if err != nil {
-		l.logger.Errorln(err)
+		l.logger.Errorw("Can't sync object", zap.Error(err))
 
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err.Error())
@@ -106,14 +105,6 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
-
-	if err := obj.UpdateMetadata(ctx, tx, ev.SourceId, ev.Name, utils.ToDBString(ev.URL), ev.ExtraTags); err != nil {
-		l.logger.Errorw("Can't update object metadata", zap.String("object", obj.DisplayName()), zap.Error(err))
-
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprintln(w, "can't update object metadata")
-		return
-	}
 
 	if err := ev.Sync(ctx, tx, l.db, obj.ID); err != nil {
 		l.logger.Errorw("Failed to insert event and fetch its ID", zap.String("event", ev.String()), zap.Error(err))

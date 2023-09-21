@@ -1,5 +1,5 @@
 CREATE TYPE boolenum AS ENUM ( 'n', 'y' );
-CREATE TYPE incident_history_event_type AS ENUM ( 'source_severity_changed', 'incident_severity_changed', 'recipient_role_changed', 'escalation_triggered', 'rule_matched', 'opened', 'closed', 'notified' );
+CREATE TYPE incident_history_event_type AS ENUM ( 'incident_severity_changed', 'recipient_role_changed', 'escalation_triggered', 'rule_matched', 'opened', 'closed', 'notified' );
 CREATE TYPE frequency_type AS ENUM ( 'MINUTELY', 'HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY' );
 
 -- IPL ORM renders SQL queries with LIKE operators for all suggestions in the search bar,
@@ -125,34 +125,24 @@ CREATE TABLE source (
 CREATE TABLE object (
     id bytea NOT NULL, -- SHA256 of identifying tags and the source.id
     source_id bigint NOT NULL REFERENCES source(id),
+    name text NOT NULL,
     -- this will probably become more flexible in the future
     host text NOT NULL,
     service text,
 
-    CHECK (length(id) = 256/8),
-
-    CONSTRAINT pk_object PRIMARY KEY (id),
-    FOREIGN KEY (source_id) REFERENCES source(id)
-);
-
-CREATE TABLE source_object (
-    object_id bytea NOT NULL REFERENCES object(id),
-    source_id bigint NOT NULL REFERENCES source(id),
-    name text NOT NULL,
     url text,
 
-    CONSTRAINT pk_source_object PRIMARY KEY (object_id, source_id)
+    CHECK (length(id) = 256/8),
+
+    CONSTRAINT pk_object PRIMARY KEY (id)
 );
 
 CREATE TABLE object_extra_tag (
     object_id bytea NOT NULL REFERENCES object(id),
-    source_id bigint NOT NULL REFERENCES source(id),
-
     tag text NOT NULL,
     value text NOT NULL,
 
-    CONSTRAINT pk_object_extra_tag PRIMARY KEY (object_id, source_id, tag),
-    FOREIGN KEY (object_id, source_id) REFERENCES source_object(object_id, source_id)
+    CONSTRAINT pk_object_extra_tag PRIMARY KEY (object_id, tag)
 );
 
 CREATE TYPE severity AS ENUM ('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg');
@@ -166,8 +156,7 @@ CREATE TABLE event (
     message text,
     username text,
 
-    CONSTRAINT pk_event PRIMARY KEY (id),
-    FOREIGN KEY (object_id) REFERENCES object(id)
+    CONSTRAINT pk_event PRIMARY KEY (id)
 );
 
 CREATE TABLE rule (
