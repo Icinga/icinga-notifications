@@ -37,7 +37,7 @@ func (c *Channel) GetPlugin() (*Plugin, error) {
 
 func (c *Channel) ResetPlugin() error {
 	if c.Plugin != nil {
-		if err := c.Plugin.writer.Close(); err != nil {
+		if err := c.Plugin.RPC.Close(); err != nil {
 			return err
 		}
 
@@ -62,8 +62,6 @@ func SpawnPlugin(path string, config string, baseLogger *logging.Logger) (*Plugi
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	reader := bufio.NewReader(tempReader)
-
 	errPipe, err := cmd.StderrPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
@@ -75,13 +73,15 @@ func SpawnPlugin(path string, config string, baseLogger *logging.Logger) (*Plugi
 	}
 	logger.Debug("Cmd started successfully")
 
-	p := &Plugin{cmd: cmd, writer: writer, reader: reader, Logger: logger}
+	rpc := newRPC(writer, tempReader, logger)
+
+	p := &Plugin{cmd: cmd, RPC: rpc, Logger: logger}
 
 	info, err := p.GetInfo()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get p info: %w", err)
 	}
-	logger.Debug("Plugin info: ", info)
+	logger.Debugf("Plugin info: %#v", info)
 
 	if err = p.SetConfig(config); err != nil {
 		return nil, fmt.Errorf("failed to set config: %w", err)
