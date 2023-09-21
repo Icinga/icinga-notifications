@@ -8,70 +8,115 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
-	"github.com/jmoiron/sqlx"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
 )
 
+var (
+	cache   = make(map[string]*Object)
+	cacheMu sync.Mutex
+)
+
 type Object struct {
 	ID       types.Binary
 	SourceId int64
+	Name     string
 	Tags     map[string]string
-	Metadata map[int64]*SourceMetadata
+	URL      string
+
+	ExtraTags map[string]string
 
 	db *icingadb.DB
 
 	mu sync.Mutex
 }
 
-var (
-	cache   = make(map[string]*Object)
-	cacheMu sync.Mutex
-)
+func NewObject(db *icingadb.DB, ev *event.Event) *Object {
+	return &Object{
+		SourceId:  ev.SourceId,
+		Name:      ev.Name,
+		db:        db,
+		URL:       ev.URL,
+		Tags:      ev.Tags,
+		ExtraTags: ev.ExtraTags,
+	}
+}
 
-func FromTags(ctx context.Context, db *icingadb.DB, source int64, tags map[string]string) (*Object, error) {
-	id := ID(source, tags)
+// FromEvent creates an object from the provided event tags if it's not in the cache
+// and syncs all object related types with the database.
+// Returns error on any database failure
+func FromEvent(ctx context.Context, db *icingadb.DB, ev *event.Event) (*Object, error) {
+	id := ID(ev.SourceId, ev.Tags)
 
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 
 	object, ok := cache[id.String()]
-	if ok {
-		return object, nil
+	if !ok {
+		object = NewObject(db, ev)
+		object.ID = id
+		cache[id.String()] = object
 	}
 
-	object = &Object{ID: id, Tags: tags, db: db}
-	cache[id.String()] = object
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start object database transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 
-	stmt, _ := object.db.BuildInsertIgnoreStmt(&ObjectRow{})
 	dbObj := &ObjectRow{
 		ID:       object.ID,
-		SourceID: source,
-		Host:     object.Tags["host"],
+		SourceID: ev.SourceId,
+		Name:     ev.Name,
+		Host:     ev.Tags["host"],
+		URL:      utils.ToDBString(ev.URL),
 	}
 
-	if service, ok := object.Tags["service"]; ok {
+	if service, ok := ev.Tags["service"]; ok {
 		dbObj.Service = utils.ToDBString(service)
 	}
 
-	_, err := object.db.NamedExecContext(ctx, stmt, dbObj)
+	stmt, _ := object.db.BuildUpsertStmt(&ObjectRow{})
+	_, err = tx.NamedExecContext(ctx, stmt, dbObj)
 	if err != nil {
-		return nil, fmt.Errorf("failed to insert object: %s", err)
+		return nil, fmt.Errorf("failed to insert object: %w", err)
 	}
+
+	extraTag := &ExtraTagRow{ObjectId: object.ID}
+	_, err = tx.NamedExecContext(ctx, `DELETE FROM "object_extra_tag" WHERE "object_id" = :object_id`, extraTag)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(ev.ExtraTags) > 0 {
+		stmt, _ := object.db.BuildInsertStmt(extraTag)
+		_, err = tx.NamedExecContext(ctx, stmt, mapToExtraTagRows(object.ID, ev.ExtraTags))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("can't commit object database transaction: %w", err)
+	}
+
+	object.ExtraTags = ev.ExtraTags
+	object.Tags = ev.Tags
+	object.Name = ev.Name
+	object.URL = ev.URL
 
 	return object, nil
 }
 
 func (o *Object) DisplayName() string {
-	for _, metadata := range o.Metadata {
-		if metadata.Name != "" {
-			return metadata.Name
-		}
+	if o.Name != "" {
+		return o.Name
 	}
 
 	j, err := json.Marshal(o.Tags)
@@ -92,63 +137,21 @@ func (o *Object) String() string {
 		}
 		_, _ = fmt.Fprintf(&b, "\n")
 	}
-	for source, metadata := range o.Metadata {
-		_, _ = fmt.Fprintf(&b, "    Source %d:\n", source)
-		_, _ = fmt.Fprintf(&b, "      Name: %q\n", metadata.Name)
-		_, _ = fmt.Fprintf(&b, "      URL: %q\n", metadata.URL.String)
-		_, _ = fmt.Fprintf(&b, "      Extra Tags:\n")
-		for tag, value := range metadata.ExtraTags {
-			_, _ = fmt.Fprintf(&b, "        %q", tag)
-			if value != "" {
-				_, _ = fmt.Fprintf(&b, " = %q", value)
-			}
-			_, _ = fmt.Fprintf(&b, "\n")
+
+	_, _ = fmt.Fprintf(&b, "    Source %d:\n", o.SourceId)
+	_, _ = fmt.Fprintf(&b, "    Name: %q\n", o.Name)
+	_, _ = fmt.Fprintf(&b, "    URL: %q\n", o.URL)
+	_, _ = fmt.Fprintf(&b, "    Extra Tags:\n")
+
+	for tag, value := range o.ExtraTags {
+		_, _ = fmt.Fprintf(&b, "        %q", tag)
+		if value != "" {
+			_, _ = fmt.Fprintf(&b, " = %q", value)
 		}
+		_, _ = fmt.Fprintf(&b, "\n")
 	}
+
 	return b.String()
-}
-
-func (o *Object) UpdateMetadata(
-	ctx context.Context, tx *sqlx.Tx, source int64, name string, url types.String, extraTags map[string]string,
-) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	sourceMetadata := &SourceMetadata{
-		ObjectId:  o.ID,
-		SourceId:  source,
-		Name:      name,
-		URL:       url,
-		ExtraTags: extraTags,
-	}
-
-	stmt, _ := o.db.BuildUpsertStmt(&SourceMetadata{})
-	_, err := tx.NamedExecContext(ctx, stmt, sourceMetadata)
-	if err != nil {
-		return err
-	}
-
-	extraTag := &ExtraTagRow{ObjectId: o.ID, SourceId: source}
-	_, err = tx.NamedExecContext(ctx, `DELETE FROM "object_extra_tag" WHERE "object_id" = :object_id AND "source_id" = :source_id`, extraTag)
-	if err != nil {
-		return err
-	}
-
-	if len(extraTags) > 0 {
-		stmt, _ = o.db.BuildInsertStmt(extraTag)
-		_, err = tx.NamedExecContext(ctx, stmt, sourceMetadata.mapToExtraTags())
-		if err != nil {
-			return err
-		}
-	}
-
-	if o.Metadata == nil {
-		o.Metadata = make(map[int64]*SourceMetadata)
-	}
-
-	o.Metadata[source] = sourceMetadata
-
-	return nil
 }
 
 func (o *Object) EvalEqual(key string, value string) (bool, error) {
@@ -157,11 +160,9 @@ func (o *Object) EvalEqual(key string, value string) (bool, error) {
 		return true, nil
 	}
 
-	for _, m := range o.Metadata {
-		tagVal, ok = m.ExtraTags[key]
-		if ok && tagVal == value {
-			return true, nil
-		}
+	tagVal, ok = o.ExtraTags[key]
+	if ok && tagVal == value {
+		return true, nil
 	}
 
 	return false, nil
@@ -185,11 +186,9 @@ func (o *Object) EvalLike(key string, value string) (bool, error) {
 		return true, nil
 	}
 
-	for _, m := range o.Metadata {
-		tagVal, ok = m.ExtraTags[key]
-		if ok && regex.MatchString(tagVal) {
-			return true, nil
-		}
+	tagVal, ok = o.ExtraTags[key]
+	if ok && regex.MatchString(tagVal) {
+		return true, nil
 	}
 
 	return false, nil
@@ -201,11 +200,9 @@ func (o *Object) EvalLess(key string, value string) (bool, error) {
 		return true, nil
 	}
 
-	for _, m := range o.Metadata {
-		tagVal, ok = m.ExtraTags[key]
-		if ok && tagVal < value {
-			return true, nil
-		}
+	tagVal, ok = o.ExtraTags[key]
+	if ok && tagVal < value {
+		return true, nil
 	}
 
 	return false, nil
@@ -217,11 +214,9 @@ func (o *Object) EvalLessOrEqual(key string, value string) (bool, error) {
 		return true, nil
 	}
 
-	for _, m := range o.Metadata {
-		tagVal, ok = m.ExtraTags[key]
-		if ok && tagVal <= value {
-			return true, nil
-		}
+	tagVal, ok = o.ExtraTags[key]
+	if ok && tagVal <= value {
+		return true, nil
 	}
 
 	return false, nil
@@ -233,11 +228,9 @@ func (o *Object) EvalExists(key string) bool {
 		return true
 	}
 
-	for _, m := range o.Metadata {
-		_, ok = m.ExtraTags[key]
-		if ok {
-			return true
-		}
+	_, ok = o.ExtraTags[key]
+	if ok {
+		return true
 	}
 
 	return false
@@ -271,30 +264,16 @@ func ID(source int64, tags map[string]string) types.Binary {
 	return h.Sum(nil)
 }
 
-type SourceMetadata struct {
-	ObjectId  types.Binary      `db:"object_id"`
-	SourceId  int64             `db:"source_id"`
-	Name      string            `db:"name"`
-	URL       types.String      `db:"url"`
-	ExtraTags map[string]string `db:"-"`
-}
-
-// TableName implements the contracts.TableNamer interface.
-func (s *SourceMetadata) TableName() string {
-	return "source_object"
-}
-
-// mapToExtraTags transforms the source metadata extra tags map to a slice of ExtraTagRow struct.
-func (s *SourceMetadata) mapToExtraTags() []*ExtraTagRow {
-	var extraTags []*ExtraTagRow
-	for key, val := range s.ExtraTags {
-		extraTags = append(extraTags, &ExtraTagRow{
-			ObjectId: s.ObjectId,
-			SourceId: s.SourceId,
+// mapToExtraTags transforms the object extra tags map to a slice of ExtraTagRow struct.
+func mapToExtraTagRows(objectId types.Binary, extraTags map[string]string) []*ExtraTagRow {
+	var extraTagRows []*ExtraTagRow
+	for key, val := range extraTags {
+		extraTagRows = append(extraTagRows, &ExtraTagRow{
+			ObjectId: objectId,
 			Tag:      key,
 			Value:    val,
 		})
 	}
 
-	return extraTags
+	return extraTagRows
 }
