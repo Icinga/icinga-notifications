@@ -123,14 +123,16 @@ CREATE TABLE source (
 );
 
 CREATE TABLE object (
-    id bytea NOT NULL, -- SHA256 of identifying tags
+    id bytea NOT NULL, -- SHA256 of identifying tags and the source.id
+    source_id bigint NOT NULL REFERENCES source(id),
     -- this will probably become more flexible in the future
     host text NOT NULL,
     service text,
 
     CHECK (length(id) = 256/8),
 
-    CONSTRAINT pk_object PRIMARY KEY (id)
+    CONSTRAINT pk_object PRIMARY KEY (id),
+    FOREIGN KEY (source_id) REFERENCES source(id)
 );
 
 CREATE TABLE source_object (
@@ -141,7 +143,6 @@ CREATE TABLE source_object (
 
     CONSTRAINT pk_source_object PRIMARY KEY (object_id, source_id)
 );
-
 
 CREATE TABLE object_extra_tag (
     object_id bytea NOT NULL REFERENCES object(id),
@@ -159,7 +160,6 @@ CREATE TYPE severity AS ENUM ('ok', 'debug', 'info', 'notice', 'warning', 'err',
 CREATE TABLE event (
     id bigserial,
     time bigint NOT NULL,
-    source_id bigint NOT NULL REFERENCES source(id),
     object_id bytea NOT NULL REFERENCES object(id),
     type text NOT NULL,
     severity severity,
@@ -167,7 +167,7 @@ CREATE TABLE event (
     username text,
 
     CONSTRAINT pk_event PRIMARY KEY (id),
-    FOREIGN KEY (object_id, source_id) REFERENCES source_object(object_id, source_id)
+    FOREIGN KEY (object_id) REFERENCES object(id)
 );
 
 CREATE TABLE rule (

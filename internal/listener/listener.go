@@ -88,7 +88,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	ctx := context.Background()
-	obj, err := object.FromTags(ctx, l.db, ev.Tags)
+	obj, err := object.FromTags(ctx, l.db, ev.SourceId, ev.Tags)
 	if err != nil {
 		l.logger.Errorln(err)
 

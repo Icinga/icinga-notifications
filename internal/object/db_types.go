@@ -18,9 +18,10 @@ func (e *ExtraTagRow) TableName() string {
 }
 
 type ObjectRow struct {
-	ID      types.Binary `db:"id"`
-	Host    string       `db:"host"`
-	Service types.String `db:"service"`
+	ID       types.Binary `db:"id"`
+	SourceID int64        `db:"source_id"`
+	Host     string       `db:"host"`
+	Service  types.String `db:"service"`
 }
 
 // TableName implements the contracts.TableNamer interface.

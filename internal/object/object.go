@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 
 type Object struct {
 	ID       types.Binary
+	SourceId int64
 	Tags     map[string]string
 	Metadata map[int64]*SourceMetadata
 
@@ -32,8 +34,8 @@ var (
 	cacheMu sync.Mutex
 )
 
-func FromTags(ctx context.Context, db *icingadb.DB, tags map[string]string) (*Object, error) {
-	id := ID(tags)
+func FromTags(ctx context.Context, db *icingadb.DB, source int64, tags map[string]string) (*Object, error) {
+	id := ID(source, tags)
 
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
@@ -48,8 +50,9 @@ func FromTags(ctx context.Context, db *icingadb.DB, tags map[string]string) (*Ob
 
 	stmt, _ := object.db.BuildInsertIgnoreStmt(&ObjectRow{})
 	dbObj := &ObjectRow{
-		ID:   object.ID,
-		Host: object.Tags["host"],
+		ID:       object.ID,
+		SourceID: source,
+		Host:     object.Tags["host"],
 	}
 
 	if service, ok := object.Tags["service"]; ok {
@@ -241,8 +244,12 @@ func (o *Object) EvalExists(key string) bool {
 }
 
 // TODO: the return value of this function must be stable like forever
-func ID(tags map[string]string) types.Binary {
+func ID(source int64, tags map[string]string) types.Binary {
 	h := sha256.New()
+
+	sourceBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(sourceBytes, uint64(source))
+	h.Write(sourceBytes)
 
 	type KV struct {
 		K, V string

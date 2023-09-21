@@ -94,7 +94,6 @@ func (e *Event) Sync(ctx context.Context, tx *sqlx.Tx, db *icingadb.DB, objectId
 type EventRow struct {
 	ID       int64           `db:"id"`
 	Time     types.UnixMilli `db:"time"`
-	SourceID int64           `db:"source_id"`
 	ObjectID types.Binary    `db:"object_id"`
 	Type     types.String    `db:"type"`
 	Severity Severity        `db:"severity"`
@@ -110,7 +109,6 @@ func (er *EventRow) TableName() string {
 func NewEventRow(e *Event, objectId types.Binary) *EventRow {
 	return &EventRow{
 		Time:     types.UnixMilli(e.Time),
-		SourceID: e.SourceId,
 		ObjectID: objectId,
 		Type:     utils.ToDBString(e.Type),
 		Severity: e.Severity,
