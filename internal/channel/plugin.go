@@ -2,27 +2,28 @@ package channel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
-	"go.uber.org/zap"
 	"os/exec"
 )
 
 type Plugin struct {
-	config string
-	path   string
-	cmd    *exec.Cmd
-	logger *zap.SugaredLogger
-	rpc    *RPC
+	cmd *exec.Cmd
+	rpc *RPC
 }
 
 func (p *Plugin) GetInfo() (*plugin.Info, error) {
-	result, err := p.rpc.RawCall("GetInfo", nil)
+	result, err := p.rpc.Call("GetInfo", nil)
 	if err != nil {
-		return nil, fmt.Errorf("RawCall failed: %w", err)
+		if errors.Is(err, ErrRpcFailed) {
+			// reset and resart plugin
+		}
+
+		return nil, fmt.Errorf("call failed: %w", err)
 	}
 
 	info := &plugin.Info{}
@@ -35,8 +36,8 @@ func (p *Plugin) GetInfo() (*plugin.Info, error) {
 }
 
 func (p *Plugin) SetConfig(config string) error {
-	if _, err := p.rpc.RawCall("SetConfig", json.RawMessage(config)); err != nil {
-		return fmt.Errorf("RawCall failed: %w", err)
+	if _, err := p.rpc.Call("SetConfig", json.RawMessage(config)); err != nil {
+		return fmt.Errorf("call failed: %w", err)
 	}
 
 	return nil
@@ -60,9 +61,9 @@ func (p *Plugin) SendNotification(contact *recipient.Contact, i contracts.Incide
 		return fmt.Errorf("failed to encode request into json: %w", err)
 	}
 
-	_, err = p.rpc.RawCall("SendNotification", params)
+	_, err = p.rpc.Call("SendNotification", params)
 	if err != nil {
-		return fmt.Errorf("RawCall failed: %w", err)
+		return fmt.Errorf("call failed: %w", err)
 	}
 
 	return nil

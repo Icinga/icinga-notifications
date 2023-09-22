@@ -22,7 +22,7 @@ func Test_newRPC(t *testing.T) {
 			for j := 0; j < 1000; j++ {
 				params := fmt.Sprintf(`{"go":"%d-%d"}`, i, j)
 
-				res, err := rpc.RawCall("hello", json.RawMessage(params))
+				res, err := rpc.Call("hello", json.RawMessage(params))
 				if err != nil {
 					panic(err)
 				}

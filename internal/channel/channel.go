@@ -57,7 +57,7 @@ func SpawnPlugin(path string, config string, baseLogger *logging.Logger) (*Plugi
 		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
 
-	tempReader, err := cmd.StdoutPipe()
+	reader, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
@@ -73,9 +73,9 @@ func SpawnPlugin(path string, config string, baseLogger *logging.Logger) (*Plugi
 	}
 	logger.Debug("Cmd started successfully")
 
-	rpc := newRPC(writer, tempReader, logger)
+	rpc := newRPC(writer, reader, logger)
 
-	p := &Plugin{cmd: cmd, rpc: rpc, logger: logger}
+	p := &Plugin{cmd: cmd, rpc: rpc}
 
 	info, err := p.GetInfo()
 	if err != nil {

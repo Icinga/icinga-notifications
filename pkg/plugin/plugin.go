@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"strings"
 	"sync"
@@ -73,6 +74,9 @@ func RunPlugin(plugin Plugin) {
 	for {
 		var req JsonRpcRequest
 		err := decoder.Decode(&req)
+		if rand.Intn(4) == 0 {
+			os.Exit(1)
+		}
 		if err != nil {
 			log.Fatal("Failed to json.Decode request:", err)
 		}

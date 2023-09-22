@@ -2,12 +2,15 @@ package channel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"go.uber.org/zap"
 	"io"
 	"sync"
 )
+
+var ErrRpcFailed = errors.New("RPC failed")
 
 type RPC struct {
 	writer            io.Closer // use encoder for writing instead
@@ -18,6 +21,8 @@ type RPC struct {
 	pendingRequestsMu sync.Mutex
 	logger            *zap.SugaredLogger
 	lastRequestId     uint64
+
+	errChannel chan error
 }
 
 func newRPC(writer io.WriteCloser, reader io.Reader, logger *zap.SugaredLogger) *RPC {
@@ -27,6 +32,7 @@ func newRPC(writer io.WriteCloser, reader io.Reader, logger *zap.SugaredLogger) 
 		decoder:         json.NewDecoder(reader),
 		pendingRequests: map[uint64]chan plugin.JsonRpcResponse{},
 		logger:          logger,
+		errChannel:      make(chan error, 1),
 	}
 
 	go rpc.processResponses()
@@ -34,7 +40,11 @@ func newRPC(writer io.WriteCloser, reader io.Reader, logger *zap.SugaredLogger) 
 	return rpc
 }
 
-func (r *RPC) RawCall(method string, params json.RawMessage) (json.RawMessage, error) {
+func (r *RPC) Call(method string, params json.RawMessage) (json.RawMessage, error) {
+	if err := r.Err(); err != nil {
+		return nil, err
+	}
+
 	promise := make(chan plugin.JsonRpcResponse)
 
 	r.pendingRequestsMu.Lock()
@@ -43,31 +53,36 @@ func (r *RPC) RawCall(method string, params json.RawMessage) (json.RawMessage, e
 	r.pendingRequests[newId] = promise
 	r.pendingRequestsMu.Unlock()
 
-	req := plugin.JsonRpcRequest{Method: method, Params: params, Id: newId}
-
 	r.encoderMu.Lock()
-	err := r.encoder.Encode(req)
+	err := r.encoder.Encode(plugin.JsonRpcRequest{Method: method, Params: params, Id: newId})
 	r.encoderMu.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("json.Encode failed: %w", err)
 	}
 
-	response := <-promise
+	select {
+	case response := <-promise:
+		if response.Error != "" {
+			return nil, fmt.Errorf("plugin response contains error: %s", response.Error)
+		}
 
-	if response.Error != "" {
-		return nil, fmt.Errorf("plugin response contains error: %s", response.Error)
+		return response.Result, nil
+
+	case <-r.errChannel:
+		return nil, r.Err()
 	}
-
-	return response.Result, nil
 }
 
 func (r *RPC) processResponses() {
 	for {
 		var response plugin.JsonRpcResponse
 		err := r.decoder.Decode(&response)
+
 		if err != nil {
 			r.logger.Warnw("failed to decode json response:", zap.Error(err))
-			continue
+			close(r.errChannel)
+
+			return
 		}
 
 		r.pendingRequestsMu.Lock()
@@ -85,4 +100,13 @@ func (r *RPC) processResponses() {
 
 func (r *RPC) Close() error {
 	return r.writer.Close()
+}
+
+func (r *RPC) Err() error {
+	select {
+	case <-r.errChannel:
+		return ErrRpcFailed
+	default:
+		return nil
+	}
 }
