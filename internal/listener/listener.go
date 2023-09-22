@@ -102,24 +102,6 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	tx, err := l.db.BeginTxx(ctx, nil)
-	if err != nil {
-		l.logger.Errorw("Can't start a db transaction", zap.Error(err))
-
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprintln(w, "can't start a db transaction")
-		return
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err := ev.Sync(ctx, tx, l.db, obj.ID); err != nil {
-		l.logger.Errorw("Failed to insert event and fetch its ID", zap.String("event", ev.String()), zap.Error(err))
-
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprintln(w, "can't insert event and fetch its ID")
-		return
-	}
-
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
 	currentIncident, created, err := incident.GetCurrent(ctx, l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, l.configFile, createIncident)
 	if err != nil {
@@ -152,20 +134,10 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	l.logger.Infof("Processing event")
 
-	if err := currentIncident.ProcessEvent(ctx, tx, ev, created); err != nil {
+	err = currentIncident.ProcessEvent(ctx, &ev, created)
+	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err)
-		return
-	}
-
-	if err = tx.Commit(); err != nil {
-		l.logger.Errorw(
-			"Can't commit db transaction", zap.String("object", obj.DisplayName()),
-			zap.String("incident", currentIncident.String()), zap.Error(err),
-		)
-
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprintln(w, "can't commit db transaction")
 		return
 	}
 

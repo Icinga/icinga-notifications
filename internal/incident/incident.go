@@ -64,16 +64,42 @@ func (i *Incident) HasManager() bool {
 	return false
 }
 
-// ProcessEvent processes the given event for the current incident.
-func (i *Incident) ProcessEvent(ctx context.Context, tx *sqlx.Tx, ev event.Event, created bool) error {
+// IsNotifiable returns whether contacts in the given role should be notified about this incident.
+//
+// For a managed incident, only managers and subscribers should be notified, for unmanaged incidents,
+// regular recipients are notified as well.
+func (i *Incident) IsNotifiable(role ContactRole) bool {
+	if !i.HasManager() {
+		return true
+	}
+
+	return role > RoleRecipient
+}
+
+// ProcessEvent processes the given event for the current incident in an own transaction.
+func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bool) error {
 	i.Lock()
 	defer i.Unlock()
 
 	i.runtimeConfig.RLock()
 	defer i.runtimeConfig.RUnlock()
 
+	tx, err := i.db.BeginTxx(ctx, nil)
+	if err != nil {
+		i.logger.Errorw("Can't start a db transaction", zap.Error(err))
+
+		return errors.New("can't start a db transaction")
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err = ev.Sync(ctx, tx, i.db, i.Object.ID); err != nil {
+		i.logger.Errorw("Failed to insert event and fetch its ID", zap.String("event", ev.String()), zap.Error(err))
+
+		return errors.New("can't insert event and fetch its ID")
+	}
+
 	if created {
-		err := i.processIncidentOpenedEvent(ctx, tx, ev)
+		err = i.processIncidentOpenedEvent(ctx, tx, ev)
 		if err != nil {
 			return err
 		}
@@ -81,7 +107,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, tx *sqlx.Tx, ev event.Event
 		i.logger = i.logger.With(zap.String("incident", i.String()))
 	}
 
-	if err := i.AddEvent(ctx, tx, &ev); err != nil {
+	if err = i.AddEvent(ctx, tx, ev); err != nil {
 		i.logger.Errorw("Can't insert incident event to the database", zap.Error(err))
 
 		return errors.New("can't insert incident event to the database")
@@ -91,7 +117,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, tx *sqlx.Tx, ev event.Event
 		return i.processAcknowledgementEvent(ctx, tx, ev)
 	}
 
-	var err error
 	var causedBy types.Int
 	if !created {
 		causedBy, err = i.processSeverityChangedEvent(ctx, tx, ev)
@@ -108,12 +133,25 @@ func (i *Incident) ProcessEvent(ctx context.Context, tx *sqlx.Tx, ev event.Event
 	}
 
 	// Re-evaluate escalations based on the newly evaluated rules.
-	i.evaluateEscalations()
+	if err := i.evaluateEscalations(ctx, tx, ev, causedBy); err != nil {
+		return err
+	}
 
-	return i.notifyContacts(ctx, tx, &ev, causedBy)
+	notifications, err := i.addPendingNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time), causedBy)
+	if err != nil {
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		i.logger.Errorw("Can't commit db transaction", zap.Error(err))
+
+		return errors.New("can't commit db transaction")
+	}
+
+	return i.notifyContacts(ctx, ev, notifications)
 }
 
-func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx, ev event.Event) (types.Int, error) {
+func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) (types.Int, error) {
 	var causedByHistoryId types.Int
 	oldSeverity := i.Severity
 	newSeverity := ev.Severity
@@ -174,7 +212,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 	return causedByHistoryId, nil
 }
 
-func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, ev event.Event) error {
+func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
 	i.StartedAt = ev.Time
 	i.Severity = ev.Severity
 	if err := i.Sync(ctx, tx); err != nil {
@@ -262,7 +300,7 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 
 // evaluateEscalations evaluates this incidents rule escalations if they aren't already.
 // Returns error on database failure.
-func (i *Incident) evaluateEscalations() {
+func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, causedBy types.Int) error {
 	if i.EscalationState == nil {
 		i.EscalationState = make(map[int64]*EscalationState)
 	}
@@ -300,164 +338,108 @@ func (i *Incident) evaluateEscalations() {
 				}
 
 				if matched {
-					i.EscalationState[escalation.ID] = new(EscalationState)
+					state := &EscalationState{RuleEscalationID: escalation.ID, TriggeredAt: types.UnixMilli(time.Now())}
+					i.EscalationState[escalation.ID] = state
+
+					i.logger.Infof("Rule %q reached escalation %q", r.Name, escalation.DisplayName())
+
+					if err := i.AddEscalationTriggered(ctx, tx, state); err != nil {
+						i.logger.Errorw(
+							"Failed to upsert escalation state", zap.String("rule", r.Name),
+							zap.String("escalation", escalation.DisplayName()), zap.Error(err),
+						)
+
+						return errors.New("failed to upsert escalation state")
+					}
+
+					history := &HistoryRow{
+						Time:                      state.TriggeredAt,
+						EventID:                   utils.ToDBInt(ev.ID),
+						RuleEscalationID:          utils.ToDBInt(state.RuleEscalationID),
+						RuleID:                    utils.ToDBInt(r.ID),
+						Type:                      EscalationTriggered,
+						CausedByIncidentHistoryID: causedBy,
+					}
+
+					if _, err := i.AddHistory(ctx, tx, history, false); err != nil {
+						i.logger.Errorw(
+							"Failed to insert escalation triggered incident history", zap.String("rule", r.Name),
+							zap.String("escalation", escalation.DisplayName()), zap.Error(err),
+						)
+
+						return errors.New("failed to insert escalation triggered incident history")
+					}
+
+					if err := i.AddRecipient(ctx, tx, escalation, ev.ID); err != nil {
+						return err
+					}
 				}
 			}
 		}
 	}
+
+	return nil
 }
 
-// notifyContacts evaluates the incident.EscalationState and checks if escalations need to be triggered
-// as well as builds the incident recipients along with their channel types and sends notifications based on that.
-// Returns error on database failure.
-func (i *Incident) notifyContacts(ctx context.Context, tx *sqlx.Tx, ev *event.Event, causedBy types.Int) error {
-	managed := i.HasManager()
+// notifyContacts executes all the given pending notifications of the current incident.
+// Returns error on database failure or if the provided context is cancelled.
+func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifications []*NotificationEntry) error {
+	for _, notification := range notifications {
+		contact := i.runtimeConfig.Contacts[notification.ContactID]
 
-	contactChannels := make(map[*recipient.Contact]map[int64]struct{})
-
-	if i.Recipients == nil {
-		i.Recipients = make(map[recipient.Key]*RecipientState)
-	}
-
-	escalationRecipients := make(map[recipient.Key]bool)
-	for escalationID, state := range i.EscalationState {
-		escalation := i.runtimeConfig.GetRuleEscalation(escalationID)
-		if state.TriggeredAt.Time().IsZero() {
-			if escalation == nil {
-				continue
-			}
-
-			state.RuleEscalationID = escalationID
-			state.TriggeredAt = types.UnixMilli(time.Now())
-
-			r := i.runtimeConfig.Rules[escalation.RuleID]
-			i.logger.Infof("Rule %q reached escalation %q", r.Name, escalation.DisplayName())
-
-			err := i.AddEscalationTriggered(ctx, tx, state)
-			if err != nil {
-				i.logger.Errorw(
-					"Failed to upsert escalation state", zap.String("rule", r.Name),
-					zap.String("escalation", escalation.DisplayName()), zap.Error(err),
-				)
-
-				return errors.New("failed to upsert escalation state")
-			}
-
-			history := &HistoryRow{
-				Time:                      state.TriggeredAt,
-				EventID:                   utils.ToDBInt(ev.ID),
-				RuleEscalationID:          utils.ToDBInt(state.RuleEscalationID),
-				RuleID:                    utils.ToDBInt(r.ID),
-				Type:                      EscalationTriggered,
-				CausedByIncidentHistoryID: causedBy,
-			}
-			causedBy, err = i.AddHistory(ctx, tx, history, true)
-			if err != nil {
-				i.logger.Errorw(
-					"Failed to insert escalation triggered incident history", zap.String("rule", r.Name),
-					zap.String("escalation", escalation.DisplayName()), zap.Error(err),
-				)
-
-				return errors.New("failed to insert escalation triggered incident history")
-			}
-
-			err = i.AddRecipient(ctx, tx, escalation, ev.ID)
-			if err != nil {
-				return err
-			}
+		if i.notifyContact(contact, ev, notification.ChannelID) != nil {
+			notification.State = NotificationStateFailed
+		} else {
+			notification.State = NotificationStateSent
 		}
 
-		for _, escalationRecipient := range escalation.Recipients {
-			state := i.Recipients[escalationRecipient.Key]
-			if state == nil {
-				continue
-			}
-
-			escalationRecipients[escalationRecipient.Key] = true
-
-			if !managed || state.Role > RoleRecipient {
-				for _, c := range escalationRecipient.Recipient.GetContactsAt(ev.Time) {
-					if contactChannels[c] == nil {
-						contactChannels[c] = make(map[int64]struct{})
-					}
-					if escalationRecipient.ChannelID.Valid {
-						contactChannels[c][escalationRecipient.ChannelID.Int64] = struct{}{}
-					} else {
-						contactChannels[c][c.DefaultChannelID] = struct{}{}
-					}
-				}
-			}
-		}
-	}
-
-	for recipientKey, state := range i.Recipients {
-		r := i.runtimeConfig.GetRecipient(recipientKey)
-		if r == nil {
-			continue
-		}
-
-		isEscalationRecipient := escalationRecipients[recipientKey]
-		if !isEscalationRecipient && (!managed || state.Role > RoleRecipient) {
-			for _, contact := range r.GetContactsAt(ev.Time) {
-				if contactChannels[contact] == nil {
-					contactChannels[contact] = make(map[int64]struct{})
-				}
-				contactChannels[contact][contact.DefaultChannelID] = struct{}{}
-			}
-		}
-	}
-
-	for contact, channels := range contactChannels {
-		hr := &HistoryRow{
-			Key:                       recipient.ToKey(contact),
-			EventID:                   utils.ToDBInt(ev.ID),
-			Time:                      types.UnixMilli(time.Now()),
-			Type:                      Notified,
-			CausedByIncidentHistoryID: causedBy,
+		notification.SentAt = types.UnixMilli(time.Now())
+		stmt, _ := i.db.BuildUpdateStmt(notification)
+		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
+			i.logger.Errorw(
+				"Failed to update contact notified incident history", zap.String("contact", contact.String()),
+				zap.Error(err),
+			)
 		}
 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-
-		for chId := range channels {
-			ch := i.runtimeConfig.Channels[chId]
-			if ch == nil {
-				i.logger.Errorw("Could not find config for channel", zap.Int64("channel_id", chId))
-				continue
-			}
-
-			chType := ch.Type
-
-			i.logger.Infof("Notify contact %q via %q of type %q", contact.FullName, ch.Name, chType)
-
-			hr.ChannelID = utils.ToDBInt(ch.ID)
-
-			_, err := i.AddHistory(ctx, tx, hr, false)
-			if err != nil {
-				i.logger.Errorw(
-					"Failed to insert contact notified incident history", zap.String("contact", contact.String()),
-					zap.Error(err),
-				)
-			}
-
-			err = ch.Start(i.configFile.ChannelPluginDir)
-			if err != nil {
-				i.logger.Errorw("Could not initialize channel", zap.String("type", chType), zap.Error(err))
-				continue
-			}
-
-			err = ch.SendNotification(contact, i, ev, i.configFile.Icingaweb2URL)
-			if err != nil {
-				i.logger.Errorw("Failed to send via channel", zap.String("type", chType), zap.Error(err))
-				continue
-			}
-
-			i.logger.Infow(
-				"Successfully sent a message via channel", zap.String("type", chType), zap.String("contact", contact.String()),
-			)
-		}
 	}
+
+	return nil
+}
+
+// notifyContact notifies the given recipient via a channel matching the given ID.
+func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, chID int64) error {
+	ch := i.runtimeConfig.Channels[chID]
+	if ch == nil {
+		i.logger.Errorw("Could not find config for channel", zap.Int64("channel_id", chID))
+
+		return errors.New(fmt.Sprintf("could not find config for channel ID: %d", chID))
+	}
+
+	chType := ch.Type
+
+	i.logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, chType), zap.Int64("channel_id", chID))
+
+	err := ch.Start(i.configFile.ChannelPluginDir)
+	if err != nil {
+		i.logger.Errorw("Could not initialize channel", zap.String("type", chType), zap.Error(err))
+
+		return fmt.Errorf("could not initialize channel type %s: %w", chType, err)
+	}
+
+	err = ch.SendNotification(contact, i, ev, i.configFile.Icingaweb2URL)
+	if err != nil {
+		i.logger.Errorw("Failed to send via channel", zap.String("type", chType), zap.Error(err))
+
+		return err
+	}
+
+	i.logger.Infow(
+		"Successfully sent a message via channel", zap.String("type", chType), zap.String("contact", contact.String()),
+	)
 
 	return nil
 }
@@ -465,7 +447,7 @@ func (i *Incident) notifyContacts(ctx context.Context, tx *sqlx.Tx, ev *event.Ev
 // processAcknowledgementEvent processes the given ack event.
 // Promotes the ack author to incident.RoleManager if it's not already the case and generates a history entry.
 // Returns error on database failure.
-func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx, ev event.Event) error {
+func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
 	contact := i.runtimeConfig.GetContact(ev.Username)
 	if contact == nil {
 		i.logger.Warnw("Ignoring acknowledgement event from an unknown author", zap.String("author", ev.Username))
@@ -535,6 +517,41 @@ func (i *Incident) RestoreEscalationStateRules(states []*EscalationState) {
 	}
 }
 
+// getRecipientsChannel returns all the configured channels of the current incident and escalation recipients.
+func (i *Incident) getRecipientsChannel(t time.Time) contactChannels {
+	contactChs := make(contactChannels)
+	// Load all escalations recipients channels
+	for escalationID := range i.EscalationState {
+		escalation := i.runtimeConfig.GetRuleEscalation(escalationID)
+		if escalation == nil {
+			continue
+		}
+
+		contactChs.loadEscalationRecipientsChannel(escalation, i, t)
+	}
+
+	// Check whether all the incident recipients do have an appropriate contact channel configured.
+	// When a recipient has subscribed/managed this incident via the UI or using an ACK, fallback
+	// to the default contact channel.
+	for recipientKey, state := range i.Recipients {
+		r := i.runtimeConfig.GetRecipient(recipientKey)
+		if r == nil {
+			continue
+		}
+
+		if i.IsNotifiable(state.Role) {
+			for _, contact := range r.GetContactsAt(t) {
+				if contactChs[contact] == nil {
+					contactChs[contact] = make(map[int64]bool)
+					contactChs[contact][contact.DefaultChannelID] = true
+				}
+			}
+		}
+	}
+
+	return contactChs
+}
+
 type EscalationState struct {
 	IncidentID       int64           `db:"incident_id"`
 	RuleEscalationID int64           `db:"rule_escalation_id"`
@@ -548,6 +565,32 @@ func (e *EscalationState) TableName() string {
 
 type RecipientState struct {
 	Role ContactRole
+}
+
+// contactChannels stores a set of channel IDs for each set of individual contacts.
+type contactChannels map[*recipient.Contact]map[int64]bool
+
+// loadEscalationRecipientsChannel loads all the configured channel of all the provided escalation recipients.
+func (rct contactChannels) loadEscalationRecipientsChannel(escalation *rule.Escalation, i *Incident, t time.Time) {
+	for _, escalationRecipient := range escalation.Recipients {
+		state := i.Recipients[escalationRecipient.Key]
+		if state == nil {
+			continue
+		}
+
+		if i.IsNotifiable(state.Role) {
+			for _, c := range escalationRecipient.Recipient.GetContactsAt(t) {
+				if rct[c] == nil {
+					rct[c] = make(map[int64]bool)
+				}
+				if escalationRecipient.ChannelID.Valid {
+					rct[c][escalationRecipient.ChannelID.Int64] = true
+				} else {
+					rct[c][c.DefaultChannelID] = true
+				}
+			}
+		}
+	}
 }
 
 var (

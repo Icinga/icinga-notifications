@@ -1,6 +1,7 @@
 CREATE TYPE boolenum AS ENUM ( 'n', 'y' );
 CREATE TYPE incident_history_event_type AS ENUM ( 'incident_severity_changed', 'recipient_role_changed', 'escalation_triggered', 'rule_matched', 'opened', 'closed', 'notified' );
 CREATE TYPE frequency_type AS ENUM ( 'MINUTELY', 'HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY' );
+CREATE TYPE notification_state_type AS ENUM ( 'pending', 'sent', 'failed' );
 
 -- IPL ORM renders SQL queries with LIKE operators for all suggestions in the search bar,
 -- which fails for numeric and enum types on PostgreSQL. Just like in Icinga DB Web.
@@ -261,6 +262,8 @@ CREATE TABLE incident_history (
     old_severity severity,
     new_recipient_role incident_contact_role,
     old_recipient_role incident_contact_role,
+    notification_state notification_state_type,
+    sent_at bigint,
 
     CONSTRAINT pk_incident_history PRIMARY KEY (id),
     FOREIGN KEY (incident_id, rule_escalation_id) REFERENCES incident_rule_escalation_state(incident_id, rule_escalation_id)
