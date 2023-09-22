@@ -23,10 +23,10 @@ type ruleID = int64
 type escalationID = int64
 
 type Incident struct {
-	Object           *object.Object
-	StartedAt        time.Time
-	RecoveredAt      time.Time
-	SeverityBySource map[int64]event.Severity
+	Object      *object.Object
+	StartedAt   time.Time
+	RecoveredAt time.Time
+	Severity    event.Severity
 
 	EscalationState map[escalationID]*EscalationState
 	Rules           map[ruleID]struct{}
@@ -52,16 +52,6 @@ func (i *Incident) String() string {
 
 func (i *Incident) ID() int64 {
 	return i.incidentRowID
-}
-
-func (i *Incident) Severity() event.Severity {
-	maxSeverity := event.SeverityOK
-	for _, s := range i.SeverityBySource {
-		if s > maxSeverity {
-			maxSeverity = s
-		}
-	}
-	return maxSeverity
 }
 
 func (i *Incident) HasManager() bool {
@@ -101,9 +91,13 @@ func (i *Incident) ProcessEvent(ctx context.Context, tx *sqlx.Tx, ev event.Event
 		return i.processAcknowledgementEvent(ctx, tx, ev)
 	}
 
-	causedBy, err := i.processSeverityChangedEvent(ctx, tx, ev)
-	if err != nil {
-		return err
+	var err error
+	var causedBy types.Int
+	if !created {
+		causedBy, err = i.processSeverityChangedEvent(ctx, tx, ev)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
@@ -120,90 +114,43 @@ func (i *Incident) ProcessEvent(ctx context.Context, tx *sqlx.Tx, ev event.Event
 }
 
 func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx, ev event.Event) (types.Int, error) {
-	oldIncidentSeverity := i.Severity()
-	oldSourceSeverity := i.SeverityBySource[ev.SourceId]
-	if oldSourceSeverity == event.SeverityNone {
-		oldSourceSeverity = event.SeverityOK
-	}
-
-	if oldSourceSeverity == ev.Severity {
+	var causedByHistoryId types.Int
+	oldSeverity := i.Severity
+	newSeverity := ev.Severity
+	if oldSeverity == newSeverity {
 		msg := fmt.Sprintf("Ignoring superfluous %q state event from source %d", ev.Severity.String(), ev.SourceId)
 		i.logger.Warnln(msg)
 
-		return types.Int{}, errors.New(msg)
+		return causedByHistoryId, errors.New(msg)
 	}
 
-	i.logger.Infof(
-		"Source %d severity changed from %s to %s", ev.SourceId, oldSourceSeverity.String(), ev.Severity.String(),
-	)
+	i.logger.Infof("Incident severity changed from %s to %s", oldSeverity.String(), newSeverity.String())
 
 	history := &HistoryRow{
 		EventID:     utils.ToDBInt(ev.ID),
-		Type:        SourceSeverityChanged,
 		Time:        types.UnixMilli(time.Now()),
-		NewSeverity: ev.Severity,
-		OldSeverity: oldSourceSeverity,
+		Type:        SeverityChanged,
+		NewSeverity: newSeverity,
+		OldSeverity: oldSeverity,
 		Message:     utils.ToDBString(ev.Message),
 	}
-	causedByHistoryId, err := i.AddHistory(ctx, tx, history, true)
+
+	historyId, err := i.AddHistory(ctx, tx, history, true)
 	if err != nil {
-		i.logger.Errorw("Can't insert source severity changed history to the database", zap.Error(err))
+		i.logger.Errorw("Failed to insert incident severity changed history", zap.Error(err))
 
-		return types.Int{}, errors.New("can't insert source severity changed history to the database")
+		return causedByHistoryId, errors.New("failed to insert incident severity changed history")
 	}
 
-	if err = i.AddSourceSeverity(ctx, tx, ev.Severity, ev.SourceId); err != nil {
-		i.logger.Errorw("Failed to upsert source severity", zap.Error(err))
+	causedByHistoryId = historyId
 
-		return types.Int{}, errors.New("failed to upsert source severity")
-	}
-
-	if ev.Severity == event.SeverityOK {
-		delete(i.SeverityBySource, ev.SourceId)
-	}
-
-	newIncidentSeverity := i.Severity()
-	if newIncidentSeverity != oldIncidentSeverity {
-		i.logger.Infof(
-			"Incident severity changed from %s to %s", oldIncidentSeverity.String(), newIncidentSeverity.String(),
-		)
-
-		if err = i.Sync(ctx, tx); err != nil {
-			i.logger.Errorw("Failed to update incident severity", zap.Error(err))
-
-			return types.Int{}, errors.New("failed to update incident severity")
-		}
-
-		history = &HistoryRow{
-			EventID:                   utils.ToDBInt(ev.ID),
-			Time:                      types.UnixMilli(time.Now()),
-			Type:                      SeverityChanged,
-			NewSeverity:               newIncidentSeverity,
-			OldSeverity:               oldIncidentSeverity,
-			CausedByIncidentHistoryID: causedByHistoryId,
-		}
-		if causedByHistoryId, err = i.AddHistory(ctx, tx, history, true); err != nil {
-			i.logger.Errorw("Failed to insert incident severity changed history", zap.Error(err))
-
-			return types.Int{}, errors.New("failed to insert incident severity changed history")
-		}
-	}
-
-	if newIncidentSeverity == event.SeverityOK {
+	if newSeverity == event.SeverityOK {
 		i.RecoveredAt = time.Now()
 		i.logger.Info("All sources recovered, closing incident")
 
 		RemoveCurrent(i.Object)
 
-		incidentRow := &IncidentRow{ID: i.incidentRowID, RecoveredAt: types.UnixMilli(i.RecoveredAt)}
-		_, err = tx.NamedExecContext(ctx, `UPDATE "incident" SET "recovered_at" = :recovered_at WHERE id = :id`, incidentRow)
-		if err != nil {
-			i.logger.Errorw("Failed to close incident", zap.Error(err))
-
-			return types.Int{}, errors.New("failed to close incident")
-		}
-
-		history = &HistoryRow{
+		history := &HistoryRow{
 			EventID: utils.ToDBInt(ev.ID),
 			Time:    types.UnixMilli(i.RecoveredAt),
 			Type:    Closed,
@@ -217,22 +164,33 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		}
 	}
 
+	i.Severity = newSeverity
+	if err := i.Sync(ctx, tx); err != nil {
+		i.logger.Errorw("Failed to update incident severity", zap.Error(err))
+
+		return causedByHistoryId, errors.New("failed to update incident severity")
+	}
+
 	return causedByHistoryId, nil
 }
 
 func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, ev event.Event) error {
 	i.StartedAt = ev.Time
+	i.Severity = ev.Severity
 	if err := i.Sync(ctx, tx); err != nil {
 		i.logger.Errorw("Can't insert incident to the database", zap.Error(err))
 
 		return errors.New("can't insert incident to the database")
 	}
 
-	i.logger.Info("Opened incident")
+	i.logger.Infow(fmt.Sprintf("Source %d opened incident at severity %q", ev.SourceId, i.Severity.String()), zap.String("message", ev.Message))
+
 	historyRow := &HistoryRow{
-		Type:    Opened,
-		Time:    types.UnixMilli(ev.Time),
-		EventID: utils.ToDBInt(ev.ID),
+		Type:        Opened,
+		Time:        types.UnixMilli(ev.Time),
+		EventID:     utils.ToDBInt(ev.ID),
+		NewSeverity: i.Severity,
+		Message:     utils.ToDBString(ev.Message),
 	}
 
 	if _, err := i.AddHistory(ctx, tx, historyRow, false); err != nil {
@@ -326,7 +284,7 @@ func (i *Incident) evaluateEscalations() {
 				} else {
 					cond := &rule.EscalationFilter{
 						IncidentAge:      time.Now().Sub(i.StartedAt),
-						IncidentSeverity: i.Severity(),
+						IncidentSeverity: i.Severity,
 					}
 
 					var err error

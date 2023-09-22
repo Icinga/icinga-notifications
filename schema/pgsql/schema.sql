@@ -206,14 +206,6 @@ CREATE TABLE incident (
     CONSTRAINT pk_incident PRIMARY KEY (id)
 );
 
-CREATE TABLE incident_source (
-    incident_id bigint NOT NULL REFERENCES incident(id),
-    source_id bigint NOT NULL REFERENCES source(id),
-    severity severity NOT NULL,
-
-    CONSTRAINT pk_incident_source PRIMARY KEY (incident_id, source_id)
-);
-
 CREATE TABLE incident_event (
     incident_id bigint NOT NULL REFERENCES incident(id),
     event_id bigint NOT NULL REFERENCES event(id),

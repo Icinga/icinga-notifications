@@ -22,7 +22,7 @@ func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 		ObjectID:    i.Object.ID,
 		StartedAt:   types.UnixMilli(i.StartedAt),
 		RecoveredAt: types.UnixMilli(i.RecoveredAt),
-		Severity:    i.Severity(),
+		Severity:    i.Severity,
 	}
 
 	err := incidentRow.Sync(ctx, tx, i.db, i.incidentRowID != 0)
@@ -143,21 +143,6 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 	rr := &RuleRow{IncidentID: i.incidentRowID, RuleID: r.ID}
 	stmt, _ := i.db.BuildUpsertStmt(rr)
 	_, err := tx.NamedExecContext(ctx, stmt, rr)
-
-	return err
-}
-
-func (i *Incident) AddSourceSeverity(ctx context.Context, tx *sqlx.Tx, severity event.Severity, sourceID int64) error {
-	i.SeverityBySource[sourceID] = severity
-
-	sourceSeverity := &SourceSeverity{
-		IncidentID: i.incidentRowID,
-		SourceID:   sourceID,
-		Severity:   severity,
-	}
-
-	stmt, _ := i.db.BuildUpsertStmt(sourceSeverity)
-	_, err := tx.NamedExecContext(ctx, stmt, sourceSeverity)
 
 	return err
 }

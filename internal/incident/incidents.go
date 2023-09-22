@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"github.com/icinga/icinga-notifications/internal/config"
-	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icingadb/pkg/icingadb"
@@ -32,15 +31,14 @@ func GetCurrent(
 	if currentIncident == nil {
 		ir := &IncidentRow{}
 		incident := &Incident{
-			Object:           obj,
-			db:               db,
-			logger:           logger.With(zap.String("object", obj.DisplayName())),
-			runtimeConfig:    runtimeConfig,
-			configFile:       configFile,
-			Recipients:       map[recipient.Key]*RecipientState{},
-			EscalationState:  map[escalationID]*EscalationState{},
-			SeverityBySource: map[int64]event.Severity{},
-			Rules:            map[ruleID]struct{}{},
+			Object:          obj,
+			db:              db,
+			logger:          logger.With(zap.String("object", obj.DisplayName())),
+			runtimeConfig:   runtimeConfig,
+			configFile:      configFile,
+			Recipients:      map[recipient.Key]*RecipientState{},
+			EscalationState: map[escalationID]*EscalationState{},
+			Rules:           map[ruleID]struct{}{},
 		}
 
 		err := db.QueryRowxContext(ctx, db.Rebind(db.BuildSelectStmt(ir, ir)+` WHERE "object_id" = ? AND "recovered_at" IS NULL`), obj.ID).StructScan(ir)
@@ -52,23 +50,6 @@ func GetCurrent(
 			incident.incidentRowID = ir.ID
 			incident.StartedAt = ir.StartedAt.Time()
 			incident.logger = logger.With(zap.String("object", obj.DisplayName()), zap.String("incident", incident.String()))
-
-			sourceSeverity := &SourceSeverity{IncidentID: ir.ID}
-			var sources []SourceSeverity
-			err := db.SelectContext(
-				ctx, &sources,
-				db.Rebind(db.BuildSelectStmt(sourceSeverity, sourceSeverity)+` WHERE "incident_id" = ? AND "severity" != ?`),
-				ir.ID, event.SeverityOK,
-			)
-			if err != nil {
-				incident.logger.Errorw("Failed to load incident source severities from database", zap.Error(err))
-
-				return nil, false, errors.New("failed to load incident source severities")
-			}
-
-			for _, source := range sources {
-				incident.SeverityBySource[source.SourceID] = source.Severity
-			}
 
 			state := &EscalationState{}
 			var states []*EscalationState

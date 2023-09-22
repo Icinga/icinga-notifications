@@ -9,7 +9,6 @@ type HistoryEventType int
 
 const (
 	HistoryEventTypeNull HistoryEventType = iota
-	SourceSeverityChanged
 	SeverityChanged
 	RecipientRoleChanged
 	EscalationTriggered
@@ -20,7 +19,6 @@ const (
 )
 
 var historyTypeByName = map[string]HistoryEventType{
-	"source_severity_changed":   SourceSeverityChanged,
 	"incident_severity_changed": SeverityChanged,
 	"recipient_role_changed":    RecipientRoleChanged,
 	"escalation_triggered":      EscalationTriggered,
