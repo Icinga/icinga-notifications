@@ -1,10 +1,8 @@
 package channel
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"go.uber.org/zap"
 	"io"
@@ -12,50 +10,47 @@ import (
 )
 
 type RPC struct {
-	writer            io.WriteCloser
-	writerMu          sync.Mutex
-	reader            *bufio.Reader
-	pendingRequests   map[string]chan plugin.JsonRpcResponse
+	writer            io.Closer // use encoder for writing instead
+	encoder           *json.Encoder
+	encoderMu         sync.Mutex
+	decoder           *json.Decoder
+	pendingRequests   map[uint64]chan plugin.JsonRpcResponse
 	pendingRequestsMu sync.Mutex
-	Logger            *zap.SugaredLogger
+	logger            *zap.SugaredLogger
+	lastRequestId     uint64
 }
 
 func newRPC(writer io.WriteCloser, reader io.Reader, logger *zap.SugaredLogger) *RPC {
 	rpc := &RPC{
 		writer:          writer,
-		reader:          bufio.NewReader(reader),
-		pendingRequests: map[string]chan plugin.JsonRpcResponse{},
-		Logger:          logger,
+		encoder:         json.NewEncoder(writer),
+		decoder:         json.NewDecoder(reader),
+		pendingRequests: map[uint64]chan plugin.JsonRpcResponse{},
+		logger:          logger,
 	}
 
-	go rpc.prepareResponse()
+	go rpc.processResponses()
 
 	return rpc
 }
 
 func (r *RPC) RawCall(method string, params json.RawMessage) (json.RawMessage, error) {
-	id := uuid.New().String()
-	req := plugin.JsonRpcRequest{Method: method, Params: params, Id: id}
 	promise := make(chan plugin.JsonRpcResponse)
 
 	r.pendingRequestsMu.Lock()
-	r.pendingRequests[id] = promise
+	r.lastRequestId++
+	newId := r.lastRequestId
+	r.pendingRequests[newId] = promise
 	r.pendingRequestsMu.Unlock()
 
-	marshal, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("json.Marschal failed: %w", err)
-	}
+	req := plugin.JsonRpcRequest{Method: method, Params: params, Id: newId}
 
-	line := string(marshal)
-	r.writerMu.Lock()
-	_, err = fmt.Fprintln(r.writer, line)
-	r.writerMu.Unlock()
-
+	r.encoderMu.Lock()
+	err := r.encoder.Encode(req)
+	r.encoderMu.Unlock()
 	if err != nil {
-		return nil, fmt.Errorf("failed to pass line to writer: %w", err)
+		return nil, fmt.Errorf("json.Encode failed: %w", err)
 	}
-	r.Logger.Debugw("Successfully pass line to writer:", zap.String("line", line))
 
 	response := <-promise
 
@@ -66,19 +61,12 @@ func (r *RPC) RawCall(method string, params json.RawMessage) (json.RawMessage, e
 	return response.Result, nil
 }
 
-func (r *RPC) prepareResponse() {
+func (r *RPC) processResponses() {
 	for {
-		var response = plugin.JsonRpcResponse{}
-		res, err := r.reader.ReadString('\n')
+		var response plugin.JsonRpcResponse
+		err := r.decoder.Decode(&response)
 		if err != nil {
-			r.Logger.Warnw("failed to read response: ", zap.Error(err))
-			continue
-		}
-
-		r.Logger.Debugw("Successfully read response", zap.String("output", res))
-
-		if err = json.Unmarshal([]byte(res), &response); err != nil {
-			r.Logger.Warnw("failed to decode json response:", zap.Error(err))
+			r.logger.Warnw("failed to decode json response:", zap.Error(err))
 			continue
 		}
 
@@ -90,7 +78,7 @@ func (r *RPC) prepareResponse() {
 		if promise != nil {
 			promise <- response
 		} else {
-			r.Logger.Warn("Unknown response")
+			r.logger.Warn("Unknown response")
 		}
 	}
 }

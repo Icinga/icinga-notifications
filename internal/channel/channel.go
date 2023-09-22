@@ -37,7 +37,7 @@ func (c *Channel) GetPlugin() (*Plugin, error) {
 
 func (c *Channel) ResetPlugin() error {
 	if c.Plugin != nil {
-		if err := c.Plugin.RPC.Close(); err != nil {
+		if err := c.Plugin.rpc.Close(); err != nil {
 			return err
 		}
 
@@ -75,7 +75,7 @@ func SpawnPlugin(path string, config string, baseLogger *logging.Logger) (*Plugi
 
 	rpc := newRPC(writer, tempReader, logger)
 
-	p := &Plugin{cmd: cmd, RPC: rpc, Logger: logger}
+	p := &Plugin{cmd: cmd, rpc: rpc, logger: logger}
 
 	info, err := p.GetInfo()
 	if err != nil {

@@ -1,13 +1,13 @@
 package plugin
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,7 +28,7 @@ type Address struct {
 
 type Incident struct {
 	Id                int64  `json:"id"`
-	ObjectDisplayName string `json:"objectDisplayName"`
+	ObjectDisplayName string `json:"object_display_name"`
 }
 
 type Event struct {
@@ -44,19 +44,19 @@ type NotificationRequest struct {
 	Contact       *Contact `json:"contact"`
 	Incident      Incident `json:"incident"`
 	Event         *Event   `json:"event"`
-	IcingaWeb2Url string   `json:"icingaWeb2Url"`
+	IcingaWeb2Url string   `json:"icingaweb2_url"`
 }
 
 type JsonRpcRequest struct {
 	Method string          `json:"method"`
 	Params json.RawMessage `json:"params"`
-	Id     string          `json:"id"`
+	Id     uint64          `json:"id"`
 }
 
 type JsonRpcResponse struct {
 	Result json.RawMessage `json:"result"`
 	Error  string          `json:"error"`
-	Id     string          `json:"id"`
+	Id     uint64          `json:"id"`
 }
 
 type Plugin interface {
@@ -66,19 +66,18 @@ type Plugin interface {
 }
 
 func RunPlugin(plugin Plugin) {
-	reader := bufio.NewReader(os.Stdin)
+	encoder := json.NewEncoder(os.Stdout)
+	decoder := json.NewDecoder(os.Stdin)
+	var encoderMu sync.Mutex
 
 	for {
-		line, err := reader.ReadString('\n')
+		var req JsonRpcRequest
+		err := decoder.Decode(&req)
 		if err != nil {
-			log.Fatal("Failed to read request:", err)
+			log.Fatal("Failed to json.Decode request:", err)
 		}
 
-		go func(req string) {
-			request := JsonRpcRequest{}
-			if err = json.Unmarshal([]byte(req), &request); err != nil {
-				log.Fatal("Failed to json.Unmarshal request:", err)
-			}
+		go func(request JsonRpcRequest) {
 			var response = JsonRpcResponse{Id: request.Id}
 			switch request.Method {
 			case "GetInfo":
@@ -106,15 +105,13 @@ func RunPlugin(plugin Plugin) {
 				response.Error = "unknown json-rpc method given"
 			}
 
-			marshal, err := json.Marshal(response)
+			encoderMu.Lock()
+			err = encoder.Encode(response)
+			encoderMu.Unlock()
 			if err != nil {
-				panic(fmt.Errorf("failed to prepare json response: %w", err))
-			}
-
-			if _, err = fmt.Fprintln(os.Stdout, string(marshal)); err != nil {
 				panic(fmt.Errorf("failed to write json response: %w", err))
 			}
-		}(line)
+		}(req)
 	}
 }
 

@@ -4,21 +4,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
-	"go.uber.org/zap"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap/zaptest"
 	"io"
+	"sync"
 	"testing"
 )
 
 func Test_newRPC(t *testing.T) {
 	w, r := dummyRemote()
-	rpc := newRPC(w, r, zap.NewNop().Sugar())
+	logger := zaptest.NewLogger(t).Sugar()
+	rpc := newRPC(w, r, logger)
+	wg := sync.WaitGroup{}
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func(i int) {
+			for j := 0; j < 1000; j++ {
+				params := fmt.Sprintf(`{"go":"%d-%d"}`, i, j)
 
-	res, err := rpc.RawCall("hello", json.RawMessage(`{"foo":"bar"}`))
-	if err != nil {
-		panic(err)
+				res, err := rpc.RawCall("hello", json.RawMessage(params))
+				if err != nil {
+					panic(err)
+				}
+
+				t.Log(string(res))
+				assert.Equal(t, params, string(res))
+
+			}
+			wg.Done()
+		}(i)
 	}
-
-	t.Log(string(res))
+	wg.Wait()
 }
 
 func dummyRemote() (io.WriteCloser, io.Reader) {
@@ -42,10 +58,6 @@ func dummyRemote() (io.WriteCloser, io.Reader) {
 			res.Result = req.Params
 
 			err = enc.Encode(&res)
-			if err != nil {
-				panic(err)
-			}
-			_, err = fmt.Fprintln(resWriter)
 			if err != nil {
 				panic(err)
 			}
