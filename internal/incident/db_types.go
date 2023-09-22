@@ -27,8 +27,9 @@ func (i *IncidentRow) TableName() string {
 // Upsert implements the contracts.Upserter interface.
 func (i *IncidentRow) Upsert() interface{} {
 	return &struct {
-		Severity event.Severity `db:"severity"`
-	}{Severity: i.Severity}
+		Severity    event.Severity  `db:"severity"`
+		RecoveredAt types.UnixMilli `db:"recovered_at"`
+	}{Severity: i.Severity, RecoveredAt: i.RecoveredAt}
 }
 
 // Sync synchronizes incidents to the database.
@@ -51,17 +52,6 @@ func (i *IncidentRow) Sync(ctx context.Context, tx *sqlx.Tx, db *icingadb.DB, up
 	}
 
 	return nil
-}
-
-type SourceSeverity struct {
-	IncidentID int64          `db:"incident_id"`
-	SourceID   int64          `db:"source_id"`
-	Severity   event.Severity `db:"severity"`
-}
-
-// TableName implements the contracts.TableNamer interface.
-func (s *SourceSeverity) TableName() string {
-	return "incident_source"
 }
 
 // EventRow represents a single incident event database entry.

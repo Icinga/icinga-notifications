@@ -24,3 +24,4 @@ ALTER TABLE object_extra_tag
   ADD CONSTRAINT pk_object_extra_tag PRIMARY KEY (object_id, tag);
 
 DROP TABLE source_object;
+DROP TABLE incident_source;
