@@ -146,3 +146,43 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 
 	return err
 }
+
+// addPendingNotifications inserts pending notification incident history of the given recipients.
+func (i *Incident) addPendingNotifications(
+	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels contactChannels, causedBy types.Int,
+) ([]*NotificationEntry, error) {
+	var notifications []*NotificationEntry
+	for contact, channels := range contactChannels {
+		for chID := range channels {
+			hr := &HistoryRow{
+				Key:                       recipient.ToKey(contact),
+				EventID:                   utils.ToDBInt(ev.ID),
+				Time:                      types.UnixMilli(time.Now()),
+				Type:                      Notified,
+				ChannelID:                 utils.ToDBInt(chID),
+				CausedByIncidentHistoryID: causedBy,
+				NotificationState:         NotificationStatePending,
+			}
+
+			id, err := i.AddHistory(ctx, tx, hr, true)
+			if err != nil {
+				i.logger.Errorw(
+					"Failed to insert contact pending notification incident history",
+					zap.String("contact", contact.String()), zap.Error(err),
+				)
+
+				return nil, errors.New("can't insert contact pending notification incident history")
+			}
+
+			hr.ID = id.Int64
+			notifications = append(notifications, &NotificationEntry{
+				HistoryRowID: hr.ID,
+				ContactID:    contact.ID,
+				State:        NotificationStatePending,
+				ChannelID:    chID,
+			})
+		}
+	}
+
+	return notifications, nil
+}
