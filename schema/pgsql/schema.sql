@@ -16,11 +16,22 @@ CREATE OR REPLACE FUNCTION anynonarrayliketext(anynonarray, text)
     $$;
 CREATE OPERATOR ~~ (LEFTARG=anynonarray, RIGHTARG=text, PROCEDURE=anynonarrayliketext);
 
+CREATE TABLE channel (
+    id bigserial,
+    name text NOT NULL,
+    type text NOT NULL, -- 'email', 'sms', ...
+    config text, -- JSON with channel-specific attributes
+    -- for now type determines the implementation, in the future, this will need a reference to a concrete
+    -- implementation to allow multiple implementations of a sms channel for example, probably even user-provided ones
+
+    CONSTRAINT pk_channel PRIMARY KEY (id)
+);
+
 CREATE TABLE contact (
     id bigserial,
     full_name text NOT NULL,
     username text, -- reference to web user
-    default_channel text NOT NULL,
+    default_channel_id bigint NOT NULL REFERENCES channel(id),
     color varchar(7) NOT NULL, -- hex color codes e.g #000000
 
     CONSTRAINT pk_contact PRIMARY KEY (id),
@@ -101,17 +112,6 @@ CREATE TABLE schedule_member (
     CHECK (num_nonnulls(contact_id, contactgroup_id) = 1)
 );
 
-CREATE TABLE channel (
-    id bigserial,
-    name text NOT NULL,
-    type text NOT NULL, -- 'email', 'sms', ...
-    config text, -- JSON with channel-specific attributes
-    -- for now type determines the implementation, in the future, this will need a reference to a concrete
-    -- implementation to allow multiple implementations of a sms channel for example, probably even user-provided ones
-
-    CONSTRAINT pk_channel PRIMARY KEY (id)
-);
-
 CREATE TABLE source (
     id bigserial,
     type text NOT NULL,
@@ -189,7 +189,7 @@ CREATE TABLE rule_escalation_recipient (
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),
     schedule_id bigint REFERENCES schedule(id),
-    channel_type text,
+    channel_id bigint REFERENCES channel(id),
 
     CONSTRAINT pk_rule_escalation_recipient PRIMARY KEY (id),
 
@@ -252,8 +252,8 @@ CREATE TABLE incident_history (
     contactgroup_id bigint REFERENCES contactgroup(id),
     schedule_id bigint REFERENCES schedule(id),
     rule_id bigint REFERENCES rule(id),
+    channel_id bigint REFERENCES channel(id),
     caused_by_incident_history_id bigint REFERENCES incident_history(id),
-    channel_type text,
     time bigint NOT NULL,
     message text,
     type incident_history_event_type NOT NULL,

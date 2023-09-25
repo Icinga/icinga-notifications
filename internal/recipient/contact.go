@@ -6,11 +6,11 @@ import (
 )
 
 type Contact struct {
-	ID             int64          `db:"id"`
-	FullName       string         `db:"full_name"`
-	Username       sql.NullString `db:"username"`
-	DefaultChannel string         `db:"default_channel"`
-	Addresses      []*Address
+	ID               int64          `db:"id"`
+	FullName         string         `db:"full_name"`
+	Username         sql.NullString `db:"username"`
+	DefaultChannelID int64          `db:"default_channel_id"`
+	Addresses        []*Address
 }
 
 func (c *Contact) String() string {

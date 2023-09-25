@@ -51,7 +51,7 @@ func (e *Escalation) GetContactsAt(t time.Time) []ContactChannelPair {
 
 	for _, r := range e.Recipients {
 		for _, c := range r.Recipient.GetContactsAt(t) {
-			pairs = append(pairs, ContactChannelPair{c, r.ChannelType})
+			pairs = append(pairs, ContactChannelPair{c, r.ChannelID})
 		}
 	}
 
@@ -63,9 +63,9 @@ func (e *Escalation) TableName() string {
 }
 
 type EscalationRecipient struct {
-	ID            int64          `db:"id"`
-	EscalationID  int64          `db:"rule_escalation_id"`
-	ChannelType   sql.NullString `db:"channel_type"`
+	ID            int64         `db:"id"`
+	EscalationID  int64         `db:"rule_escalation_id"`
+	ChannelID     sql.NullInt64 `db:"channel_id"`
 	recipient.Key `db:",inline"`
 	Recipient     recipient.Recipient
 }
@@ -75,6 +75,6 @@ func (r *EscalationRecipient) TableName() string {
 }
 
 type ContactChannelPair struct {
-	Contact     *recipient.Contact
-	ChannelType sql.NullString
+	Contact   *recipient.Contact
+	ChannelID sql.NullInt64
 }
