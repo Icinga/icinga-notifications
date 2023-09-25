@@ -18,18 +18,18 @@ func (r *RuntimeConfig) fetchChannels(ctx context.Context, tx *sqlx.Tx) error {
 		return err
 	}
 
-	channelsByType := make(map[string]*channel.Channel)
+	channelsById := make(map[int64]*channel.Channel)
 	for _, c := range channels {
 		channelLogger := r.logger.With(
 			zap.Int64("id", c.ID),
 			zap.String("name", c.Name),
 			zap.String("type", c.Type),
 		)
-		if channelsByType[c.Type] != nil {
+		if channelsById[c.ID] != nil {
 			channelLogger.Warnw("ignoring duplicate config for channel type")
 		} else {
 			c.Logger = r.logs.GetChildLogger("channel").With(zap.Int64("id", c.ID), zap.String("name", c.Name))
-			channelsByType[c.Type] = c
+			channelsById[c.ID] = c
 
 			channelLogger.Debugw("loaded channel config")
 		}
@@ -37,27 +37,27 @@ func (r *RuntimeConfig) fetchChannels(ctx context.Context, tx *sqlx.Tx) error {
 
 	if r.Channels != nil {
 		// mark no longer existing channels for deletion
-		for typ := range r.Channels {
-			if _, ok := channelsByType[typ]; !ok {
-				channelsByType[typ] = nil
+		for id := range r.Channels {
+			if _, ok := channelsById[id]; !ok {
+				channelsById[id] = nil
 			}
 		}
 	}
 
-	r.pending.Channels = channelsByType
+	r.pending.Channels = channelsById
 
 	return nil
 }
 
 func (r *RuntimeConfig) applyPendingChannels() {
 	if r.Channels == nil {
-		r.Channels = make(map[string]*channel.Channel)
+		r.Channels = make(map[int64]*channel.Channel)
 	}
 
-	for typ, pendingChannel := range r.pending.Channels {
+	for id, pendingChannel := range r.pending.Channels {
 		if pendingChannel == nil {
-			delete(r.Channels, typ)
-		} else if currentChannel := r.Channels[typ]; currentChannel != nil {
+			delete(r.Channels, id)
+		} else if currentChannel := r.Channels[id]; currentChannel != nil {
 			// Currently, the whole config is reloaded from the database frequently, replacing everything.
 			// Prevent restarting the plugin processes every time by explicitly checking for config changes.
 			// The if condition should no longer be necessary when https://github.com/Icinga/icinga-notifications/issues/5
@@ -71,7 +71,7 @@ func (r *RuntimeConfig) applyPendingChannels() {
 				currentChannel.Stop()
 			}
 		} else {
-			r.Channels[typ] = pendingChannel
+			r.Channels[id] = pendingChannel
 		}
 	}
 

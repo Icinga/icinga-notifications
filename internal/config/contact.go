@@ -52,7 +52,7 @@ func (r *RuntimeConfig) applyPendingContacts() {
 		} else if currentContact := r.Contacts[id]; currentContact != nil {
 			currentContact.FullName = pendingContact.FullName
 			currentContact.Username = pendingContact.Username
-			currentContact.DefaultChannel = pendingContact.DefaultChannel
+			currentContact.DefaultChannelID = pendingContact.DefaultChannelID
 		} else {
 			r.Contacts[id] = pendingContact
 		}

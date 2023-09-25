@@ -17,10 +17,10 @@ func (r *RuntimeConfig) debugVerify() error {
 	if r.Channels == nil {
 		return errors.New("RuntimeConfig.Channels is nil")
 	} else {
-		for typ, channel := range r.Channels {
-			err := r.debugVerifyChannel(typ, channel)
+		for id, channel := range r.Channels {
+			err := r.debugVerifyChannel(id, channel)
 			if err != nil {
-				return fmt.Errorf("RuntimeConfig.Channels[%q] is invalid: %w", typ, err)
+				return fmt.Errorf("RuntimeConfig.Channels[%d] is invalid: %w", id, err)
 			}
 		}
 	}
@@ -94,13 +94,13 @@ func (r *RuntimeConfig) debugVerify() error {
 	return nil
 }
 
-func (r *RuntimeConfig) debugVerifyChannel(typ string, channel *channel.Channel) error {
-	if channel.Type != typ {
-		return fmt.Errorf("channel %p has type %q but is referenced as %q", channel, channel.Type, typ)
+func (r *RuntimeConfig) debugVerifyChannel(id int64, channel *channel.Channel) error {
+	if channel.ID != id {
+		return fmt.Errorf("channel %p has id %d but is referenced as %d", channel, channel.ID, id)
 	}
 
-	if other := r.Channels[typ]; other != channel {
-		return fmt.Errorf("channel %p is inconsistent with RuntimeConfig.Channels[%q] = %p", channel, typ, other)
+	if other := r.Channels[id]; other != channel {
+		return fmt.Errorf("channel %p is inconsistent with RuntimeConfig.Channels[%d] = %p", channel, id, other)
 	}
 
 	return nil
@@ -115,8 +115,8 @@ func (r *RuntimeConfig) debugVerifyContact(id int64, contact *recipient.Contact)
 		return fmt.Errorf("contact %p is inconsistent with RuntimeConfig.Contacts[%d] = %p", contact, id, other)
 	}
 
-	if contact.DefaultChannel == "" {
-		return fmt.Errorf("contact %q doesn't specify a default channel", contact)
+	if r.Channels[contact.DefaultChannelID] == nil {
+		return fmt.Errorf("contact %q references non-existent default channel id %d", contact, contact.DefaultChannelID)
 	}
 
 	for i, address := range contact.Addresses {

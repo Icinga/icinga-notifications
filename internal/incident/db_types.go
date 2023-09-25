@@ -119,7 +119,7 @@ type HistoryRow struct {
 	CausedByIncidentHistoryID types.Int        `db:"caused_by_incident_history_id"`
 	Time                      types.UnixMilli  `db:"time"`
 	Type                      HistoryEventType `db:"type"`
-	ChannelType               types.String     `db:"channel_type"`
+	ChannelID                 types.Int        `db:"channel_id"`
 	NewSeverity               event.Severity   `db:"new_severity"`
 	OldSeverity               event.Severity   `db:"old_severity"`
 	NewRecipientRole          ContactRole      `db:"new_recipient_role"`

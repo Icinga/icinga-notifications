@@ -313,7 +313,7 @@ func (i *Incident) evaluateEscalations() {
 func (i *Incident) notifyContacts(ctx context.Context, tx *sqlx.Tx, ev *event.Event, causedBy types.Int) error {
 	managed := i.HasManager()
 
-	contactChannels := make(map[*recipient.Contact]map[string]struct{})
+	contactChannels := make(map[*recipient.Contact]map[int64]struct{})
 
 	if i.Recipients == nil {
 		i.Recipients = make(map[recipient.Key]*RecipientState)
@@ -378,12 +378,12 @@ func (i *Incident) notifyContacts(ctx context.Context, tx *sqlx.Tx, ev *event.Ev
 			if !managed || state.Role > RoleRecipient {
 				for _, c := range escalationRecipient.Recipient.GetContactsAt(ev.Time) {
 					if contactChannels[c] == nil {
-						contactChannels[c] = make(map[string]struct{})
+						contactChannels[c] = make(map[int64]struct{})
 					}
-					if escalationRecipient.ChannelType.Valid {
-						contactChannels[c][escalationRecipient.ChannelType.String] = struct{}{}
+					if escalationRecipient.ChannelID.Valid {
+						contactChannels[c][escalationRecipient.ChannelID.Int64] = struct{}{}
 					} else {
-						contactChannels[c][c.DefaultChannel] = struct{}{}
+						contactChannels[c][c.DefaultChannelID] = struct{}{}
 					}
 				}
 			}
@@ -400,9 +400,9 @@ func (i *Incident) notifyContacts(ctx context.Context, tx *sqlx.Tx, ev *event.Ev
 		if !isEscalationRecipient && (!managed || state.Role > RoleRecipient) {
 			for _, contact := range r.GetContactsAt(ev.Time) {
 				if contactChannels[contact] == nil {
-					contactChannels[contact] = make(map[string]struct{})
+					contactChannels[contact] = make(map[int64]struct{})
 				}
-				contactChannels[contact][contact.DefaultChannel] = struct{}{}
+				contactChannels[contact][contact.DefaultChannelID] = struct{}{}
 			}
 		}
 	}
@@ -420,10 +420,18 @@ func (i *Incident) notifyContacts(ctx context.Context, tx *sqlx.Tx, ev *event.Ev
 			return err
 		}
 
-		for chType := range channels {
-			i.logger.Infof("Notify contact %q via %q", contact.FullName, chType)
+		for chId := range channels {
+			ch := i.runtimeConfig.Channels[chId]
+			if ch == nil {
+				i.logger.Errorw("Could not find config for channel", zap.Int64("channel_id", chId))
+				continue
+			}
 
-			hr.ChannelType = utils.ToDBString(chType)
+			chType := ch.Type
+
+			i.logger.Infof("Notify contact %q via %q of type %q", contact.FullName, ch.Name, chType)
+
+			hr.ChannelID = utils.ToDBInt(ch.ID)
 
 			_, err := i.AddHistory(ctx, tx, hr, false)
 			if err != nil {
@@ -431,12 +439,6 @@ func (i *Incident) notifyContacts(ctx context.Context, tx *sqlx.Tx, ev *event.Ev
 					"Failed to insert contact notified incident history", zap.String("contact", contact.String()),
 					zap.Error(err),
 				)
-			}
-
-			ch := i.runtimeConfig.Channels[chType]
-			if ch == nil {
-				i.logger.Errorw("Could not find config for channel", zap.String("type", chType))
-				continue
 			}
 
 			err = ch.Start(i.configFile.ChannelPluginDir)

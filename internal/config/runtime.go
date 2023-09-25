@@ -37,7 +37,7 @@ func NewRuntimeConfig(db *icingadb.DB, logs *logging.Logging) *RuntimeConfig {
 }
 
 type ConfigSet struct {
-	Channels         map[string]*channel.Channel
+	Channels         map[int64]*channel.Channel
 	Contacts         map[int64]*recipient.Contact
 	ContactAddresses map[int64]*recipient.Address
 	Groups           map[int64]*recipient.Group

@@ -110,7 +110,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 		recipientLogger := r.logger.With(
 			zap.Int64("id", recipient.ID),
 			zap.Int64("escalation_id", recipient.EscalationID),
-			zap.String("channel_type", recipient.ChannelType.String))
+			zap.Int64("channel_id", recipient.ChannelID.Int64))
 
 		escalation := escalationsByID[recipient.EscalationID]
 		if escalation == nil {
@@ -165,7 +165,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 					recipientLogger := r.logger.With(
 						zap.Int64("id", recipient.ID),
 						zap.Int64("escalation_id", recipient.EscalationID),
-						zap.String("channel_type", recipient.ChannelType.String))
+						zap.Int64("channel_id", recipient.ChannelID.Int64))
 
 					if recipient.ContactID.Valid {
 						id := recipient.ContactID.Int64
