@@ -468,19 +468,19 @@ func (i *Incident) notifyContacts(ev *event.Event, causedBy types.Int) error {
 				)
 			}
 
-			chConf := i.runtimeConfig.Channels[chType]
-			if chConf == nil {
+			ch := i.runtimeConfig.Channels[chType]
+			if ch == nil {
 				i.logger.Errorw("Could not find config for channel", zap.String("type", chType))
 				continue
 			}
 
-			p, err := chConf.GetPlugin()
+			err = ch.StartPlugin()
 			if err != nil {
 				i.logger.Errorw("Could not initialize channel", zap.String("type", chType), zap.Error(err))
 				continue
 			}
 
-			err = p.SendNotification(contact, i, ev, i.configFile.Icingaweb2URL)
+			err = ch.SendNotification(contact, i, ev, i.configFile.Icingaweb2URL)
 			if err != nil {
 				i.logger.Errorw("Failed to send via channel", zap.String("type", chType), zap.Error(err))
 				continue

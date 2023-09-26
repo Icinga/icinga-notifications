@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 const pluginDir = "/usr/libexec/icinga-notifications/channel"
@@ -18,77 +19,75 @@ type Channel struct {
 	Type   string `db:"type"`
 	Config string `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
 
-	Plugin *Plugin
 	Logger *logging.Logger
+	cmd    *exec.Cmd
+	rpc    *RPC
 }
 
-func (c *Channel) GetPlugin() (*Plugin, error) {
-	if c.Plugin == nil {
-		p, err := SpawnPlugin(filepath.Join(pluginDir, c.Type), c.Config, c.Logger)
-		if err != nil {
-			return p, fmt.Errorf("unknown channel type %q", c.Type)
-		}
-
-		c.Plugin = p
+func (c *Channel) StartPlugin() error {
+	if c.cmd != nil {
+		return nil
 	}
 
-	return c.Plugin, nil
-}
-
-func (c *Channel) ResetPlugin() error {
-	if c.Plugin != nil {
-		if err := c.Plugin.rpc.Close(); err != nil {
-			return err
-		}
-
-		c.Plugin = nil
-	}
-
-	return nil
-}
-
-func SpawnPlugin(path string, config string, baseLogger *logging.Logger) (*Plugin, error) {
-	logger := baseLogger.With(zap.String("path", path))
+	path := filepath.Join(pluginDir, c.Type)
+	logger := c.Logger.With(zap.String("cmd", path))
 
 	cmd := exec.Command(path)
 
 	writer, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
+		return fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
 
 	reader, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
 	errPipe, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
+
 	go forwardLogs(errPipe, logger)
 
 	if err = cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start cmd: %w", err)
+		return fmt.Errorf("failed to start cmd: %w", err)
 	}
 	logger.Debug("Cmd started successfully")
 
 	rpc := newRPC(writer, reader, logger)
 
-	p := &Plugin{cmd: cmd, rpc: rpc}
+	c.cmd = cmd
+	c.rpc = rpc
 
-	info, err := p.GetInfo()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get p info: %w", err)
+	if err = c.SetConfig(c.Config); err != nil {
+		c.ResetPlugin()
+
+		return fmt.Errorf("failed to set config: %w", err)
 	}
-	logger.Debugf("Plugin info: %#v", info)
+	logger.Debug("Successfully set config: ", c.Config)
 
-	if err = p.SetConfig(config); err != nil {
-		return nil, fmt.Errorf("failed to set config: %w", err)
+	return nil
+}
+
+func (c *Channel) ResetPlugin() {
+	if c.cmd != nil {
+
+		go func(cmd *exec.Cmd, rpc *RPC) {
+			_ = rpc.Close()
+
+			timer := time.AfterFunc(5*time.Second, func() {
+				_ = cmd.Process.Kill()
+			})
+
+			_ = cmd.Wait()
+			timer.Stop()
+		}(c.cmd, c.rpc)
+
+		c.cmd = nil
+		c.rpc = nil
 	}
-	logger.Debug("Successfully set p config: ", config)
-
-	return p, nil
 }
 
 func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {

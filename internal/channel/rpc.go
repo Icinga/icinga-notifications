@@ -2,7 +2,6 @@ package channel
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"go.uber.org/zap"
@@ -10,7 +9,9 @@ import (
 	"sync"
 )
 
-var ErrRpcFailed = errors.New("RPC failed")
+type RPCError struct {
+	cause error
+}
 
 type RPC struct {
 	writer            io.Closer // use encoder for writing instead
@@ -21,8 +22,11 @@ type RPC struct {
 	pendingRequestsMu sync.Mutex
 	logger            *zap.SugaredLogger
 	lastRequestId     uint64
+	mu                sync.Mutex
 
 	errChannel chan error
+
+	rpcErr *RPCError
 }
 
 func newRPC(writer io.WriteCloser, reader io.Reader, logger *zap.SugaredLogger) *RPC {
@@ -47,17 +51,17 @@ func (r *RPC) Call(method string, params json.RawMessage) (json.RawMessage, erro
 
 	promise := make(chan plugin.JsonRpcResponse)
 
-	r.pendingRequestsMu.Lock()
+	r.mu.Lock()
 	r.lastRequestId++
 	newId := r.lastRequestId
 	r.pendingRequests[newId] = promise
-	r.pendingRequestsMu.Unlock()
-
-	r.encoderMu.Lock()
 	err := r.encoder.Encode(plugin.JsonRpcRequest{Method: method, Params: params, Id: newId})
-	r.encoderMu.Unlock()
+	r.mu.Unlock()
 	if err != nil {
-		return nil, fmt.Errorf("json.Encode failed: %w", err)
+		err = fmt.Errorf("failed to write request: %w", err)
+		r.setRPCErr(err)
+
+		return nil, err
 	}
 
 	select {
@@ -79,16 +83,17 @@ func (r *RPC) processResponses() {
 		err := r.decoder.Decode(&response)
 
 		if err != nil {
-			r.logger.Warnw("failed to decode json response:", zap.Error(err))
-			close(r.errChannel)
+			r.logger.Infof("dropping %d pending request(s)", len(r.pendingRequests))
+
+			r.setRPCErr(fmt.Errorf("failed to decode json response: %w", err))
 
 			return
 		}
 
-		r.pendingRequestsMu.Lock()
+		r.mu.Lock()
 		promise := r.pendingRequests[response.Id]
 		delete(r.pendingRequests, response.Id)
-		r.pendingRequestsMu.Unlock()
+		r.mu.Unlock()
 
 		if promise != nil {
 			promise <- response
@@ -105,8 +110,27 @@ func (r *RPC) Close() error {
 func (r *RPC) Err() error {
 	select {
 	case <-r.errChannel:
-		return ErrRpcFailed
+		return r.rpcErr
 	default:
 		return nil
 	}
+}
+
+func (r *RPC) setRPCErr(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.rpcErr == nil {
+		r.rpcErr = &RPCError{cause: err}
+		r.pendingRequests = nil
+		close(r.errChannel)
+	}
+}
+
+func (err *RPCError) Error() string {
+	return fmt.Sprintf("RPCError: %s", err.cause.Error())
+}
+
+func (err *RPCError) Unwrap() error {
+	return err.cause
 }

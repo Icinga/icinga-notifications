@@ -63,9 +63,7 @@ func (r *RuntimeConfig) applyPendingChannels() {
 				currentChannel.Name = pendingChannel.Name
 				currentChannel.Config = pendingChannel.Config
 
-				if err := currentChannel.ResetPlugin(); err != nil {
-					currentChannel.Logger.Errorw("Failed to reset plugin", zap.String("Name", currentChannel.Name), zap.Error(err))
-				}
+				currentChannel.ResetPlugin()
 			}
 		} else {
 			r.Channels[typ] = pendingChannel

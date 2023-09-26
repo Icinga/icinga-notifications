@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"os"
 	"strings"
 	"sync"
@@ -74,11 +73,8 @@ func RunPlugin(plugin Plugin) {
 	for {
 		var req JsonRpcRequest
 		err := decoder.Decode(&req)
-		if rand.Intn(4) == 0 {
-			os.Exit(1)
-		}
 		if err != nil {
-			log.Fatal("Failed to json.Decode request:", err)
+			log.Fatal("failed to read request:", err)
 		}
 
 		go func(request JsonRpcRequest) {
@@ -113,7 +109,7 @@ func RunPlugin(plugin Plugin) {
 			err = encoder.Encode(response)
 			encoderMu.Unlock()
 			if err != nil {
-				panic(fmt.Errorf("failed to write json response: %w", err))
+				panic(fmt.Errorf("failed to write response: %w", err))
 			}
 		}(req)
 	}
