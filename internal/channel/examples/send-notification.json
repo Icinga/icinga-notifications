@@ -1,0 +1,29 @@
+{
+  "method" : "SendNotification",
+  "params": {
+    "contact": {
+      "full_name": "John Doe",
+      "addresses": [
+        {
+          "type": "email",
+          "address": "johnd@example.com"
+        },{
+          "type": "rocketchat",
+          "address": "@johndoe"
+        }
+      ]
+    },
+    "incident": {
+      "id": 22,
+      "object_display_name": "httpd"
+    },
+    "event": {
+      "url": "https://example.com/icingaweb2/icingadb/service?name=httpd&host.name=www1",
+      "type": "state",
+      "severity": "crit",
+      "message": "Service is down"
+    },
+    "icingaweb2_url": "https://example.com/icingaweb2/"
+  },
+  "id": 2020
+}

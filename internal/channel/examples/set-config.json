@@ -1,0 +1,9 @@
+{
+  "method": "SetConfig",
+  "params": {
+    "host": "example.com",
+    "port": "25",
+    "from": "notifications-daemon@example.com"
+  },
+  "id" : 2020
+}

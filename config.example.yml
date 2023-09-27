@@ -7,6 +7,7 @@
 #debug-password: "put-something-secret-here"
 
 icingaweb2-url: http://localhost/icingaweb2/
+channel-plugin-dir: /usr/libexec/icinga-notifications/channel
 
 database:
   type: pgsql
