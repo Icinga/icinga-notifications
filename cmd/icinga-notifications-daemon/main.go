@@ -73,7 +73,7 @@ func main() {
 		}
 	}
 
-	runtimeConfig := config.NewRuntimeConfig(db, logs.GetChildLogger("runtime-updates"))
+	runtimeConfig := config.NewRuntimeConfig(db, logs)
 	if err := runtimeConfig.UpdateFromDatabase(context.TODO()); err != nil {
 		logger.Fatalw("failed to load config from database", zap.Error(err))
 	}

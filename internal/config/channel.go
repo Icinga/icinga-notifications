@@ -28,6 +28,7 @@ func (r *RuntimeConfig) fetchChannels(ctx context.Context, tx *sqlx.Tx) error {
 		if channelsByType[c.Type] != nil {
 			channelLogger.Warnw("ignoring duplicate config for channel type")
 		} else {
+			c.Logger = r.logs.GetChildLogger("channel").With(zap.Int64("id", c.ID), zap.String("name", c.Name))
 			channelsByType[c.Type] = c
 
 			channelLogger.Debugw("loaded channel config")
@@ -57,10 +58,18 @@ func (r *RuntimeConfig) applyPendingChannels() {
 		if pendingChannel == nil {
 			delete(r.Channels, typ)
 		} else if currentChannel := r.Channels[typ]; currentChannel != nil {
-			currentChannel.ID = pendingChannel.ID
-			currentChannel.Name = pendingChannel.Name
-			currentChannel.Config = pendingChannel.Config
-			currentChannel.ResetPlugin()
+			// Currently, the whole config is reloaded from the database frequently, replacing everything.
+			// Prevent restarting the plugin processes every time by explicitly checking for config changes.
+			// The if condition should no longer be necessary when https://github.com/Icinga/icinga-notifications/issues/5
+			// is solved properly.
+			if currentChannel.ID != pendingChannel.ID || currentChannel.Name != pendingChannel.Name || currentChannel.Config != pendingChannel.Config {
+				currentChannel.ID = pendingChannel.ID
+				currentChannel.Name = pendingChannel.Name
+				currentChannel.Config = pendingChannel.Config
+
+				currentChannel.Logger.Info("Resetting the channel because the config has been changed")
+				currentChannel.ResetPlugin()
+			}
 		} else {
 			r.Channels[typ] = pendingChannel
 		}

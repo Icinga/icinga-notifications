@@ -8,11 +8,12 @@ import (
 )
 
 type ConfigFile struct {
-	Listen        string                  `yaml:"listen" default:"localhost:5680"`
-	DebugPassword string                  `yaml:"debug-password"`
-	Icingaweb2URL string                  `yaml:"icingaweb2-url"`
-	Database      icingadbConfig.Database `yaml:"database"`
-	Logging       icingadbConfig.Logging  `yaml:"logging"`
+	Listen           string                  `yaml:"listen" default:"localhost:5680"`
+	DebugPassword    string                  `yaml:"debug-password"`
+	ChannelPluginDir string                  `yaml:"channel-plugin-dir" default:"/usr/libexec/icinga-notifications/channel"`
+	Icingaweb2URL    string                  `yaml:"icingaweb2-url"`
+	Database         icingadbConfig.Database `yaml:"database"`
+	Logging          icingadbConfig.Logging  `yaml:"logging"`
 }
 
 func FromFile(path string) (*ConfigFile, error) {
