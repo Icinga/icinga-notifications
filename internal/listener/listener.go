@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
@@ -40,9 +41,14 @@ func NewListener(db *icingadb.DB, configFile *config.ConfigFile, runtimeConfig *
 	return l
 }
 
+func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	rw.Header().Set("Server", "icinga-notifications/"+internal.Version.Version)
+	l.mux.ServeHTTP(rw, req)
+}
+
 func (l *Listener) Run() error {
 	l.logger.Infof("Starting listener on http://%s", l.configFile.Listen)
-	return http.ListenAndServe(l.configFile.Listen, &l.mux)
+	return http.ListenAndServe(l.configFile.Listen, l)
 }
 
 func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
