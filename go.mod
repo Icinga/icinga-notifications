@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/creasty/defaults v1.7.0
-	github.com/goccy/go-yaml v1.9.6
+	github.com/goccy/go-yaml v1.11.2
 	github.com/icinga/icingadb v1.1.1-0.20230418113126-7c4b947aad3a
 	github.com/jmoiron/sqlx v1.3.5
 	github.com/stretchr/testify v1.8.4
@@ -31,7 +31,7 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c // indirect
-	golang.org/x/sys v0.1.0 // indirect
+	golang.org/x/sys v0.6.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
