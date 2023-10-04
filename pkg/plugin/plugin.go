@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"strings"
 	"sync"
 	"time"
 )
@@ -34,14 +33,20 @@ type Address struct {
 	Address string `json:"address"`
 }
 
+type Object struct {
+	Name      string            `json:"name"`
+	Url       string            `json:"url"`
+	Tags      map[string]string `json:"tags"`
+	ExtraTags map[string]string `json:"extra_tags"`
+}
+
 type Incident struct {
-	Id                int64  `json:"id"`
-	ObjectDisplayName string `json:"object_display_name"`
+	Id  int64  `json:"id"`
+	Url string `json:"url"`
 }
 
 type Event struct {
 	Time     time.Time `json:"time"`
-	URL      string    `json:"url"`
 	Type     string    `json:"type"`
 	Severity string    `json:"severity"`
 	Username string    `json:"username"`
@@ -49,10 +54,10 @@ type Event struct {
 }
 
 type NotificationRequest struct {
-	Contact       *Contact  `json:"contact"`
-	Incident      *Incident `json:"incident"`
-	Event         *Event    `json:"event"`
-	IcingaWeb2Url string    `json:"icingaweb2_url"`
+	Contact  *Contact  `json:"contact"`
+	Object   *Object   `json:"object"`
+	Incident *Incident `json:"incident"`
+	Event    *Event    `json:"event"`
 }
 
 type Plugin interface {
@@ -119,19 +124,23 @@ func RunPlugin(plugin Plugin) {
 // FormatMessage formats a notification message and adds to the given io.Writer
 func FormatMessage(writer io.Writer, req *NotificationRequest) {
 	_, _ = fmt.Fprintf(writer, "Info: %s\n\n", req.Event.Message)
-	_, _ = fmt.Fprintf(writer, "When: %s\n", req.Event.Time.Format("2006-01-02 15:04:05 MST"))
+	_, _ = fmt.Fprintf(writer, "When: %s\n\n", req.Event.Time.Format("2006-01-02 15:04:05 MST"))
 
 	if req.Event.Username != "" {
-		_, _ = fmt.Fprintf(writer, "\nCommented by %s\n\n", req.Event.Username)
+		_, _ = fmt.Fprintf(writer, "Commented by %s\n\n", req.Event.Username)
+	}
+	_, _ = fmt.Fprintf(writer, "Object: %s\n\n", req.Object.Url)
+	_, _ = writer.Write([]byte("Tags:\n"))
+	for k, v := range req.Object.Tags {
+		_, _ = fmt.Fprintf(writer, "%s: %s\n", k, v)
 	}
 
-	_, _ = writer.Write([]byte(req.Event.URL + "\n\n"))
-	incidentUrl := req.IcingaWeb2Url
-	if strings.HasSuffix(incidentUrl, "/") {
-		incidentUrl = fmt.Sprintf("Incident: %snotifications/incident?id=%d\n", req.IcingaWeb2Url, req.Incident.Id)
-	} else {
-		incidentUrl = fmt.Sprintf("Incident: %s/notifications/incident?id=%d\n", req.IcingaWeb2Url, req.Incident.Id)
+	if len(req.Object.ExtraTags) > 0 {
+		_, _ = writer.Write([]byte("\nExtra Tags:\n"))
+		for k, v := range req.Object.ExtraTags {
+			_, _ = fmt.Fprintf(writer, "%s: %s\n", k, v)
+		}
 	}
 
-	_, _ = writer.Write([]byte(incidentUrl))
+	_, _ = fmt.Fprintf(writer, "\nIncident: %s", req.Incident.Url)
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"github.com/icinga/icinga-notifications/pkg/rpc"
+	"strings"
 )
 
 func (c *Channel) GetInfo() (*plugin.Info, error) {
@@ -38,18 +39,29 @@ func (c *Channel) SendNotification(contact *recipient.Contact, i contracts.Incid
 		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
 	}
 
+	if !strings.HasSuffix(icingaweb2Url, "/") {
+		icingaweb2Url += "/"
+	}
+
 	req := plugin.NotificationRequest{
-		Contact:  contactStruct,
-		Incident: &plugin.Incident{Id: i.ID(), ObjectDisplayName: i.ObjectDisplayName()},
+		Contact: contactStruct,
+		Object: &plugin.Object{
+			Name:      i.ObjectDisplayName(),
+			Url:       ev.URL,
+			Tags:      ev.Tags,
+			ExtraTags: ev.ExtraTags,
+		},
+		Incident: &plugin.Incident{
+			Id:  i.ID(),
+			Url: fmt.Sprintf("%snotifications/incident?id=%d", icingaweb2Url, i.ID()),
+		},
 		Event: &plugin.Event{
 			Time:     ev.Time,
-			URL:      ev.URL,
 			Type:     ev.Type,
 			Severity: ev.Severity.String(),
 			Username: ev.Username,
 			Message:  ev.Message,
 		},
-		IcingaWeb2Url: icingaweb2Url,
 	}
 
 	params, err := json.Marshal(req)
