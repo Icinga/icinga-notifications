@@ -7,24 +7,33 @@ import (
 	"github.com/icinga/icingadb/pkg/types"
 )
 
-// ExtraTagRow represents a single database object extra tag like `hostgroup/foo: null`.
-type ExtraTagRow struct {
+// TagRow is a base type for IdTagRow and ExtraTagRow
+type TagRow struct {
 	ObjectId types.Binary `db:"object_id"`
 	Tag      string       `db:"tag"`
 	Value    string       `db:"value"`
 }
+
+// ExtraTagRow represents a single database object extra tag like `hostgroup/foo: null`.
+type ExtraTagRow TagRow
 
 // TableName implements the contracts.TableNamer interface.
 func (e *ExtraTagRow) TableName() string {
 	return "object_extra_tag"
 }
 
+// IdTagRow represents a single database object id tag.
+type IdTagRow TagRow
+
+// TableName implements the contracts.TableNamer interface.
+func (e *IdTagRow) TableName() string {
+	return "object_id_tag"
+}
+
 type ObjectRow struct {
 	ID       types.Binary `db:"id"`
 	SourceID int64        `db:"source_id"`
 	Name     string       `db:"name"`
-	Host     string       `db:"host"`
-	Service  types.String `db:"service"`
 	URL      types.String `db:"url"`
 }
 
@@ -56,9 +65,17 @@ func LoadFromDB(ctx context.Context, db *icingadb.DB, id types.Binary) (*Object,
 		return nil, fmt.Errorf("failed to fetch object: %w", err)
 	}
 
-	tags := map[string]string{"host": objectRow.Host}
-	if objectRow.Service.Valid {
-		tags["service"] = objectRow.Service.String
+	var idTagRows []*IdTagRow
+	err = db.SelectContext(
+		ctx, &idTagRows,
+		db.Rebind(db.BuildSelectStmt(&IdTagRow{}, &IdTagRow{})+` WHERE "object_id" = ?`), id,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch object id tags: %w", err)
+	}
+	idTags := map[string]string{}
+	for _, idTag := range idTagRows {
+		idTags[idTag.Tag] = idTag.Value
 	}
 
 	var extraTagRows []*ExtraTagRow
@@ -69,7 +86,6 @@ func LoadFromDB(ctx context.Context, db *icingadb.DB, id types.Binary) (*Object,
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch object extra tags: %w", err)
 	}
-
 	extraTags := map[string]string{}
 	for _, extraTag := range extraTagRows {
 		extraTags[extraTag.Tag] = extraTag.Value
@@ -80,7 +96,7 @@ func LoadFromDB(ctx context.Context, db *icingadb.DB, id types.Binary) (*Object,
 		ID:        id,
 		Name:      objectRow.Name,
 		URL:       objectRow.URL.String,
-		Tags:      tags,
+		Tags:      idTags,
 		ExtraTags: extraTags,
 	}
 	cache[id.String()] = obj
