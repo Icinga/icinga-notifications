@@ -92,6 +92,13 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		_, _ = fmt.Fprintf(w, "cannot parse JSON body: %v\n", err)
 		return
 	}
+
+	if len(ev.Tags) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprintln(w, "ignoring invalid event: tags cannot be empty")
+		return
+	}
+
 	ev.Time = time.Now()
 
 	if ev.Severity == event.SeverityNone && ev.Type == "" {

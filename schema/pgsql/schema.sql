@@ -136,15 +136,20 @@ CREATE TABLE object (
     id bytea NOT NULL, -- SHA256 of identifying tags and the source.id
     source_id bigint NOT NULL REFERENCES source(id),
     name text NOT NULL,
-    -- this will probably become more flexible in the future
-    host text NOT NULL,
-    service text,
 
     url text,
 
     CHECK (length(id) = 256/8),
 
     CONSTRAINT pk_object PRIMARY KEY (id)
+);
+
+CREATE TABLE object_id_tag (
+    object_id bytea NOT NULL REFERENCES object(id),
+    tag text NOT NULL,
+    value text NOT NULL,
+
+    CONSTRAINT pk_object_id_tag PRIMARY KEY (object_id, tag)
 );
 
 CREATE TABLE object_extra_tag (

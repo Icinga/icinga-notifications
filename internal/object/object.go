@@ -72,12 +72,7 @@ func FromEvent(ctx context.Context, db *icingadb.DB, ev *event.Event) (*Object, 
 		ID:       object.ID,
 		SourceID: ev.SourceId,
 		Name:     ev.Name,
-		Host:     ev.Tags["host"],
 		URL:      utils.ToDBString(ev.URL),
-	}
-
-	if service, ok := ev.Tags["service"]; ok {
-		dbObj.Service = utils.ToDBString(service)
 	}
 
 	stmt, _ := object.db.BuildUpsertStmt(&ObjectRow{})
@@ -86,17 +81,23 @@ func FromEvent(ctx context.Context, db *icingadb.DB, ev *event.Event) (*Object, 
 		return nil, fmt.Errorf("failed to insert object: %w", err)
 	}
 
+	stmt, _ = object.db.BuildUpsertStmt(&IdTagRow{})
+	_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(object.ID, ev.Tags))
+	if err != nil {
+		return nil, fmt.Errorf("failed to upsert object id tags: %w", err)
+	}
+
 	extraTag := &ExtraTagRow{ObjectId: object.ID}
 	_, err = tx.NamedExecContext(ctx, `DELETE FROM "object_extra_tag" WHERE "object_id" = :object_id`, extraTag)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to delete object extra tags: %w", err)
 	}
 
 	if len(ev.ExtraTags) > 0 {
 		stmt, _ := object.db.BuildInsertStmt(extraTag)
-		_, err = tx.NamedExecContext(ctx, stmt, mapToExtraTagRows(object.ID, ev.ExtraTags))
+		_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(object.ID, ev.ExtraTags))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to insert object extra tags: %w", err)
 		}
 	}
 
@@ -258,16 +259,16 @@ func ID(source int64, tags map[string]string) types.Binary {
 	return h.Sum(nil)
 }
 
-// mapToExtraTags transforms the object extra tags map to a slice of ExtraTagRow struct.
-func mapToExtraTagRows(objectId types.Binary, extraTags map[string]string) []*ExtraTagRow {
-	var extraTagRows []*ExtraTagRow
+// mapToTagRows transforms the object (extra) tags map to a slice of TagRow struct.
+func mapToTagRows(objectId types.Binary, extraTags map[string]string) []*TagRow {
+	var tagRows []*TagRow
 	for key, val := range extraTags {
-		extraTagRows = append(extraTagRows, &ExtraTagRow{
+		tagRows = append(tagRows, &TagRow{
 			ObjectId: objectId,
 			Tag:      key,
 			Value:    val,
 		})
 	}
 
-	return extraTagRows
+	return tagRows
 }
