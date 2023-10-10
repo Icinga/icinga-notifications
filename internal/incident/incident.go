@@ -419,26 +419,16 @@ func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, ch
 		return fmt.Errorf("could not find config for channel ID: %d", chID)
 	}
 
-	chType := ch.Type
+	i.logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type), zap.Int64("channel_id", chID))
 
-	i.logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, chType), zap.Int64("channel_id", chID))
-
-	err := ch.Start()
+	err := ch.Notify(contact, i, ev, daemon.Config().Icingaweb2URL)
 	if err != nil {
-		i.logger.Errorw("Could not initialize channel", zap.String("type", chType), zap.Error(err))
-
-		return fmt.Errorf("could not initialize channel type %s: %w", chType, err)
-	}
-
-	err = ch.SendNotification(contact, i, ev, daemon.Config().Icingaweb2URL)
-	if err != nil {
-		i.logger.Errorw("Failed to send via channel", zap.String("type", chType), zap.Error(err))
-
+		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
 		return err
 	}
 
 	i.logger.Infow(
-		"Successfully sent a message via channel", zap.String("type", chType), zap.String("contact", contact.String()),
+		"Successfully sent a notification via channel plugin", zap.String("type", ch.Type), zap.String("contact", contact.FullName),
 	)
 
 	return nil

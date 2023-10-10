@@ -18,9 +18,65 @@ const (
 	MethodSendNotification = "SendNotification"
 )
 
+// ConfigOption describes a config element of the channel form
+type ConfigOption struct {
+	// Element name
+	Name string `json:"name"`
+
+	// Element type:
+	//
+	//  string = text, port = number, bool = checkbox, text = textarea, option = select, options = select[multiple], secret = password
+	Type string `json:"type"`
+
+	// Element label map. Locale in the standard format (language_REGION) as key and corresponding label as value.
+	// Locale is assumed to be UTF-8 encoded (Without the suffix in the locale)
+	//
+	//  e.g. {"en_US": "Save", "de_DE": "Speichern"}
+	//  An "en_US" locale must be given as a fallback
+	Label map[string]string `json:"label"`
+
+	// Element placeholder
+	Placeholder string `json:"placeholder,omitempty"`
+
+	// Element title: When the user moves the mouse pointer over an element, a tooltip is displayed with a given message.
+	Help map[string]string `json:"help,omitempty"`
+
+	// Element default value: bool for checkbox, string for other elements
+	Default any `json:"default,omitempty"`
+
+	// Set true if this element is required, omit otherwise
+	Required bool `json:"required,omitempty"`
+
+	// Options of a select element: key => value. Only required for type option and options
+	//
+	//  e.g., map[string]string{
+	//			"1":   "January",
+	//			"2":  "February",
+	//		}
+	Options map[string]string `json:"options,omitempty"`
+}
+
+// Info contains plugin information.
 type Info struct {
-	Name             string          `json:"display_name"`
-	ConfigAttributes json.RawMessage `json:"config_attrs"`
+	Type             string          `db:"type" json:"type"`
+	Name             string          `db:"name" json:"name"`
+	Version          string          `db:"version" json:"version"`
+	Author           string          `db:"author" json:"author"`
+	ConfigAttributes json.RawMessage `db:"config_attrs" json:"config_attrs"` // ConfigOption(s) as json-encoded list
+}
+
+// TableName implements the contracts.TableNamer interface.
+func (c *Info) TableName() string {
+	return "available_channel_type"
+}
+
+// Upsert implements the contracts.Upserter interface.
+func (c *Info) Upsert() interface{} {
+	return struct {
+		Version          string          `db:"version"`
+		Author           string          `db:"author"`
+		ConfigAttributes json.RawMessage `db:"config_attrs"`
+	}{}
 }
 
 type Contact struct {
@@ -61,11 +117,17 @@ type NotificationRequest struct {
 }
 
 type Plugin interface {
+	// GetInfo returns the corresponding plugin *Info
 	GetInfo() *Info
+
+	// SetConfig sets the plugin config, returns an error on failure
 	SetConfig(jsonStr json.RawMessage) error
+
+	// SendNotification sends the notification, returns an error on failure
 	SendNotification(req *NotificationRequest) error
 }
 
+// RunPlugin reads the incoming stdin requests, processes and writes the responses to stdout
 func RunPlugin(plugin Plugin) {
 	encoder := json.NewEncoder(os.Stdout)
 	decoder := json.NewDecoder(os.Stdin)

@@ -17,10 +17,20 @@ CREATE OR REPLACE FUNCTION anynonarrayliketext(anynonarray, text)
     $$;
 CREATE OPERATOR ~~ (LEFTARG=anynonarray, RIGHTARG=text, PROCEDURE=anynonarrayliketext);
 
+CREATE TABLE available_channel_type (
+    type text NOT NULL,
+    name text NOT NULL,
+    version text NOT NULL,
+    author text NOT NULL,
+    config_attrs text NOT NULL,
+
+    CONSTRAINT pk_available_channel_type PRIMARY KEY (type)
+);
+
 CREATE TABLE channel (
     id bigserial,
     name text NOT NULL,
-    type text NOT NULL, -- 'email', 'sms', ...
+    type text NOT NULL REFERENCES available_channel_type(type), -- 'email', 'sms', ...
     config text, -- JSON with channel-specific attributes
     -- for now type determines the implementation, in the future, this will need a reference to a concrete
     -- implementation to allow multiple implementations of a sms channel for example, probably even user-provided ones

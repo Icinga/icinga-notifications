@@ -5,7 +5,11 @@ import (
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+	"regexp"
 )
+
+// channelTypeNameRegex is to filter allowed channel type name
+var channelTypeNameRegex = regexp.MustCompile("^[a-zA-Z0-9]+$")
 
 func (r *RuntimeConfig) fetchChannels(ctx context.Context, tx *sqlx.Tx) error {
 	var channelPtr *channel.Channel
@@ -27,8 +31,9 @@ func (r *RuntimeConfig) fetchChannels(ctx context.Context, tx *sqlx.Tx) error {
 		)
 		if channelsById[c.ID] != nil {
 			channelLogger.Warnw("ignoring duplicate config for channel type")
+		} else if !channelTypeNameRegex.MatchString(c.Type) {
+			channelLogger.Errorf("Channel type must only contain a-zA-Z0-9, %q given", c.Type)
 		} else {
-			c.Logger = r.logs.GetChildLogger("channel").With(zap.Int64("id", c.ID), zap.String("name", c.Name))
 			channelsById[c.ID] = c
 
 			channelLogger.Debugw("loaded channel config")
@@ -56,6 +61,9 @@ func (r *RuntimeConfig) applyPendingChannels() {
 
 	for id, pendingChannel := range r.pending.Channels {
 		if pendingChannel == nil {
+			r.Channels[id].Logger.Info("Channel has been removed, stopping channel plugin")
+			r.Channels[id].Stop()
+
 			delete(r.Channels, id)
 		} else if currentChannel := r.Channels[id]; currentChannel != nil {
 			// Currently, the whole config is reloaded from the database frequently, replacing everything.
@@ -67,10 +75,14 @@ func (r *RuntimeConfig) applyPendingChannels() {
 				currentChannel.Name = pendingChannel.Name
 				currentChannel.Config = pendingChannel.Config
 
-				currentChannel.Logger.Info("Stopping the channel plugin because the config has been changed")
-				currentChannel.Stop()
+				currentChannel.Logger.Info("New config detected, reloading the channel plugin config")
+				currentChannel.ReloadConfig()
 			}
 		} else {
+			pendingChannel.Start(r.logs.GetChildLogger("channel").With(
+				zap.Int64("id", pendingChannel.ID),
+				zap.String("name", pendingChannel.Name)))
+
 			r.Channels[id] = pendingChannel
 		}
 	}

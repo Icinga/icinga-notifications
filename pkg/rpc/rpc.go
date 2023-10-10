@@ -47,7 +47,7 @@ type RPC struct {
 
 	errChannel        chan struct{} // never transports a value, only closed through setErr() to signal an occurred error
 	err               *Error        // only initialized via setErr(), if a rpc (Fatal/non-recoverable) error has occurred
-	errMu             sync.Mutex
+	errOnce           sync.Once
 	requestedShutdown bool
 }
 
@@ -104,20 +104,29 @@ func (r *RPC) Call(method string, params json.RawMessage) (json.RawMessage, erro
 
 		return response.Result, nil
 
-	case <-r.errChannel:
+	case <-r.Done():
 		return nil, r.Err()
 	}
 }
 
+// Err returns a non-nil error, If Done sends. Otherwise, nil is returned
 func (r *RPC) Err() error {
 	select {
-	case <-r.errChannel:
+	case <-r.Done():
 		return r.err
 	default:
 		return nil
 	}
 }
 
+// Done sends when the errChannel has been closed.
+// errChannel is closed when encoder/decoder fails to write/read
+func (r *RPC) Done() <-chan struct{} {
+	return r.errChannel
+}
+
+// Close closes the RPC.writer.
+// Further requests leads encoder/decoder to fail
 func (r *RPC) Close() error {
 	r.encoderMu.Lock()
 	defer r.encoderMu.Unlock()
@@ -126,21 +135,22 @@ func (r *RPC) Close() error {
 	return r.writer.Close()
 }
 
+// setErr sets the err encoder/decoder fails and closes errChannel
 func (r *RPC) setErr(err error) {
-	r.errMu.Lock()
-	defer r.errMu.Unlock()
-
-	if r.err == nil {
-		pendingReqMsg := fmt.Sprintf("cancelling %d pending request(s)", len(r.pendingRequests))
+	r.errOnce.Do(func() {
 		if r.requestedShutdown {
-			r.logger.Infof("Plugin shutdown triggered: %s", pendingReqMsg)
+			r.logger.Info("Plugin shutdown triggered")
 		} else {
-			r.logger.Warnf("Plugin terminated unexpectedly: %s", pendingReqMsg)
+			r.logger.Warn("Plugin terminated unexpectedly")
+		}
+
+		if reqCount := len(r.pendingRequests); reqCount > 0 {
+			r.logger.Infof("Cancelling %d pending request(s)", reqCount)
 		}
 
 		r.err = &Error{cause: err}
 		close(r.errChannel)
-	}
+	})
 }
 
 // processResponses sends responses to its channel (identified by response.id)

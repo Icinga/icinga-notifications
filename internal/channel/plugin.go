@@ -1,19 +1,77 @@
 package channel
 
 import (
+	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"github.com/icinga/icinga-notifications/internal/contracts"
-	"github.com/icinga/icinga-notifications/internal/event"
-	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"github.com/icinga/icinga-notifications/pkg/rpc"
+	"github.com/icinga/icingadb/pkg/icingadb"
+	"github.com/icinga/icingadb/pkg/logging"
+	"go.uber.org/zap"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
-func (c *Channel) GetInfo() (*plugin.Info, error) {
-	result, err := c.rpcCall(plugin.MethodGetInfo, nil)
+type Plugin struct {
+	cmd    *exec.Cmd
+	rpc    *rpc.RPC
+	mu     sync.Mutex
+	logger *zap.SugaredLogger
+}
+
+// NewPlugin starts and returns a new plugin instance. If the start of the plugin fails, an error is returned
+func NewPlugin(pluginName string, logger *zap.SugaredLogger) (*Plugin, error) {
+	p := &Plugin{logger: logger}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	file := filepath.Join(daemon.Config().ChannelPluginDir, pluginName)
+	cmd := exec.Command(file)
+
+	writer, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+
+	reader, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	errPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	if err = cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start cmd: %w", err)
+	}
+	p.logger.Info("Successfully started channel plugin")
+
+	go forwardLogs(errPipe, p.logger)
+
+	p.cmd = cmd
+	p.rpc = rpc.NewRPC(writer, reader, p.logger)
+
+	return p, nil
+}
+
+// Stop stops the plugin
+func (p *Plugin) Stop() {
+	go terminate(p)
+}
+
+// GetInfo sends the PluginInfo request and returns the response or an error if an error occurred
+func (p *Plugin) GetInfo() (*plugin.Info, error) {
+	result, err := p.rpc.Call(plugin.MethodGetInfo, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -27,60 +85,96 @@ func (c *Channel) GetInfo() (*plugin.Info, error) {
 	return info, nil
 }
 
-func (c *Channel) SetConfig(config string) error {
-	_, err := c.rpcCall(plugin.MethodSetConfig, json.RawMessage(config))
+// SetConfig sends the setConfig request with given config, returns an error if an error occurred
+func (p *Plugin) SetConfig(config string) error {
+	_, err := p.rpc.Call(plugin.MethodSetConfig, json.RawMessage(config))
 
 	return err
 }
 
-func (c *Channel) SendNotification(contact *recipient.Contact, i contracts.Incident, ev *event.Event, icingaweb2Url string) error {
-	contactStruct := &plugin.Contact{FullName: contact.FullName}
-	for _, addr := range contact.Addresses {
-		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
-	}
-
-	if !strings.HasSuffix(icingaweb2Url, "/") {
-		icingaweb2Url += "/"
-	}
-
-	req := plugin.NotificationRequest{
-		Contact: contactStruct,
-		Object: &plugin.Object{
-			Name:      i.ObjectDisplayName(),
-			Url:       ev.URL,
-			Tags:      ev.Tags,
-			ExtraTags: ev.ExtraTags,
-		},
-		Incident: &plugin.Incident{
-			Id:  i.ID(),
-			Url: fmt.Sprintf("%snotifications/incident?id=%d", icingaweb2Url, i.ID()),
-		},
-		Event: &plugin.Event{
-			Time:     ev.Time,
-			Type:     ev.Type,
-			Severity: ev.Severity.String(),
-			Username: ev.Username,
-			Message:  ev.Message,
-		},
-	}
-
+// SendNotification sends the notification, returns an error if fails
+func (p *Plugin) SendNotification(req *plugin.NotificationRequest) error {
 	params, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("failed to prepare request params: %w", err)
 	}
 
-	_, err = c.rpcCall(plugin.MethodSendNotification, params)
+	_, err = p.rpc.Call(plugin.MethodSendNotification, params)
 
 	return err
 }
 
-func (c *Channel) rpcCall(method string, params json.RawMessage) (json.RawMessage, error) {
-	result, err := c.rpc.Call(method, params)
+func terminate(p *Plugin) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	var rpcErr *rpc.Error
-	if errors.As(err, &rpcErr) {
-		c.Stop()
+	p.logger.Debug("Stopping the channel plugin")
+
+	_ = p.rpc.Close()
+	timer := time.AfterFunc(5*time.Second, func() {
+		p.logger.Debug("killing the channel plugin")
+		_ = p.cmd.Process.Kill()
+	})
+
+	<-p.rpc.Done()
+	timer.Stop()
+	p.logger.Debug("Successfully stopped channel plugin")
+}
+
+func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
+	scanner := bufio.NewScanner(errPipe)
+	for scanner.Scan() {
+		logger.Info(scanner.Text())
 	}
 
-	return result, err
+	if err := scanner.Err(); err != nil {
+		logger.Errorw("Failed to scan stderr line", zap.Error(err))
+	}
+}
+
+// UpsertPlugins upsert the available_channel_type table with working plugins
+func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *icingadb.DB) {
+	files, err := os.ReadDir(channelPluginDir)
+	if err != nil {
+		logger.Errorw("Failed to read the channel plugin directory", zap.Error(err))
+	}
+
+	var pluginInfos []*plugin.Info
+	var pluginTypes []string
+
+	for _, file := range files {
+		pluginLogger := logger.With(zap.String("name", file.Name()))
+		p, err := NewPlugin(file.Name(), pluginLogger)
+		if err != nil {
+			pluginLogger.Errorw("Failed to start plugin", zap.Error(err))
+			continue
+		}
+
+		info, err := p.GetInfo()
+		if err != nil {
+			p.logger.Error(err)
+			p.Stop()
+			continue
+		}
+		p.Stop()
+
+		pluginTypes = append(pluginTypes, file.Name())
+		pluginInfos = append(pluginInfos, info)
+	}
+
+	if len(pluginInfos) == 0 {
+		logger.Info("No working plugin found")
+		return
+	}
+
+	stmt, _ := db.BuildUpsertStmt(&plugin.Info{})
+	_, err = db.NamedExec(stmt, pluginInfos)
+	if err != nil {
+		logger.Errorw("Failed to upsert channel plugins", zap.Error(err))
+	} else {
+		logger.Infof(
+			"Successfully upserted %d plugins: %s",
+			len(pluginInfos),
+			strings.Join(pluginTypes, ", "))
+	}
 }
