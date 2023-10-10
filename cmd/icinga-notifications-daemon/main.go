@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal"
+	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/listener"
@@ -77,6 +78,8 @@ func main() {
 			logger.Fatalw("cannot connect to database", zap.Error(err))
 		}
 	}
+
+	channel.UpsertPlugins(conf.ChannelPluginDir, logs.GetChildLogger("channel"), db)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

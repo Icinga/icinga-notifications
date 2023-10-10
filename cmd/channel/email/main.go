@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
+	"github.com/icinga/icingadb/pkg/types"
 	"net"
 	"net/smtp"
 	"os"
@@ -80,7 +83,72 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *Email) GetInfo() *plugin.Info {
-	return &plugin.Info{Name: "Email"}
+	elements := []*plugin.ConfigOption{
+		{
+			Name: "host",
+			Type: "string",
+			Label: map[string]string{
+				"en_US": "SMTP Host",
+				"de_DE": "SMTP Host",
+			},
+		},
+		{
+			Name: "port",
+			Type: "number",
+			Label: map[string]string{
+				"en_US": "SMTP Port",
+				"de_DE": "SMTP Port",
+			},
+			Min: types.Int{NullInt64: sql.NullInt64{Int64: 0, Valid: true}},
+			Max: types.Int{NullInt64: sql.NullInt64{Int64: 65535, Valid: true}},
+		},
+		{
+			Name: "from",
+			Type: "string",
+			Label: map[string]string{
+				"en_US": "From",
+				"de_DE": "Von",
+			},
+			Placeholder: "icinga@example.com",
+		},
+		{
+			Name: "password",
+			Type: "secret",
+			Label: map[string]string{
+				"en_US": "Password",
+				"de_DE": "Passwort",
+			},
+		},
+		{
+			Name: "tls",
+			Type: "bool",
+			Label: map[string]string{
+				"en_US": "TLS / SSL",
+				"de_DE": "TLS / SSL",
+			},
+		},
+		{
+			Name: "tls_certcheck",
+			Type: "bool",
+			Label: map[string]string{
+				"en_US": "Certificate Check",
+				"de_DE": "Zertifikat prüfen",
+			},
+		},
+	}
+
+	configAttrs, err := json.Marshal(elements)
+	if err != nil {
+		panic(err)
+	}
+
+	return &plugin.Info{
+		Type:             "email",
+		Name:             "Email",
+		Version:          internal.Version.Version,
+		Author:           "Icinga GmbH",
+		ConfigAttributes: configAttrs,
+	}
 }
 
 func (ch *Email) GetServer() string {
