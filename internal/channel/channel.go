@@ -29,7 +29,7 @@ func (c *Channel) StartPlugin(pluginDir string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.cmd != nil {
+	if c.cmd != nil && c.rpc.Err() == nil {
 		return nil
 	}
 
