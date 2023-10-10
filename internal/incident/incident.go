@@ -439,7 +439,7 @@ func (i *Incident) notifyContacts(ctx context.Context, tx *sqlx.Tx, ev *event.Ev
 				continue
 			}
 
-			err = ch.StartPlugin(i.configFile.ChannelPluginDir)
+			err = ch.Start(i.configFile.ChannelPluginDir)
 			if err != nil {
 				i.logger.Errorw("Could not initialize channel", zap.String("type", chType), zap.Error(err))
 				continue

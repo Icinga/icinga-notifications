@@ -79,7 +79,7 @@ func (c *Channel) rpcCall(method string, params json.RawMessage) (json.RawMessag
 
 	var rpcErr *rpc.Error
 	if errors.As(err, &rpcErr) {
-		c.ResetPlugin()
+		c.Stop()
 	}
 
 	return result, err

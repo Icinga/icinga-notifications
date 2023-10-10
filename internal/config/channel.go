@@ -67,8 +67,8 @@ func (r *RuntimeConfig) applyPendingChannels() {
 				currentChannel.Name = pendingChannel.Name
 				currentChannel.Config = pendingChannel.Config
 
-				currentChannel.Logger.Info("Resetting the channel because the config has been changed")
-				currentChannel.ResetPlugin()
+				currentChannel.Logger.Info("Stopping the channel plugin because the config has been changed")
+				currentChannel.Stop()
 			}
 		} else {
 			r.Channels[typ] = pendingChannel

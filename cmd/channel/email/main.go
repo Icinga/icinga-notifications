@@ -51,7 +51,7 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 	err := json.Unmarshal(jsonStr, ch)
 	if err != nil {
-		return fmt.Errorf("failed to load config:%s %w", jsonStr, err)
+		return fmt.Errorf("failed to load config: %s %w", jsonStr, err)
 	}
 
 	if ch.Host == "" {
