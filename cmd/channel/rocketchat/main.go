@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"net/http"
 	"time"
@@ -80,5 +81,47 @@ func (ch *RocketChat) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *RocketChat) GetInfo() *plugin.Info {
-	return &plugin.Info{Name: "Rocket.Chat"}
+
+	elements := []*plugin.ConfigOption{
+		{
+			Name: "url",
+			Type: "string",
+			Label: map[string]string{
+				"en_US": "Rocket.Chat URL",
+				"de_DE": "Rocket.Chat URL",
+			},
+			Required: true,
+		},
+		{
+			Name: "user_id",
+			Type: "string",
+			Label: map[string]string{
+				"en_US": "User ID",
+				"de_DE": "Benutzer ID",
+			},
+			Required: true,
+		},
+		{
+			Name: "token",
+			Type: "secret",
+			Label: map[string]string{
+				"en_US": "Personal Access Token",
+				"de_DE": "Persönliches Zugangstoken",
+			},
+			Required: true,
+		},
+	}
+
+	configAttrs, err := json.Marshal(elements)
+	if err != nil {
+		panic(err)
+	}
+
+	return &plugin.Info{
+		Type:             "rocketchat",
+		Name:             "Rocket.Chat",
+		Version:          internal.Version.Version,
+		Author:           "Icinga GmbH",
+		ConfigAttributes: configAttrs,
+	}
 }
