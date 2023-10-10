@@ -25,7 +25,7 @@ type Channel struct {
 	mu     sync.Mutex
 }
 
-func (c *Channel) StartPlugin(pluginDir string) error {
+func (c *Channel) Start(pluginDir string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -79,12 +79,12 @@ func (c *Channel) StartPlugin(pluginDir string) error {
 	return nil
 }
 
-func (c *Channel) ResetPlugin() {
+func (c *Channel) Stop() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.cmd == nil {
-		c.Logger.Debug("channel has already been reset")
+		c.Logger.Debug("channel plugin has already been stopped")
 		return
 	}
 
@@ -93,7 +93,7 @@ func (c *Channel) ResetPlugin() {
 	c.cmd = nil
 	c.rpc = nil
 
-	c.Logger.Debug("reset channel successfully")
+	c.Logger.Debug("Stopped channel plugin successfully")
 }
 
 func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
@@ -114,15 +114,15 @@ func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
 
 // run as go routine to terminate given channel
 func (c *Channel) terminate(cmd *exec.Cmd, rpc *rpc.RPC) {
-	c.Logger.Debug("terminating channel")
+	c.Logger.Debug("terminating channel plugin")
 	_ = rpc.Close()
 
 	timer := time.AfterFunc(5*time.Second, func() {
-		c.Logger.Debug("killing the channel")
+		c.Logger.Debug("killing the channel plugin")
 		_ = cmd.Process.Kill()
 	})
 
 	_ = cmd.Wait()
 	timer.Stop()
-	c.Logger.Debug("Channel terminated successfully")
+	c.Logger.Debug("Channel plugin terminated successfully")
 }
