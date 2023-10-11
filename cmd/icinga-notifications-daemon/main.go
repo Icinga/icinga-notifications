@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
+	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/listener"
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/utils"
@@ -43,11 +44,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	conf, err := config.FromFile(configPath)
+	err := daemon.LoadConfig(configPath)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "cannot load config:", err)
 		os.Exit(1)
 	}
+
+	conf := daemon.Config()
 
 	logs, err := logging.NewLogging(
 		"icinga-notifications",
@@ -85,7 +88,7 @@ func main() {
 
 	go runtimeConfig.PeriodicUpdates(ctx, 1*time.Second)
 
-	if err := listener.NewListener(db, conf, runtimeConfig, logs).Run(ctx); err != nil {
+	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {
 		logger.Errorw("Listener has finished with an error", zap.Error(err))
 	} else {
 		logger.Info("Listener has finished")

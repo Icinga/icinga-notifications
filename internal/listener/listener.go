@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
+	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/object"
@@ -18,7 +19,6 @@ import (
 )
 
 type Listener struct {
-	configFile    *config.ConfigFile
 	db            *icingadb.DB
 	logger        *logging.Logger
 	runtimeConfig *config.RuntimeConfig
@@ -27,9 +27,8 @@ type Listener struct {
 	mux  http.ServeMux
 }
 
-func NewListener(db *icingadb.DB, configFile *config.ConfigFile, runtimeConfig *config.RuntimeConfig, logs *logging.Logging) *Listener {
+func NewListener(db *icingadb.DB, runtimeConfig *config.RuntimeConfig, logs *logging.Logging) *Listener {
 	l := &Listener{
-		configFile:    configFile,
 		db:            db,
 		logger:        logs.GetChildLogger("listener"),
 		logs:          logs,
@@ -53,9 +52,10 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 //
 // An error is returned in every case except for a gracefully context-based shutdown without hitting the time limit.
 func (l *Listener) Run(ctx context.Context) error {
-	l.logger.Infof("Starting listener on http://%s", l.configFile.Listen)
+	listenAddr := daemon.Config().Listen
+	l.logger.Infof("Starting listener on http://%s", listenAddr)
 	server := &http.Server{
-		Addr:         l.configFile.Listen,
+		Addr:         listenAddr,
 		Handler:      l,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -130,7 +130,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
-	currentIncident, created, err := incident.GetCurrent(ctx, l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, l.configFile, createIncident)
+	currentIncident, created, err := incident.GetCurrent(ctx, l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, createIncident)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintln(w, err)
@@ -176,7 +176,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 // checkDebugPassword checks if the valid debug password was provided. If there is no password configured or the
 // supplied password is incorrect, it sends an error code and returns false. True is returned if access is allowed.
 func (l *Listener) checkDebugPassword(w http.ResponseWriter, r *http.Request) bool {
-	expectedPassword := l.configFile.DebugPassword
+	expectedPassword := daemon.Config().DebugPassword
 	if expectedPassword == "" {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = fmt.Fprintln(w, "config dump disables, no debug-password set in config")

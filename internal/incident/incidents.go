@@ -20,7 +20,7 @@ var (
 
 func GetCurrent(
 	ctx context.Context, db *icingadb.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
-	configFile *config.ConfigFile, create bool,
+	create bool,
 ) (*Incident, bool, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
@@ -35,7 +35,6 @@ func GetCurrent(
 			db:              db,
 			logger:          logger.With(zap.String("object", obj.DisplayName())),
 			runtimeConfig:   runtimeConfig,
-			configFile:      configFile,
 			Recipients:      map[recipient.Key]*RecipientState{},
 			EscalationState: map[escalationID]*EscalationState{},
 			Rules:           map[ruleID]struct{}{},

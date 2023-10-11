@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/contracts"
+	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -37,7 +38,6 @@ type Incident struct {
 	db            *icingadb.DB
 	logger        *zap.SugaredLogger
 	runtimeConfig *config.RuntimeConfig
-	configFile    *config.ConfigFile
 
 	sync.Mutex
 }
@@ -423,14 +423,14 @@ func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, ch
 
 	i.logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, chType), zap.Int64("channel_id", chID))
 
-	err := ch.Start(i.configFile.ChannelPluginDir)
+	err := ch.Start()
 	if err != nil {
 		i.logger.Errorw("Could not initialize channel", zap.String("type", chType), zap.Error(err))
 
 		return fmt.Errorf("could not initialize channel type %s: %w", chType, err)
 	}
 
-	err = ch.SendNotification(contact, i, ev, i.configFile.Icingaweb2URL)
+	err = ch.SendNotification(contact, i, ev, daemon.Config().Icingaweb2URL)
 	if err != nil {
 		i.logger.Errorw("Failed to send via channel", zap.String("type", chType), zap.Error(err))
 
