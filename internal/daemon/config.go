@@ -1,6 +1,7 @@
-package config
+package daemon
 
 import (
+	"errors"
 	"github.com/creasty/defaults"
 	"github.com/goccy/go-yaml"
 	icingadbConfig "github.com/icinga/icingadb/pkg/config"
@@ -16,7 +17,31 @@ type ConfigFile struct {
 	Logging          icingadbConfig.Logging  `yaml:"logging"`
 }
 
-func FromFile(path string) (*ConfigFile, error) {
+// config holds the configuration state as a singleton. It is used from LoadConfig and Config
+var config *ConfigFile
+
+// LoadConfig loads the daemon config from given path. Call it only once when starting the daemon.
+func LoadConfig(path string) error {
+	if config != nil {
+		return errors.New("config already set")
+	}
+
+	cfg, err := fromFile(path)
+	if err != nil {
+		return err
+	}
+
+	config = cfg
+
+	return nil
+}
+
+// Config returns the config that was loaded while starting the daemon
+func Config() *ConfigFile {
+	return config
+}
+
+func fromFile(path string) (*ConfigFile, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

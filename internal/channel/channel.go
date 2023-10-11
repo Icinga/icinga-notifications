@@ -3,6 +3,7 @@ package channel
 import (
 	"bufio"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/pkg/rpc"
 	"go.uber.org/zap"
 	"io"
@@ -25,7 +26,7 @@ type Channel struct {
 	mu     sync.Mutex
 }
 
-func (c *Channel) Start(pluginDir string) error {
+func (c *Channel) Start() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -37,7 +38,7 @@ func (c *Channel) Start(pluginDir string) error {
 		return fmt.Errorf("channel type must only contain a-zA-Z0-9, %q given", c.Type)
 	}
 
-	path := filepath.Join(pluginDir, c.Type)
+	path := filepath.Join(daemon.Config().ChannelPluginDir, c.Type)
 
 	cmd := exec.Command(path)
 
