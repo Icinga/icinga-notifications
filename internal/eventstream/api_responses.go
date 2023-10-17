@@ -116,6 +116,20 @@ func (objQueriesRes *ObjectQueriesResult) UnmarshalJSON(bytes []byte) error {
 	return json.Unmarshal(responseAttrs, objQueriesRes.Attrs)
 }
 
+// The following constants list all implemented Icinga 2 API Event Stream Types to be used as a const instead of
+// (mis)typing the name at multiple places.
+const (
+	typeStateChange            = "StateChange"
+	typeAcknowledgementSet     = "AcknowledgementSet"
+	typeAcknowledgementCleared = "AcknowledgementCleared"
+	typeCommentAdded           = "CommentAdded"
+	typeCommentRemoved         = "CommentRemoved"
+	typeDowntimeAdded          = "DowntimeAdded"
+	typeDowntimeRemoved        = "DowntimeRemoved"
+	typeDowntimeStarted        = "DowntimeStarted"
+	typeDowntimeTriggered      = "DowntimeTriggered"
+)
+
 // StateChange represents the Icinga 2 API Event Stream StateChange response for host/service state changes.
 //
 // NOTE:
@@ -236,23 +250,23 @@ func UnmarshalEventStreamResponse(bytes []byte) (any, error) {
 
 	var resp any
 	switch responseType {
-	case "StateChange":
+	case typeStateChange:
 		resp = new(StateChange)
-	case "AcknowledgementSet":
+	case typeAcknowledgementSet:
 		resp = new(AcknowledgementSet)
-	case "AcknowledgementCleared":
+	case typeAcknowledgementCleared:
 		resp = new(AcknowledgementCleared)
-	case "CommentAdded":
+	case typeCommentAdded:
 		resp = new(CommentAdded)
-	case "CommentRemoved":
+	case typeCommentRemoved:
 		resp = new(CommentRemoved)
-	case "DowntimeAdded":
+	case typeDowntimeAdded:
 		resp = new(DowntimeAdded)
-	case "DowntimeRemoved":
+	case typeDowntimeRemoved:
 		resp = new(DowntimeRemoved)
-	case "DowntimeStarted":
+	case typeDowntimeStarted:
 		resp = new(DowntimeStarted)
-	case "DowntimeTriggered":
+	case typeDowntimeTriggered:
 		resp = new(DowntimeTriggered)
 	default:
 		return nil, fmt.Errorf("unsupported type %q", responseType)

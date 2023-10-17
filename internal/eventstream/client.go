@@ -21,6 +21,8 @@ type Client struct {
 	ApiBasicAuthPass string
 	ApiHttpTransport http.Transport
 
+	IcingaWebRoot string
+
 	Ctx context.Context
 
 	CallbackFn func(event event.Event)
@@ -28,19 +30,8 @@ type Client struct {
 	LastTimestamp time.Time
 }
 
-func (client *Client) uniqueQueueName() string {
-	buff := make([]byte, 16)
-	_, err := rand.Read(buff)
-	if err != nil {
-		// This error SHOULD NOT happen. Otherwise, it might be wise to crash.
-		panic(err)
-	}
-	return fmt.Sprintf("icinga-notifications-%x", buff)
-}
-
-func (client *Client) handleStateChange(stateChange *StateChange) error {
-	client.LastTimestamp = stateChange.Timestamp.Time
-
+// eventStreamHandleStateChange acts on a received Event Stream StateChange object.
+func (client *Client) eventStreamHandleStateChange(stateChange *StateChange) (event.Event, error) {
 	var (
 		eventName      string
 		eventUrlSuffix string
@@ -50,7 +41,7 @@ func (client *Client) handleStateChange(stateChange *StateChange) error {
 
 	if stateChange.Service != "" {
 		eventName = stateChange.Host + "!" + stateChange.Service
-		eventUrlSuffix = "/icingadb/service?q=" + url.QueryEscape(stateChange.Service) + "&host.name=" + url.QueryEscape(stateChange.Host)
+		eventUrlSuffix = "/icingadb/service?name=" + url.PathEscape(stateChange.Service) + "&host.name=" + url.PathEscape(stateChange.Host)
 		eventTags = map[string]string{
 			"host":    stateChange.Host,
 			"service": stateChange.Service,
@@ -67,7 +58,7 @@ func (client *Client) handleStateChange(stateChange *StateChange) error {
 		}
 	} else {
 		eventName = stateChange.Host
-		eventUrlSuffix = "/icingadb/host?name=" + url.QueryEscape(stateChange.Host)
+		eventUrlSuffix = "/icingadb/host?name=" + url.PathEscape(stateChange.Host)
 		eventTags = map[string]string{
 			"host": stateChange.Host,
 		}
@@ -85,32 +76,71 @@ func (client *Client) handleStateChange(stateChange *StateChange) error {
 		Time:      stateChange.Timestamp.Time,
 		SourceId:  IcingaNotificationsEventSourceId,
 		Name:      eventName,
-		URL:       client.ApiHost + eventUrlSuffix,
+		URL:       client.IcingaWebRoot + eventUrlSuffix,
 		Tags:      eventTags,
 		ExtraTags: nil, // TODO
 		Type:      event.TypeState,
 		Severity:  eventSeverity,
-		Username:  "", // TODO: a StateChange has no user per se
+		Username:  "", // NOTE: a StateChange has no user per se
 		Message:   stateChange.CheckResult.Output,
 	}
-	client.CallbackFn(ev)
-
-	return nil
+	return ev, nil
 }
 
+// eventStreamHandleAcknowledgementSet acts on a received Event Stream AcknowledgementSet object.
+func (client *Client) eventStreamHandleAcknowledgementSet(ackSet *AcknowledgementSet) (event.Event, error) {
+	var (
+		eventName      string
+		eventUrlSuffix string
+		eventTags      map[string]string
+	)
+
+	if ackSet.Service != "" {
+		eventName = ackSet.Host + "!" + ackSet.Service
+		eventUrlSuffix = "/icingadb/service?name=" + url.PathEscape(ackSet.Service) + "&host.name=" + url.PathEscape(ackSet.Host)
+		eventTags = map[string]string{
+			"host":    ackSet.Host,
+			"service": ackSet.Service,
+		}
+	} else {
+		eventName = ackSet.Host
+		eventUrlSuffix = "/icingadb/host?name=" + url.PathEscape(ackSet.Host)
+		eventTags = map[string]string{
+			"host": ackSet.Host,
+		}
+	}
+
+	ev := event.Event{
+		Time:      ackSet.Timestamp.Time,
+		SourceId:  IcingaNotificationsEventSourceId,
+		Name:      eventName,
+		URL:       client.IcingaWebRoot + eventUrlSuffix,
+		Tags:      eventTags,
+		ExtraTags: nil, // TODO
+		Type:      event.TypeAcknowledgement,
+		Username:  ackSet.Author,
+		Message:   ackSet.Comment,
+	}
+	return ev, nil
+}
+
+// ListenEventStream subscribes to the Icinga 2 API Event Stream and handles received objects.
 func (client *Client) ListenEventStream() error {
+	queueNameRndBuff := make([]byte, 16)
+	_, _ = rand.Read(queueNameRndBuff)
+
 	reqBody, err := json.Marshal(map[string]any{
-		"queue": client.uniqueQueueName(),
+		"queue": fmt.Sprintf("icinga-notifications-%x", queueNameRndBuff),
 		"types": []string{
-			"StateChange",
-			// "AcknowledgementSet",
-			// "AcknowledgementCleared",
-			// "CommentAdded",
-			// "CommentRemoved",
-			// "DowntimeAdded",
-			// "DowntimeRemoved",
-			// "DowntimeStarted",
-			// "DowntimeTriggered",
+			typeStateChange,
+			typeAcknowledgementSet,
+			// typeAcknowledgementCleared,
+			// typeCommentAdded,
+			// typeCommentRemoved,
+			// typeDowntimeAdded,
+			// typeDowntimeRemoved,
+			// typeDowntimeStarted,
+			// typeDowntimeTriggered,
 		},
 	})
 	if err != nil {
@@ -141,10 +171,12 @@ func (client *Client) ListenEventStream() error {
 			return err
 		}
 
+		var ev event.Event
 		switch resp.(type) {
 		case *StateChange:
-			err = client.handleStateChange(resp.(*StateChange))
-		// case *AcknowledgementSet:
+			ev, err = client.eventStreamHandleStateChange(resp.(*StateChange))
+		case *AcknowledgementSet:
+			ev, err = client.eventStreamHandleAcknowledgementSet(resp.(*AcknowledgementSet))
 		// case *AcknowledgementCleared:
 		// case *CommentAdded:
 		// case *CommentRemoved:
@@ -158,6 +190,9 @@ func (client *Client) ListenEventStream() error {
 		if err != nil {
 			return err
 		}
+
+		client.LastTimestamp = ev.Time
+		client.CallbackFn(ev)
 	}
 	err = lineScanner.Err()
 	if err != nil {
