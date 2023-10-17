@@ -8,12 +8,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icingadb/pkg/logging"
+	"hash/fnv"
+	"math"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
+	"sync"
 	"time"
 )
-
-const IcingaNotificationsEventSourceId = 1 // TODO
 
 type Client struct {
 	ApiHost          string
@@ -21,13 +25,49 @@ type Client struct {
 	ApiBasicAuthPass string
 	ApiHttpTransport http.Transport
 
-	IcingaWebRoot string
-
-	Ctx context.Context
+	IcingaNotificationsEventSourceId int64
+	IcingaWebRoot                    string
 
 	CallbackFn func(event event.Event)
+	Ctx        context.Context
+	Logger     *logging.Logger
 
-	LastTimestamp time.Time
+	eventsHandlerMutex  sync.RWMutex
+	eventsRingBuffer    []uint64
+	eventsRingBufferPos int
+	eventsLastTs        time.Time
+}
+
+// handleEvent checks and dispatches generated Events.
+func (client *Client) handleEvent(ev event.Event, source string) {
+	h := fnv.New64a()
+	_ = json.NewEncoder(h).Encode(ev)
+	evHash := h.Sum64()
+
+	client.Logger.Debugf("Start handling event %s as %x received from %s", ev.String(), evHash, source)
+	client.Logger.Debugf("%#v", ev)
+
+	client.eventsHandlerMutex.RLock()
+	inCache := slices.Contains(client.eventsRingBuffer, evHash)
+	client.eventsHandlerMutex.RUnlock()
+	if inCache {
+		client.Logger.Warnf("Event %s is already in cache and will not be processed", ev.String())
+		return
+	}
+
+	client.eventsHandlerMutex.Lock()
+	client.eventsRingBuffer[client.eventsRingBufferPos] = evHash
+	client.eventsRingBufferPos = (client.eventsRingBufferPos + 1) % len(client.eventsRingBuffer)
+
+	if ev.Time.Before(client.eventsLastTs) {
+		client.Logger.Warnf("Received Event %s generated before last known timestamp %v; turn back the clock",
+			ev.String(), client.eventsLastTs)
+	}
+	client.eventsLastTs = ev.Time
+	client.eventsHandlerMutex.Unlock()
+
+	client.Logger.Debugf("Forward event %s to callback function", ev.String())
+	client.CallbackFn(ev)
 }
 
 // eventStreamHandleStateChange acts on a received Event Stream StateChange object.
@@ -74,7 +114,7 @@ func (client *Client) eventStreamHandleStateChange(stateChange *StateChange) (ev
 
 	ev := event.Event{
 		Time:      stateChange.Timestamp.Time,
-		SourceId:  IcingaNotificationsEventSourceId,
+		SourceId:  client.IcingaNotificationsEventSourceId,
 		Name:      eventName,
 		URL:       client.IcingaWebRoot + eventUrlSuffix,
 		Tags:      eventTags,
@@ -112,7 +152,7 @@ func (client *Client) eventStreamHandleAcknowledgementSet(ackSet *Acknowledgemen
 
 	ev := event.Event{
 		Time:      ackSet.Timestamp.Time,
-		SourceId:  IcingaNotificationsEventSourceId,
+		SourceId:  client.IcingaNotificationsEventSourceId,
 		Name:      eventName,
 		URL:       client.IcingaWebRoot + eventUrlSuffix,
 		Tags:      eventTags,
@@ -124,11 +164,11 @@ func (client *Client) eventStreamHandleAcknowledgementSet(ackSet *Acknowledgemen
 	return ev, nil
 }
 
-// ListenEventStream subscribes to the Icinga 2 API Event Stream and handles received objects.
+// listenEventStream subscribes to the Icinga 2 API Event Stream and handles received objects.
 //
 // In case of a parsing or handling error, this error will be returned. If the server closes the connection, nil will
 // be returned.
-func (client *Client) ListenEventStream() error {
+func (client *Client) listenEventStream() error {
 	queueNameRndBuff := make([]byte, 16)
 	_, _ = rand.Read(queueNameRndBuff)
 
@@ -195,8 +235,7 @@ func (client *Client) ListenEventStream() error {
 			return err
 		}
 
-		client.LastTimestamp = ev.Time
-		client.CallbackFn(ev)
+		client.handleEvent(ev, "Event Stream")
 	}
 	err = lineScanner.Err()
 	if err != nil {
@@ -241,12 +280,164 @@ func (client *Client) queryObjectsApi(objType string, payload map[string]any) ([
 	return objQueriesResults, nil
 }
 
-// QueryObjectApiSince retrieves all objects of the given type, e.g., "host" or "service", with a state change after the
+// queryObjectApiSince retrieves all objects of the given type, e.g., "host" or "service", with a state change after the
 // passed time.
-func (client *Client) QueryObjectApiSince(objType string, since time.Time) ([]ObjectQueriesResult, error) {
+func (client *Client) queryObjectApiSince(objType string, since time.Time) ([]ObjectQueriesResult, error) {
 	return client.queryObjectsApi(
 		objType+"s",
 		map[string]any{
 			"filter": fmt.Sprintf("%s.last_state_change>%f", objType, float64(since.UnixMicro())/1_000_000.0),
 		})
+}
+
+func (client *Client) checkMissedObjects(objType string) {
+	client.eventsHandlerMutex.RLock()
+	objQueriesResults, err := client.queryObjectApiSince(objType, client.eventsLastTs.Add(-time.Minute))
+	client.eventsHandlerMutex.RUnlock()
+
+	if err != nil {
+		client.Logger.Errorf("Quering %ss from API failed, %v", objType, err)
+		return
+	}
+
+	client.Logger.Infof("Querying %ss from API resulted in %d objects", objType, len(objQueriesResults))
+
+	for _, objQueriesResult := range objQueriesResults {
+		if client.Ctx.Err() != nil {
+			client.Logger.Info("Stopping %s API response processing as context is finished", objType)
+			return
+		}
+
+		attrs := objQueriesResult.Attrs.(*HostServiceRuntimeAttributes)
+
+		var (
+			eventUrlSuffix string
+			eventTags      map[string]string
+			eventSeverity  event.Severity
+		)
+
+		switch objQueriesResult.Type {
+		case "Host":
+			eventUrlSuffix = "/icingadb/host?name=" + url.PathEscape(attrs.Name)
+			eventTags = map[string]string{
+				"host": attrs.Name,
+			}
+			switch attrs.State {
+			case 0:
+				eventSeverity = event.SeverityOK
+			case 1:
+				eventSeverity = event.SeverityCrit
+			default:
+				eventSeverity = event.SeverityErr
+			}
+
+		case "Service":
+			if !strings.HasPrefix(attrs.Name, attrs.Host+"!") {
+				client.Logger.Errorf("Queried API Service object's name mismatches, %q is no prefix of %q", attrs.Host, attrs.Name)
+				continue
+			}
+			serviceName := attrs.Name[len(attrs.Host)+1:]
+			eventUrlSuffix = "/icingadb/service?name=" + url.PathEscape(serviceName) + "&host.name=" + url.PathEscape(attrs.Host)
+			eventTags = map[string]string{
+				"host":    attrs.Host,
+				"service": serviceName,
+			}
+			switch attrs.State {
+			case 0:
+				eventSeverity = event.SeverityOK
+			case 1:
+				eventSeverity = event.SeverityWarning
+			case 2:
+				eventSeverity = event.SeverityCrit
+			default:
+				eventSeverity = event.SeverityErr
+			}
+
+		default:
+			client.Logger.Errorf("Querying API delivered a %q object when expecting %s", objQueriesResult.Type, objType)
+			continue
+		}
+
+		ev := event.Event{
+			Time:      attrs.LastStateChange.Time,
+			SourceId:  client.IcingaNotificationsEventSourceId,
+			Name:      attrs.Name,
+			URL:       client.IcingaWebRoot + eventUrlSuffix,
+			Tags:      eventTags,
+			ExtraTags: nil, // TODO, same as Event Stream insertion
+			Type:      event.TypeState,
+			Severity:  eventSeverity,
+			Username:  "", // NOTE: a StateChange has no user per se
+			Message:   attrs.LastCheckResult.Output,
+		}
+		client.handleEvent(ev, "API "+objType)
+	}
+}
+
+// reestablishApiConnection tries to access the Icinga 2 API with an exponential backoff.
+//
+// With 10 retries, it might block up to (2^10 - 1) * 10 / 1_000 = 10.23 seconds.
+func (client *Client) reestablishApiConnection() error {
+	const maxRetries = 10
+
+	req, err := http.NewRequestWithContext(client.Ctx, http.MethodGet, client.ApiHost+"/v1/", nil)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(client.ApiBasicAuthUser, client.ApiBasicAuthPass)
+
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		time.Sleep((time.Duration)(math.Exp2(float64(i))) * 10 * time.Millisecond)
+
+		client.Logger.Debugf("Try to reestablish an API connection, %d/%d tries..", i+1, maxRetries)
+
+		httpClient := &http.Client{Transport: &client.ApiHttpTransport}
+		res, err := httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			client.Logger.Debugf("API probing failed: %v", lastErr)
+			continue
+		}
+		_ = res.Body.Close()
+
+		if res.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("expected HTTP status %d, got %d", http.StatusOK, res.StatusCode)
+			client.Logger.Debugf("API probing failed: %v", lastErr)
+			continue
+		}
+		return nil
+	}
+	return fmt.Errorf("cannot query API backend in %d tries, %w", maxRetries, lastErr)
+}
+
+func (client *Client) Process() {
+	client.eventsRingBuffer = make([]uint64, 1024)
+	client.eventsRingBufferPos = 0
+
+	for {
+		client.Logger.Info("Start listening on Icinga 2 Event Stream..")
+		err := client.listenEventStream()
+		if err != nil {
+			client.Logger.Errorf("Event Stream processing failed: %v", err)
+		} else {
+			client.Logger.Warn("Event Stream closed stream; maybe Icinga 2 is reloading")
+		}
+
+		for {
+			if client.Ctx.Err() != nil {
+				client.Logger.Info("Abort Icinga 2 API reconnections as context is finished")
+				return
+			}
+
+			err := client.reestablishApiConnection()
+			if err == nil {
+				break
+			}
+			client.Logger.Errorf("Cannot reestablish an API connection: %v", err)
+		}
+
+		go client.checkMissedObjects("host")
+		go client.checkMissedObjects("service")
+	}
 }
