@@ -162,6 +162,7 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 						ExitStatus: 0,
 						Output:     "If you think last Tuesday was a drag, wait till you see what happens tomorrow!",
 					},
+					LastStateChange: Icinga2Time{time.UnixMicro(1697099900637215)},
 					DowntimeDepth:   0,
 					Acknowledgement: 0,
 				},
@@ -176,11 +177,13 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 				Type: "Service",
 				Attrs: &HostServiceRuntimeAttributes{
 					Name:  "docker-master!ssh",
+					Host:  "docker-master",
 					State: 2,
 					LastCheckResult: CheckResult{
 						ExitStatus: 2,
 						Output:     "connect to address 127.0.0.1 and port 22: Connection refused",
 					},
+					LastStateChange: Icinga2Time{time.UnixMicro(1697099896120829)},
 					DowntimeDepth:   0,
 					Acknowledgement: 1,
 				},
