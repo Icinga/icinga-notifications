@@ -125,6 +125,9 @@ func (client *Client) eventStreamHandleAcknowledgementSet(ackSet *Acknowledgemen
 }
 
 // ListenEventStream subscribes to the Icinga 2 API Event Stream and handles received objects.
+//
+// In case of a parsing or handling error, this error will be returned. If the server closes the connection, nil will
+// be returned.
 func (client *Client) ListenEventStream() error {
 	queueNameRndBuff := make([]byte, 16)
 	_, _ = rand.Read(queueNameRndBuff)
@@ -161,6 +164,7 @@ func (client *Client) ListenEventStream() error {
 	if err != nil {
 		return err
 	}
+	defer res.Body.Close()
 
 	lineScanner := bufio.NewScanner(res.Body)
 	for lineScanner.Scan() {
@@ -172,11 +176,11 @@ func (client *Client) ListenEventStream() error {
 		}
 
 		var ev event.Event
-		switch resp.(type) {
+		switch respT := resp.(type) {
 		case *StateChange:
-			ev, err = client.eventStreamHandleStateChange(resp.(*StateChange))
+			ev, err = client.eventStreamHandleStateChange(respT)
 		case *AcknowledgementSet:
-			ev, err = client.eventStreamHandleAcknowledgementSet(resp.(*AcknowledgementSet))
+			ev, err = client.eventStreamHandleAcknowledgementSet(respT)
 		// case *AcknowledgementCleared:
 		// case *CommentAdded:
 		// case *CommentRemoved:
@@ -200,4 +204,49 @@ func (client *Client) ListenEventStream() error {
 	}
 
 	return nil
+}
+
+// queryObjectsApi sends a query to the Icinga 2 API /v1/objects to receive data of the given objType.
+func (client *Client) queryObjectsApi(objType string, payload map[string]any) ([]ObjectQueriesResult, error) {
+	reqBody, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(client.Ctx, http.MethodPost, client.ApiHost+"/v1/objects/"+objType, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, err
+	}
+
+	req.SetBasicAuth(client.ApiBasicAuthUser, client.ApiBasicAuthPass)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Http-Method-Override", "GET")
+
+	httpClient := &http.Client{Transport: &client.ApiHttpTransport}
+	res, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	var objQueriesResults []ObjectQueriesResult
+	err = json.NewDecoder(res.Body).Decode(&struct {
+		Results *[]ObjectQueriesResult `json:"results"`
+	}{&objQueriesResults})
+	if err != nil {
+		return nil, err
+	}
+
+	return objQueriesResults, nil
+}
+
+// QueryObjectApiSince retrieves all objects of the given type, e.g., "host" or "service", with a state change after the
+// passed time.
+func (client *Client) QueryObjectApiSince(objType string, since time.Time) ([]ObjectQueriesResult, error) {
+	return client.queryObjectsApi(
+		objType+"s",
+		map[string]any{
+			"filter": fmt.Sprintf("%s.last_state_change>%f", objType, float64(since.UnixMicro())/1_000_000.0),
+		})
 }
