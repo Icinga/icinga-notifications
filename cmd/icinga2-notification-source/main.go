@@ -15,6 +15,7 @@ func main() {
 		ApiBasicAuthUser: "root",
 		ApiBasicAuthPass: "icinga",
 		ApiHttpTransport: http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+		IcingaWebRoot:    "http://localhost/icingaweb2",
 		Ctx:              context.Background(),
 		CallbackFn:       func(event event.Event) { fmt.Println(event.FullString()) },
 	}
