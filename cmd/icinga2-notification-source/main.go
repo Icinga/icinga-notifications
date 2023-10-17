@@ -7,6 +7,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/eventstream"
 	"net/http"
+	"time"
 )
 
 func main() {
@@ -19,5 +20,9 @@ func main() {
 		Ctx:              context.Background(),
 		CallbackFn:       func(event event.Event) { fmt.Println(event.FullString()) },
 	}
+
+	fmt.Println(client.QueryObjectApiSince("host", time.Now().Add(-time.Minute)))
+	fmt.Println(client.QueryObjectApiSince("service", time.Now().Add(-time.Minute)))
+
 	panic(client.ListenEventStream())
 }
