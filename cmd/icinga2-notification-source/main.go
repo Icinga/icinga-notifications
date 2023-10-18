@@ -8,11 +8,16 @@ import (
 	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
 	"net/http"
+	"os"
+	"os/signal"
 	"time"
 )
 
 func main() {
-	logs, err := logging.NewLogging("ici2-noma", zap.DebugLevel, logging.CONSOLE, nil, time.Second)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	logs, err := logging.NewLogging("ici2-noma", zap.InfoLevel, logging.CONSOLE, nil, time.Second)
 	if err != nil {
 		panic(err)
 	}
@@ -27,7 +32,7 @@ func main() {
 		IcingaNotificationsEventSourceId: 1,
 
 		CallbackFn: func(event.Event) { /* nop */ },
-		Ctx:        context.Background(),
+		Ctx:        ctx,
 		Logger:     logs.GetLogger(),
 	}
 	client.Process()
