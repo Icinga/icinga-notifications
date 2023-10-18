@@ -156,8 +156,9 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 				Name: "dummy-244",
 				Type: "Host",
 				Attrs: &HostServiceRuntimeAttributes{
-					Name:  "dummy-244",
-					State: 0,
+					Name:   "dummy-244",
+					Groups: []string{"app-network", "department-dev", "env-qa", "location-rome"},
+					State:  0,
 					LastCheckResult: CheckResult{
 						ExitStatus: 0,
 						Output:     "If you think last Tuesday was a drag, wait till you see what happens tomorrow!",
@@ -185,9 +186,10 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 				Name: "docker-master!ssh",
 				Type: "Service",
 				Attrs: &HostServiceRuntimeAttributes{
-					Name:  "docker-master!ssh",
-					Host:  "docker-master",
-					State: 2,
+					Name:   "docker-master!ssh",
+					Host:   "docker-master",
+					Groups: []string{},
+					State:  2,
 					LastCheckResult: CheckResult{
 						ExitStatus: 2,
 						Output:     "connect to address 127.0.0.1 and port 22: Connection refused",

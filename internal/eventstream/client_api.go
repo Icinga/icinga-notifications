@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -46,8 +47,8 @@ func (client *Client) queryObjectsApiDirect(objType, objName string) ([]ObjectQu
 }
 
 // queryObjectsApiQuery sends a query to the Icinga 2 API /v1/objects to receive data of the given objType.
-func (client *Client) queryObjectsApiQuery(objType string, payload map[string]any) ([]ObjectQueriesResult, error) {
-	reqBody, err := json.Marshal(payload)
+func (client *Client) queryObjectsApiQuery(objType string, query map[string]any) ([]ObjectQueriesResult, error) {
+	reqBody, err := json.Marshal(query)
 	if err != nil {
 		return nil, err
 	}
@@ -65,23 +66,44 @@ func (client *Client) queryObjectsApiQuery(objType string, payload map[string]an
 	return client.queryObjectsApi(req)
 }
 
-// queryObjectApiSince retrieves all objects of the given type, e.g., "host" or "service", with a state change after the
-// passed time.
-func (client *Client) queryObjectApiSince(objType string, since time.Time) ([]ObjectQueriesResult, error) {
-	return client.queryObjectsApiQuery(
-		objType,
-		map[string]any{
-			"filter": fmt.Sprintf("%s.last_state_change>%f", objType, float64(since.UnixMicro())/1_000_000.0),
-		})
+// fetchHostGroup fetches all Host Groups for this host.
+func (client *Client) fetchHostGroups(host string) ([]string, error) {
+	objQueriesResults, err := client.queryObjectsApiDirect("host", url.PathEscape(host))
+	if err != nil {
+		return nil, err
+	}
+	if len(objQueriesResults) != 1 {
+		return nil, fmt.Errorf("expected exactly one result for host %q instead of %d", host, len(objQueriesResults))
+	}
+
+	attrs := objQueriesResults[0].Attrs.(*HostServiceRuntimeAttributes)
+	return attrs.Groups, nil
+}
+
+// fetchServiceGroups fetches all Service Groups for this service on this host.
+func (client *Client) fetchServiceGroups(host, service string) ([]string, error) {
+	objQueriesResults, err := client.queryObjectsApiDirect("service", url.PathEscape(host)+"!"+url.PathEscape(service))
+	if err != nil {
+		return nil, err
+	}
+	if len(objQueriesResults) != 1 {
+		return nil, fmt.Errorf("expected exactly one result for service %q instead of %d", host+"!"+service, len(objQueriesResults))
+	}
+
+	attrs := objQueriesResults[0].Attrs.(*HostServiceRuntimeAttributes)
+	return attrs.Groups, nil
 }
 
 // checkMissedObjects fetches all objects of the requested objType (host or service) from the API and sends those to the
 // handleEvent method to be eventually dispatched to the callback.
 func (client *Client) checkMissedObjects(objType string) {
 	client.eventsHandlerMutex.RLock()
-	objQueriesResults, err := client.queryObjectApiSince(objType, client.eventsLastTs)
+	queryFilter := map[string]any{
+		"filter": fmt.Sprintf("%s.last_state_change>%f", objType, float64(client.eventsLastTs.UnixMicro())/1_000_000.0),
+	}
 	client.eventsHandlerMutex.RUnlock()
 
+	objQueriesResults, err := client.queryObjectsApiQuery(objType, queryFilter)
 	if err != nil {
 		client.Logger.Errorf("Quering %ss from API failed, %v", objType, err)
 		return
@@ -118,7 +140,11 @@ func (client *Client) checkMissedObjects(objType string) {
 			continue
 		}
 
-		ev := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, hostName, serviceName)
+		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, hostName, serviceName)
+		if err != nil {
+			client.Logger.Error("Failed to construct Event from %s API: %v", objType, err)
+			continue
+		}
 		client.handleEvent(ev, "API "+objType)
 	}
 }
