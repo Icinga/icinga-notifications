@@ -43,35 +43,71 @@ type Client struct {
 	eventsLastTs        time.Time
 }
 
-// buildHostServiceEvent constructs an event.Event based on a CheckResult, a Host or Service state, a Host name and an
-// optional Service name if the Event should represent a Service object.
-func (client *Client) buildHostServiceEvent(result CheckResult, state int, hostName, serviceName string) (*event.Event, error) {
+// buildCommonEvent creates an event.Event based on Host and (optional) Service attributes to be specified later.
+//
+// The following fields will NOT be populated and might be altered later:
+//   - Time
+//   - Type
+//   - Severity
+//   - Username
+//   - Message
+//   - ID
+func (client *Client) buildCommonEvent(host, service string) (*event.Event, error) {
 	var (
 		eventName      string
 		eventUrlSuffix string
 		eventTags      map[string]string
 		eventExtraTags = make(map[string]string)
-		eventSeverity  event.Severity
 	)
 
-	if serviceName != "" {
-		eventName = hostName + "!" + serviceName
-
-		eventUrlSuffix = "/icingadb/service?name=" + url.PathEscape(serviceName) + "&host.name=" + url.PathEscape(hostName)
+	if service != "" {
+		eventName = host + "!" + service
+		eventUrlSuffix = "/icingadb/service?name=" + url.PathEscape(service) + "&host.name=" + url.PathEscape(host)
 
 		eventTags = map[string]string{
-			"host":    hostName,
-			"service": serviceName,
+			"host":    host,
+			"service": service,
 		}
 
-		serviceGroups, err := client.fetchServiceGroups(hostName, serviceName)
+		serviceGroups, err := client.fetchServiceGroups(host, service)
 		if err != nil {
 			return nil, err
 		}
 		for _, serviceGroup := range serviceGroups {
 			eventExtraTags["servicegroup/"+serviceGroup] = ""
 		}
+	} else {
+		eventName = host
+		eventUrlSuffix = "/icingadb/host?name=" + url.PathEscape(host)
 
+		eventTags = map[string]string{
+			"host": host,
+		}
+	}
+
+	hostGroups, err := client.fetchHostGroups(host)
+	if err != nil {
+		return nil, err
+	}
+	for _, hostGroup := range hostGroups {
+		eventExtraTags["hostgroup/"+hostGroup] = ""
+	}
+
+	return &event.Event{
+		SourceId:  client.IcingaNotificationsEventSourceId,
+		Name:      eventName,
+		URL:       client.IcingaWebRoot + eventUrlSuffix,
+		Tags:      eventTags,
+		ExtraTags: eventExtraTags,
+	}, nil
+}
+
+// buildHostServiceEvent constructs an event.Event based on a CheckResult, a Host or Service state, a Host name and an
+// optional Service name if the Event should represent a Service object.
+func (client *Client) buildHostServiceEvent(result CheckResult, state int, host, service string) (*event.Event, error) {
+	var eventSeverity event.Severity
+
+	if service != "" {
 		switch state {
 		case 0:
 			eventSeverity = event.SeverityOK
@@ -83,14 +119,6 @@ func (client *Client) buildHostServiceEvent(result CheckResult, state int, hostN
 			eventSeverity = event.SeverityErr
 		}
 	} else {
-		eventName = hostName
-
-		eventUrlSuffix = "/icingadb/host?name=" + url.PathEscape(hostName)
-
-		eventTags = map[string]string{
-			"host": hostName,
-		}
-
 		switch state {
 		case 0:
 			eventSeverity = event.SeverityOK
@@ -101,26 +129,32 @@ func (client *Client) buildHostServiceEvent(result CheckResult, state int, hostN
 		}
 	}
 
-	hostGroups, err := client.fetchHostGroups(hostName)
+	ev, err := client.buildCommonEvent(host, service)
 	if err != nil {
 		return nil, err
 	}
-	for _, hostGroup := range hostGroups {
-		eventExtraTags["hostgroup/"+hostGroup] = ""
+
+	ev.Time = result.ExecutionEnd.Time
+	ev.Type = event.TypeState
+	ev.Severity = eventSeverity
+	ev.Message = result.Output
+
+	return ev, nil
+}
+
+// buildAcknowledgementEvent from the given fields.
+func (client *Client) buildAcknowledgementEvent(ts time.Time, host, service, author, comment string) (*event.Event, error) {
+	ev, err := client.buildCommonEvent(host, service)
+	if err != nil {
+		return nil, err
 	}
 
-	return &event.Event{
-		Time:      result.ExecutionEnd.Time,
-		SourceId:  client.IcingaNotificationsEventSourceId,
-		Name:      eventName,
-		URL:       client.IcingaWebRoot + eventUrlSuffix,
-		Tags:      eventTags,
-		ExtraTags: eventExtraTags,
-		Type:      event.TypeState,
-		Severity:  eventSeverity,
-		Username:  "", // NOTE: a StateChange has no user per se
-		Message:   result.Output,
-	}, nil
+	ev.Time = ts
+	ev.Type = event.TypeAcknowledgement
+	ev.Username = author
+	ev.Message = comment
+
+	return ev, nil
 }
 
 // handleEvent checks and dispatches generated Events.
@@ -186,7 +220,9 @@ func (client *Client) Process() {
 			client.Logger.Errorf("Cannot reestablish an API connection: %v", err)
 		}
 
-		go client.checkMissedObjects("host")
-		go client.checkMissedObjects("service")
+		go client.checkMissedStateChanges("host")
+		go client.checkMissedStateChanges("service")
+		go client.checkMissedAcknowledgements("host")
+		go client.checkMissedAcknowledgements("service")
 	}
 }

@@ -31,11 +31,12 @@ func (iciTime *Icinga2Time) UnmarshalJSON(data []byte) error {
 //
 // https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#objecttype-comment
 type Comment struct {
-	Host      string `json:"host_name"`
-	Service   string `json:"service_name"`
-	Author    string `json:"author"`
-	Text      string `json:"text"`
-	EntryType int    `json:"entry_type"`
+	Host      string      `json:"host_name"`
+	Service   string      `json:"service_name"`
+	Author    string      `json:"author"`
+	Text      string      `json:"text"`
+	EntryTime Icinga2Time `json:"entry_time"`
+	EntryType int         `json:"entry_type"`
 }
 
 // CheckResult represents the Icinga 2 API CheckResult object.
@@ -81,14 +82,15 @@ type Downtime struct {
 // https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#host
 // https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#service
 type HostServiceRuntimeAttributes struct {
-	Name            string      `json:"__name"`
-	Host            string      `json:"host_name,omitempty"`
-	Groups          []string    `json:"groups"`
-	State           int         `json:"state"`
-	LastCheckResult CheckResult `json:"last_check_result"`
-	LastStateChange Icinga2Time `json:"last_state_change"`
-	DowntimeDepth   int         `json:"downtime_depth"`
-	Acknowledgement int         `json:"acknowledgement"`
+	Name                      string      `json:"__name"`
+	Host                      string      `json:"host_name,omitempty"`
+	Groups                    []string    `json:"groups"`
+	State                     int         `json:"state"`
+	LastCheckResult           CheckResult `json:"last_check_result"`
+	LastStateChange           Icinga2Time `json:"last_state_change"`
+	DowntimeDepth             int         `json:"downtime_depth"`
+	Acknowledgement           int         `json:"acknowledgement"`
+	AcknowledgementLastChange Icinga2Time `json:"acknowledgement_last_change"`
 }
 
 // ObjectQueriesResult represents the Icinga 2 API Object Queries Result wrapper object.
