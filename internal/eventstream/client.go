@@ -30,7 +30,7 @@ type Client struct {
 	IcingaWebRoot string
 
 	// CallbackFn receives generated event.Events.
-	CallbackFn func(event event.Event)
+	CallbackFn func(*event.Event)
 	// Ctx for all web requests as well as internal wait loops.
 	Ctx context.Context
 	// Logger to log to.
@@ -45,21 +45,33 @@ type Client struct {
 
 // buildHostServiceEvent constructs an event.Event based on a CheckResult, a Host or Service state, a Host name and an
 // optional Service name if the Event should represent a Service object.
-func (client *Client) buildHostServiceEvent(result CheckResult, state int, hostName, serviceName string) event.Event {
+func (client *Client) buildHostServiceEvent(result CheckResult, state int, hostName, serviceName string) (*event.Event, error) {
 	var (
 		eventName      string
 		eventUrlSuffix string
 		eventTags      map[string]string
+		eventExtraTags = make(map[string]string)
 		eventSeverity  event.Severity
 	)
 
 	if serviceName != "" {
 		eventName = hostName + "!" + serviceName
+
 		eventUrlSuffix = "/icingadb/service?name=" + url.PathEscape(serviceName) + "&host.name=" + url.PathEscape(hostName)
+
 		eventTags = map[string]string{
 			"host":    hostName,
 			"service": serviceName,
 		}
+
+		serviceGroups, err := client.fetchServiceGroups(hostName, serviceName)
+		if err != nil {
+			return nil, err
+		}
+		for _, serviceGroup := range serviceGroups {
+			eventExtraTags["servicegroup/"+serviceGroup] = ""
+		}
+
 		switch state {
 		case 0:
 			eventSeverity = event.SeverityOK
@@ -72,10 +84,13 @@ func (client *Client) buildHostServiceEvent(result CheckResult, state int, hostN
 		}
 	} else {
 		eventName = hostName
+
 		eventUrlSuffix = "/icingadb/host?name=" + url.PathEscape(hostName)
+
 		eventTags = map[string]string{
 			"host": hostName,
 		}
+
 		switch state {
 		case 0:
 			eventSeverity = event.SeverityOK
@@ -86,33 +101,41 @@ func (client *Client) buildHostServiceEvent(result CheckResult, state int, hostN
 		}
 	}
 
-	return event.Event{
+	hostGroups, err := client.fetchHostGroups(hostName)
+	if err != nil {
+		return nil, err
+	}
+	for _, hostGroup := range hostGroups {
+		eventExtraTags["hostgroup/"+hostGroup] = ""
+	}
+
+	return &event.Event{
 		Time:      result.ExecutionEnd.Time,
 		SourceId:  client.IcingaNotificationsEventSourceId,
 		Name:      eventName,
 		URL:       client.IcingaWebRoot + eventUrlSuffix,
 		Tags:      eventTags,
-		ExtraTags: nil, // TODO
+		ExtraTags: eventExtraTags,
 		Type:      event.TypeState,
 		Severity:  eventSeverity,
 		Username:  "", // NOTE: a StateChange has no user per se
 		Message:   result.Output,
-	}
+	}, nil
 }
 
 // handleEvent checks and dispatches generated Events.
-func (client *Client) handleEvent(ev event.Event, source string) {
+func (client *Client) handleEvent(ev *event.Event, source string) {
 	h := fnv.New64a()
 	_ = json.NewEncoder(h).Encode(ev)
 	evHash := h.Sum64()
 
-	client.Logger.Debugf("Start handling event %s received from %s", ev.String(), source)
+	client.Logger.Debugf("Start handling event %s received from %s", ev, source)
 
 	client.eventsHandlerMutex.RLock()
 	inCache := slices.Contains(client.eventsRingBuffer, evHash)
 	client.eventsHandlerMutex.RUnlock()
 	if inCache {
-		client.Logger.Warnf("Event %s received from %s is already in cache and will not be processed", ev.String(), source)
+		client.Logger.Warnf("Event %s received from %s is already in cache and will not be processed", ev, source)
 		return
 	}
 
@@ -122,7 +145,7 @@ func (client *Client) handleEvent(ev event.Event, source string) {
 
 	if ev.Time.Before(client.eventsLastTs) {
 		client.Logger.Infof("Event %s received from %s generated at %v before last known timestamp %v; might be a replay",
-			ev.String(), source, ev.Time, client.eventsLastTs)
+			ev, source, ev.Time, client.eventsLastTs)
 	}
 	client.eventsLastTs = ev.Time
 	client.eventsHandlerMutex.Unlock()

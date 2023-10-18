@@ -14,12 +14,12 @@ import (
 // This file contains Event Stream related methods of the Client.
 
 // eventStreamHandleStateChange acts on a received Event Stream StateChange object.
-func (client *Client) eventStreamHandleStateChange(stateChange *StateChange) (event.Event, error) {
-	return client.buildHostServiceEvent(stateChange.CheckResult, stateChange.State, stateChange.Host, stateChange.Service), nil
+func (client *Client) eventStreamHandleStateChange(stateChange *StateChange) (*event.Event, error) {
+	return client.buildHostServiceEvent(stateChange.CheckResult, stateChange.State, stateChange.Host, stateChange.Service)
 }
 
 // eventStreamHandleAcknowledgementSet acts on a received Event Stream AcknowledgementSet object.
-func (client *Client) eventStreamHandleAcknowledgementSet(ackSet *AcknowledgementSet) (event.Event, error) {
+func (client *Client) eventStreamHandleAcknowledgementSet(ackSet *AcknowledgementSet) (*event.Event, error) {
 	var (
 		eventName      string
 		eventUrlSuffix string
@@ -41,7 +41,7 @@ func (client *Client) eventStreamHandleAcknowledgementSet(ackSet *Acknowledgemen
 		}
 	}
 
-	ev := event.Event{
+	return &event.Event{
 		Time:      ackSet.Timestamp.Time,
 		SourceId:  client.IcingaNotificationsEventSourceId,
 		Name:      eventName,
@@ -51,8 +51,7 @@ func (client *Client) eventStreamHandleAcknowledgementSet(ackSet *Acknowledgemen
 		Type:      event.TypeAcknowledgement,
 		Username:  ackSet.Author,
 		Message:   ackSet.Comment,
-	}
-	return ev, nil
+	}, nil
 }
 
 // listenEventStream subscribes to the Icinga 2 API Event Stream and handles received objects.
@@ -106,7 +105,7 @@ func (client *Client) listenEventStream() error {
 			return err
 		}
 
-		var ev event.Event
+		var ev *event.Event
 		switch respT := resp.(type) {
 		case *StateChange:
 			ev, err = client.eventStreamHandleStateChange(respT)

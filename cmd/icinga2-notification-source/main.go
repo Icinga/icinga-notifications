@@ -31,9 +31,9 @@ func main() {
 		IcingaWebRoot:                    "http://localhost/icingaweb2",
 		IcingaNotificationsEventSourceId: 1,
 
-		CallbackFn: func(event.Event) { /* nop */ },
+		CallbackFn: func(ev *event.Event) { logs.GetLogger().Debugf("%#v", ev) },
 		Ctx:        ctx,
-		Logger:     logs.GetLogger(),
+		Logger:     logs.GetChildLogger("ESClient"),
 	}
 	client.Process()
 }

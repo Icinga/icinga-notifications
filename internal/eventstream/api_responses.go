@@ -84,6 +84,7 @@ type Downtime struct {
 type HostServiceRuntimeAttributes struct {
 	Name            string      `json:"__name"`
 	Host            string      `json:"host_name,omitempty"`
+	Groups          []string    `json:"groups"`
 	State           int         `json:"state"`
 	StateType       int         `json:"state_type"`
 	LastCheckResult CheckResult `json:"last_check_result"`
