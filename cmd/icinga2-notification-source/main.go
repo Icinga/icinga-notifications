@@ -17,7 +17,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	logs, err := logging.NewLogging("ici2-noma", zap.InfoLevel, logging.CONSOLE, nil, time.Second)
+	logs, err := logging.NewLogging("ici2-noma", zap.DebugLevel, logging.CONSOLE, nil, time.Second)
 	if err != nil {
 		panic(err)
 	}

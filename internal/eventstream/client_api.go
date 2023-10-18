@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -68,7 +68,7 @@ func (client *Client) queryObjectsApiQuery(objType string, query map[string]any)
 
 // fetchHostGroup fetches all Host Groups for this host.
 func (client *Client) fetchHostGroups(host string) ([]string, error) {
-	objQueriesResults, err := client.queryObjectsApiDirect("host", url.PathEscape(host))
+	objQueriesResults, err := client.queryObjectsApiDirect("host", host)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func (client *Client) fetchHostGroups(host string) ([]string, error) {
 
 // fetchServiceGroups fetches all Service Groups for this service on this host.
 func (client *Client) fetchServiceGroups(host, service string) ([]string, error) {
-	objQueriesResults, err := client.queryObjectsApiDirect("service", url.PathEscape(host)+"!"+url.PathEscape(service))
+	objQueriesResults, err := client.queryObjectsApiDirect("service", host+"!"+service)
 	if err != nil {
 		return nil, err
 	}
@@ -94,16 +94,46 @@ func (client *Client) fetchServiceGroups(host, service string) ([]string, error)
 	return attrs.Groups, nil
 }
 
-// checkMissedObjects fetches all objects of the requested objType (host or service) from the API and sends those to the
-// handleEvent method to be eventually dispatched to the callback.
-func (client *Client) checkMissedObjects(objType string) {
-	client.eventsHandlerMutex.RLock()
-	queryFilter := map[string]any{
-		"filter": fmt.Sprintf("%s.last_state_change>%f", objType, float64(client.eventsLastTs.UnixMicro())/1_000_000.0),
+// fetchAcknowledgementComment fetches an Acknowledgement Comment for a Host (empty service) or for a Service at a Host.
+//
+// Unfortunately, there is no direct link between ACK'ed Host or Service objects and their acknowledgement Comment. The
+// closest we can do, is query for Comments with the Acknowledgement Service Type and the host/service name. In addition,
+// the Host's resp. Service's AcknowledgementLastChange field has NOT the same timestamp as the Comment; there is a
+// difference of some milliseconds. As there might be even multiple ACK comments, we have to find the closest one.
+func (client *Client) fetchAcknowledgementComment(host, service string, ackTime time.Time) (*Comment, error) {
+	filterExpr := `comment.entry_type == 4 && comment.host_name == "` + host + `"`
+	if service != "" {
+		filterExpr += ` && comment.service_name == "` + service + `"`
 	}
-	client.eventsHandlerMutex.RUnlock()
 
-	objQueriesResults, err := client.queryObjectsApiQuery(objType, queryFilter)
+	objQueriesResults, err := client.queryObjectsApiQuery("comment", map[string]any{"filter": filterExpr})
+	if err != nil {
+		return nil, err
+	}
+	if len(objQueriesResults) == 0 {
+		return nil, fmt.Errorf("found no ACK Comments found for %q", filterExpr)
+	}
+
+	comments := make([]*Comment, len(objQueriesResults))
+	for i, objQueriesResult := range objQueriesResults {
+		comments[i] = objQueriesResult.Attrs.(*Comment)
+	}
+
+	slices.SortFunc(comments, func(a, b *Comment) int {
+		distA := a.EntryTime.Time.Sub(ackTime).Abs()
+		distB := b.EntryTime.Time.Sub(ackTime).Abs()
+		return int(distA - distB)
+	})
+	if comments[0].EntryTime.Sub(ackTime).Abs() > time.Second {
+		return nil, fmt.Errorf("found no ACK Comment for %q close to %v", filterExpr, ackTime)
+	}
+
+	return comments[0], nil
+}
+
+// checkMissedChanges queries for Service or Host objects with a specific filter to handle missed elements.
+func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallbackFn func(attrs *HostServiceRuntimeAttributes, host, service string)) {
+	objQueriesResults, err := client.queryObjectsApiQuery(objType, map[string]any{"filter": filterExpr})
 	if err != nil {
 		client.Logger.Errorf("Quering %ss from API failed, %v", objType, err)
 		return
@@ -112,7 +142,7 @@ func (client *Client) checkMissedObjects(objType string) {
 		return
 	}
 
-	client.Logger.Infof("Querying %ss from API resulted in %d objects to replay", objType, len(objQueriesResults))
+	client.Logger.Infof("Querying %ss from API resulted in %d state changes to replay", objType, len(objQueriesResults))
 
 	for _, objQueriesResult := range objQueriesResults {
 		if client.Ctx.Err() != nil {
@@ -140,18 +170,58 @@ func (client *Client) checkMissedObjects(objType string) {
 			continue
 		}
 
-		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, hostName, serviceName)
+		attrsCallbackFn(attrs, hostName, serviceName)
+	}
+}
+
+// checkMissedStateChanges fetches missed Host or Service state changes and feeds them into the handler.
+func (client *Client) checkMissedStateChanges(objType string) {
+	client.eventsHandlerMutex.RLock()
+	filterExpr := fmt.Sprintf("%s.last_state_change>%f",
+		objType, float64(client.eventsLastTs.UnixMicro())/1_000_000.0)
+	client.eventsHandlerMutex.RUnlock()
+
+	client.checkMissedChanges(objType, filterExpr, func(attrs *HostServiceRuntimeAttributes, host, service string) {
+		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, host, service)
 		if err != nil {
 			client.Logger.Error("Failed to construct Event from %s API: %v", objType, err)
-			continue
+			return
 		}
+
 		client.handleEvent(ev, "API "+objType)
-	}
+	})
+}
+
+// checkMissedAcknowledgements fetches missed set Host or Service Acknowledgements and feeds them into the handler.
+func (client *Client) checkMissedAcknowledgements(objType string) {
+	client.eventsHandlerMutex.RLock()
+	filterExpr := fmt.Sprintf("%s.acknowledgement && %s.acknowledgement_last_change>%f",
+		objType, objType, float64(client.eventsLastTs.UnixMicro())/1_000_000.0)
+	client.eventsHandlerMutex.RUnlock()
+
+	client.checkMissedChanges(objType, filterExpr, func(attrs *HostServiceRuntimeAttributes, host, service string) {
+		ackComment, err := client.fetchAcknowledgementComment(host, service, attrs.AcknowledgementLastChange.Time)
+		if err != nil {
+			client.Logger.Errorf("Cannot fetch ACK Comment for Acknowledgement, %v", err)
+			return
+		}
+
+		ev, err := client.buildAcknowledgementEvent(
+			attrs.AcknowledgementLastChange.Time,
+			host, service,
+			ackComment.Author, ackComment.Text)
+		if err != nil {
+			client.Logger.Error("Failed to construct Event from Acknowledgement %s API: %v", objType, err)
+			return
+		}
+
+		client.handleEvent(ev, "ACK API "+objType)
+	})
 }
 
 // reestablishApiConnection tries to access the Icinga 2 API with an exponential backoff.
 //
-// With 10 retries, it might block up to (2^10 - 1) * 10 / 1_000 = 10.23 seconds.
+// With 10 retries, it might block up to (2^10 - 1) * 10 / 1_000 = 10.23 seconds plus additional HTTP delays.
 func (client *Client) reestablishApiConnection() error {
 	const maxRetries = 10
 
@@ -170,7 +240,10 @@ func (client *Client) reestablishApiConnection() error {
 
 		client.Logger.Debugf("Try to reestablish an API connection, %d/%d tries..", i+1, maxRetries)
 
-		httpClient := &http.Client{Transport: &client.ApiHttpTransport}
+		httpClient := &http.Client{
+			Transport: &client.ApiHttpTransport,
+			Timeout:   time.Second,
+		}
 		res, err := httpClient.Do(req)
 		if err != nil {
 			lastErr = err
