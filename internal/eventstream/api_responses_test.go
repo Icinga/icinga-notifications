@@ -161,6 +161,15 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 					LastCheckResult: CheckResult{
 						ExitStatus: 0,
 						Output:     "If you think last Tuesday was a drag, wait till you see what happens tomorrow!",
+						State:      0,
+						Command: []string{
+							"/bin/bash",
+							"-c",
+							"/usr/games/fortune; exit $0",
+							"0",
+						},
+						ExecutionStart: Icinga2Time{time.UnixMicro(1697459643863147)},
+						ExecutionEnd:   Icinga2Time{time.UnixMicro(1697459643868893)},
 					},
 					LastStateChange: Icinga2Time{time.UnixMicro(1697099900637215)},
 					DowntimeDepth:   0,
@@ -182,6 +191,13 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 					LastCheckResult: CheckResult{
 						ExitStatus: 2,
 						Output:     "connect to address 127.0.0.1 and port 22: Connection refused",
+						State:      2,
+						Command: []string{
+							"/usr/lib/nagios/plugins/check_ssh",
+							"127.0.0.1",
+						},
+						ExecutionStart: Icinga2Time{time.UnixMicro(1697460711130247)},
+						ExecutionEnd:   Icinga2Time{time.UnixMicro(1697460711134875)},
 					},
 					LastStateChange: Icinga2Time{time.UnixMicro(1697099896120829)},
 					DowntimeDepth:   0,
@@ -239,6 +255,15 @@ func TestApiResponseUnmarshal(t *testing.T) {
 				CheckResult: CheckResult{
 					ExitStatus: 2,
 					Output:     "If two people love each other, there can be no happy end to it.\n\t\t-- Ernest Hemingway",
+					State:      2,
+					Command: []string{
+						"/bin/bash",
+						"-c",
+						"/usr/games/fortune; exit $0",
+						"2",
+					},
+					ExecutionStart: Icinga2Time{time.UnixMicro(1697188278194409)},
+					ExecutionEnd:   Icinga2Time{time.UnixMicro(1697188278202986)},
 				},
 				DowntimeDepth:   0,
 				Acknowledgement: false,
@@ -256,6 +281,15 @@ func TestApiResponseUnmarshal(t *testing.T) {
 				CheckResult: CheckResult{
 					ExitStatus: 2,
 					Output:     "You're growing out of some of your problems, but there are others that\nyou're growing into.",
+					State:      2,
+					Command: []string{
+						"/bin/bash",
+						"-c",
+						"/usr/games/fortune; exit $0",
+						"2",
+					},
+					ExecutionStart: Icinga2Time{time.UnixMicro(1697184778600973)},
+					ExecutionEnd:   Icinga2Time{time.UnixMicro(1697184778611465)},
 				},
 				DowntimeDepth:   0,
 				Acknowledgement: false,

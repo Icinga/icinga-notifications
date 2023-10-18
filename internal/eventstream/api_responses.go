@@ -42,8 +42,12 @@ type Comment struct {
 //
 // https://icinga.com/docs/icinga-2/latest/doc/08-advanced-topics/#advanced-value-types-checkresult
 type CheckResult struct {
-	ExitStatus int    `json:"exit_status"`
-	Output     string `json:"output"`
+	ExitStatus     int         `json:"exit_status"`
+	Output         string      `json:"output"`
+	State          int         `json:"state"`
+	Command        []string    `json:"command"`
+	ExecutionStart Icinga2Time `json:"execution_start"`
+	ExecutionEnd   Icinga2Time `json:"execution_end"`
 }
 
 // Downtime represents the Icinga 2 API Downtime object.
