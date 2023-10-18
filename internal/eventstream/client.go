@@ -38,6 +38,62 @@ type Client struct {
 	eventsLastTs        time.Time
 }
 
+// buildHostServiceEvent constructs an event.Event based on a CheckResult, a host name and an optional service name.
+func (client *Client) buildHostServiceEvent(result CheckResult, hostName, serviceName string) event.Event {
+	var (
+		eventName      string
+		eventUrlSuffix string
+		eventTags      map[string]string
+		eventSeverity  event.Severity
+	)
+
+	if serviceName != "" {
+		eventName = hostName + "!" + serviceName
+		eventUrlSuffix = "/icingadb/service?name=" + url.PathEscape(serviceName) + "&host.name=" + url.PathEscape(hostName)
+		eventTags = map[string]string{
+			"host":    hostName,
+			"service": serviceName,
+		}
+		switch result.State {
+		case 0:
+			eventSeverity = event.SeverityOK
+		case 1:
+			eventSeverity = event.SeverityWarning
+		case 2:
+			eventSeverity = event.SeverityCrit
+		default:
+			eventSeverity = event.SeverityErr
+		}
+	} else {
+		eventName = hostName
+		eventUrlSuffix = "/icingadb/host?name=" + url.PathEscape(hostName)
+		eventTags = map[string]string{
+			"host": hostName,
+		}
+		switch result.State {
+		case 0:
+			eventSeverity = event.SeverityOK
+		case 1:
+			eventSeverity = event.SeverityCrit
+		default:
+			eventSeverity = event.SeverityErr
+		}
+	}
+
+	return event.Event{
+		Time:      result.ExecutionEnd.Time,
+		SourceId:  client.IcingaNotificationsEventSourceId,
+		Name:      eventName,
+		URL:       client.IcingaWebRoot + eventUrlSuffix,
+		Tags:      eventTags,
+		ExtraTags: nil, // TODO
+		Type:      event.TypeState,
+		Severity:  eventSeverity,
+		Username:  "", // NOTE: a StateChange has no user per se
+		Message:   result.Output,
+	}
+}
+
 // handleEvent checks and dispatches generated Events.
 func (client *Client) handleEvent(ev event.Event, source string) {
 	h := fnv.New64a()
@@ -45,7 +101,6 @@ func (client *Client) handleEvent(ev event.Event, source string) {
 	evHash := h.Sum64()
 
 	client.Logger.Debugf("Start handling event %s as %x received from %s", ev.String(), evHash, source)
-	client.Logger.Debugf("%#v", ev)
 
 	client.eventsHandlerMutex.RLock()
 	inCache := slices.Contains(client.eventsRingBuffer, evHash)
@@ -72,59 +127,7 @@ func (client *Client) handleEvent(ev event.Event, source string) {
 
 // eventStreamHandleStateChange acts on a received Event Stream StateChange object.
 func (client *Client) eventStreamHandleStateChange(stateChange *StateChange) (event.Event, error) {
-	var (
-		eventName      string
-		eventUrlSuffix string
-		eventTags      map[string]string
-		eventSeverity  event.Severity
-	)
-
-	if stateChange.Service != "" {
-		eventName = stateChange.Host + "!" + stateChange.Service
-		eventUrlSuffix = "/icingadb/service?name=" + url.PathEscape(stateChange.Service) + "&host.name=" + url.PathEscape(stateChange.Host)
-		eventTags = map[string]string{
-			"host":    stateChange.Host,
-			"service": stateChange.Service,
-		}
-		switch stateChange.State {
-		case 0:
-			eventSeverity = event.SeverityOK
-		case 1:
-			eventSeverity = event.SeverityWarning
-		case 2:
-			eventSeverity = event.SeverityCrit
-		default:
-			eventSeverity = event.SeverityErr
-		}
-	} else {
-		eventName = stateChange.Host
-		eventUrlSuffix = "/icingadb/host?name=" + url.PathEscape(stateChange.Host)
-		eventTags = map[string]string{
-			"host": stateChange.Host,
-		}
-		switch stateChange.State {
-		case 0:
-			eventSeverity = event.SeverityOK
-		case 1:
-			eventSeverity = event.SeverityCrit
-		default:
-			eventSeverity = event.SeverityErr
-		}
-	}
-
-	ev := event.Event{
-		Time:      stateChange.Timestamp.Time,
-		SourceId:  client.IcingaNotificationsEventSourceId,
-		Name:      eventName,
-		URL:       client.IcingaWebRoot + eventUrlSuffix,
-		Tags:      eventTags,
-		ExtraTags: nil, // TODO
-		Type:      event.TypeState,
-		Severity:  eventSeverity,
-		Username:  "", // NOTE: a StateChange has no user per se
-		Message:   stateChange.CheckResult.Output,
-	}
-	return ev, nil
+	return client.buildHostServiceEvent(stateChange.CheckResult, stateChange.Host, stateChange.Service), nil
 }
 
 // eventStreamHandleAcknowledgementSet acts on a received Event Stream AcknowledgementSet object.
@@ -204,7 +207,7 @@ func (client *Client) listenEventStream() error {
 	if err != nil {
 		return err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	lineScanner := bufio.NewScanner(res.Body)
 	for lineScanner.Scan() {
@@ -267,7 +270,7 @@ func (client *Client) queryObjectsApi(objType string, payload map[string]any) ([
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	var objQueriesResults []ObjectQueriesResult
 	err = json.NewDecoder(res.Body).Decode(&struct {
@@ -310,66 +313,25 @@ func (client *Client) checkMissedObjects(objType string) {
 
 		attrs := objQueriesResult.Attrs.(*HostServiceRuntimeAttributes)
 
-		var (
-			eventUrlSuffix string
-			eventTags      map[string]string
-			eventSeverity  event.Severity
-		)
-
+		var hostName, serviceName string
 		switch objQueriesResult.Type {
 		case "Host":
-			eventUrlSuffix = "/icingadb/host?name=" + url.PathEscape(attrs.Name)
-			eventTags = map[string]string{
-				"host": attrs.Name,
-			}
-			switch attrs.State {
-			case 0:
-				eventSeverity = event.SeverityOK
-			case 1:
-				eventSeverity = event.SeverityCrit
-			default:
-				eventSeverity = event.SeverityErr
-			}
+			hostName = attrs.Name
 
 		case "Service":
 			if !strings.HasPrefix(attrs.Name, attrs.Host+"!") {
 				client.Logger.Errorf("Queried API Service object's name mismatches, %q is no prefix of %q", attrs.Host, attrs.Name)
 				continue
 			}
-			serviceName := attrs.Name[len(attrs.Host)+1:]
-			eventUrlSuffix = "/icingadb/service?name=" + url.PathEscape(serviceName) + "&host.name=" + url.PathEscape(attrs.Host)
-			eventTags = map[string]string{
-				"host":    attrs.Host,
-				"service": serviceName,
-			}
-			switch attrs.State {
-			case 0:
-				eventSeverity = event.SeverityOK
-			case 1:
-				eventSeverity = event.SeverityWarning
-			case 2:
-				eventSeverity = event.SeverityCrit
-			default:
-				eventSeverity = event.SeverityErr
-			}
+			hostName = attrs.Host
+			serviceName = attrs.Name[len(attrs.Host)+1:]
 
 		default:
 			client.Logger.Errorf("Querying API delivered a %q object when expecting %s", objQueriesResult.Type, objType)
 			continue
 		}
 
-		ev := event.Event{
-			Time:      attrs.LastStateChange.Time,
-			SourceId:  client.IcingaNotificationsEventSourceId,
-			Name:      attrs.Name,
-			URL:       client.IcingaWebRoot + eventUrlSuffix,
-			Tags:      eventTags,
-			ExtraTags: nil, // TODO, same as Event Stream insertion
-			Type:      event.TypeState,
-			Severity:  eventSeverity,
-			Username:  "", // NOTE: a StateChange has no user per se
-			Message:   attrs.LastCheckResult.Output,
-		}
+		ev := client.buildHostServiceEvent(attrs.LastCheckResult, hostName, serviceName)
 		client.handleEvent(ev, "API "+objType)
 	}
 }
