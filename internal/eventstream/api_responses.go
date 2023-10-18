@@ -83,6 +83,7 @@ type Downtime struct {
 type HostServiceRuntimeAttributes struct {
 	Name            string      `json:"__name"`
 	Host            string      `json:"host_name,omitempty"`
+	Groups          []string    `json:"groups"`
 	State           int         `json:"state"`
 	LastCheckResult CheckResult `json:"last_check_result"`
 	LastStateChange Icinga2Time `json:"last_state_change"`
