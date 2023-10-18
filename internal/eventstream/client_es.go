@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"net/http"
-	"net/url"
 )
 
 // This file contains Event Stream related methods of the Client.
@@ -20,38 +19,10 @@ func (client *Client) eventStreamHandleStateChange(stateChange *StateChange) (*e
 
 // eventStreamHandleAcknowledgementSet acts on a received Event Stream AcknowledgementSet object.
 func (client *Client) eventStreamHandleAcknowledgementSet(ackSet *AcknowledgementSet) (*event.Event, error) {
-	var (
-		eventName      string
-		eventUrlSuffix string
-		eventTags      map[string]string
-	)
-
-	if ackSet.Service != "" {
-		eventName = ackSet.Host + "!" + ackSet.Service
-		eventUrlSuffix = "/icingadb/service?name=" + url.PathEscape(ackSet.Service) + "&host.name=" + url.PathEscape(ackSet.Host)
-		eventTags = map[string]string{
-			"host":    ackSet.Host,
-			"service": ackSet.Service,
-		}
-	} else {
-		eventName = ackSet.Host
-		eventUrlSuffix = "/icingadb/host?name=" + url.PathEscape(ackSet.Host)
-		eventTags = map[string]string{
-			"host": ackSet.Host,
-		}
-	}
-
-	return &event.Event{
-		Time:      ackSet.Timestamp.Time,
-		SourceId:  client.IcingaNotificationsEventSourceId,
-		Name:      eventName,
-		URL:       client.IcingaWebRoot + eventUrlSuffix,
-		Tags:      eventTags,
-		ExtraTags: nil, // TODO
-		Type:      event.TypeAcknowledgement,
-		Username:  ackSet.Author,
-		Message:   ackSet.Comment,
-	}, nil
+	return client.buildAcknowledgementEvent(
+		ackSet.Timestamp.Time,
+		ackSet.Host, ackSet.Service,
+		ackSet.Author, ackSet.Comment)
 }
 
 // listenEventStream subscribes to the Icinga 2 API Event Stream and handles received objects.
