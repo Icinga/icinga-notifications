@@ -19,27 +19,37 @@ import (
 	"time"
 )
 
+// Client for the Icinga 2 Event Stream API with extended support for other Icinga 2 APIs to gather additional
+// information and allow a replay in case of a connection loss.
 type Client struct {
+	// ApiHost et al. configure where and how the Icinga 2 API can be reached.
 	ApiHost          string
 	ApiBasicAuthUser string
 	ApiBasicAuthPass string
 	ApiHttpTransport http.Transport
 
+	// IcingaNotificationsEventSourceId to be reflected in generated event.Events.
 	IcingaNotificationsEventSourceId int64
-	IcingaWebRoot                    string
+	// IcingaWebRoot points to the Icinga Web 2 endpoint for generated URLs.
+	IcingaWebRoot string
 
+	// CallbackFn receives generated event.Events.
 	CallbackFn func(event event.Event)
-	Ctx        context.Context
-	Logger     *logging.Logger
+	// Ctx for all web requests as well as internal wait loops.
+	Ctx context.Context
+	// Logger to log to.
+	Logger *logging.Logger
 
+	// All those variables are used internally to keep at least some state.
 	eventsHandlerMutex  sync.RWMutex
 	eventsRingBuffer    []uint64
 	eventsRingBufferPos int
 	eventsLastTs        time.Time
 }
 
-// buildHostServiceEvent constructs an event.Event based on a CheckResult, a host name and an optional service name.
-func (client *Client) buildHostServiceEvent(result CheckResult, hostName, serviceName string) event.Event {
+// buildHostServiceEvent constructs an event.Event based on a CheckResult, a Host or Service state, a Host name and an
+// optional Service name if the Event should represent a Service object.
+func (client *Client) buildHostServiceEvent(result CheckResult, state int, hostName, serviceName string) event.Event {
 	var (
 		eventName      string
 		eventUrlSuffix string
@@ -54,7 +64,7 @@ func (client *Client) buildHostServiceEvent(result CheckResult, hostName, servic
 			"host":    hostName,
 			"service": serviceName,
 		}
-		switch result.State {
+		switch state {
 		case 0:
 			eventSeverity = event.SeverityOK
 		case 1:
@@ -70,7 +80,7 @@ func (client *Client) buildHostServiceEvent(result CheckResult, hostName, servic
 		eventTags = map[string]string{
 			"host": hostName,
 		}
-		switch result.State {
+		switch state {
 		case 0:
 			eventSeverity = event.SeverityOK
 		case 1:
@@ -100,13 +110,13 @@ func (client *Client) handleEvent(ev event.Event, source string) {
 	_ = json.NewEncoder(h).Encode(ev)
 	evHash := h.Sum64()
 
-	client.Logger.Debugf("Start handling event %s as %x received from %s", ev.String(), evHash, source)
+	client.Logger.Debugf("Start handling event %s received from %s", ev.String(), source)
 
 	client.eventsHandlerMutex.RLock()
 	inCache := slices.Contains(client.eventsRingBuffer, evHash)
 	client.eventsHandlerMutex.RUnlock()
 	if inCache {
-		client.Logger.Warnf("Event %s is already in cache and will not be processed", ev.String())
+		client.Logger.Warnf("Event %s received from %s is already in cache and will not be processed", ev.String(), source)
 		return
 	}
 
@@ -115,19 +125,18 @@ func (client *Client) handleEvent(ev event.Event, source string) {
 	client.eventsRingBufferPos = (client.eventsRingBufferPos + 1) % len(client.eventsRingBuffer)
 
 	if ev.Time.Before(client.eventsLastTs) {
-		client.Logger.Warnf("Received Event %s generated before last known timestamp %v; turn back the clock",
-			ev.String(), client.eventsLastTs)
+		client.Logger.Infof("Event %s received from %s generated at %v before last known timestamp %v; might be a replay",
+			ev.String(), source, ev.Time, client.eventsLastTs)
 	}
 	client.eventsLastTs = ev.Time
 	client.eventsHandlerMutex.Unlock()
 
-	client.Logger.Debugf("Forward event %s to callback function", ev.String())
 	client.CallbackFn(ev)
 }
 
 // eventStreamHandleStateChange acts on a received Event Stream StateChange object.
 func (client *Client) eventStreamHandleStateChange(stateChange *StateChange) (event.Event, error) {
-	return client.buildHostServiceEvent(stateChange.CheckResult, stateChange.Host, stateChange.Service), nil
+	return client.buildHostServiceEvent(stateChange.CheckResult, stateChange.State, stateChange.Host, stateChange.Service), nil
 }
 
 // eventStreamHandleAcknowledgementSet acts on a received Event Stream AcknowledgementSet object.
@@ -293,17 +302,22 @@ func (client *Client) queryObjectApiSince(objType string, since time.Time) ([]Ob
 		})
 }
 
+// checkMissedObjects fetches all objects of the requested objType (host or service) from the API and sends those to the
+// handleEvent method to be eventually dispatched to the callback.
 func (client *Client) checkMissedObjects(objType string) {
 	client.eventsHandlerMutex.RLock()
-	objQueriesResults, err := client.queryObjectApiSince(objType, client.eventsLastTs.Add(-time.Minute))
+	objQueriesResults, err := client.queryObjectApiSince(objType, client.eventsLastTs)
 	client.eventsHandlerMutex.RUnlock()
 
 	if err != nil {
 		client.Logger.Errorf("Quering %ss from API failed, %v", objType, err)
 		return
 	}
+	if len(objQueriesResults) == 0 {
+		return
+	}
 
-	client.Logger.Infof("Querying %ss from API resulted in %d objects", objType, len(objQueriesResults))
+	client.Logger.Infof("Querying %ss from API resulted in %d objects to replay", objType, len(objQueriesResults))
 
 	for _, objQueriesResult := range objQueriesResults {
 		if client.Ctx.Err() != nil {
@@ -324,14 +338,14 @@ func (client *Client) checkMissedObjects(objType string) {
 				continue
 			}
 			hostName = attrs.Host
-			serviceName = attrs.Name[len(attrs.Host)+1:]
+			serviceName = attrs.Name[len(attrs.Host+"!"):]
 
 		default:
 			client.Logger.Errorf("Querying API delivered a %q object when expecting %s", objQueriesResult.Type, objType)
 			continue
 		}
 
-		ev := client.buildHostServiceEvent(attrs.LastCheckResult, hostName, serviceName)
+		ev := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, hostName, serviceName)
 		client.handleEvent(ev, "API "+objType)
 	}
 }
@@ -350,6 +364,9 @@ func (client *Client) reestablishApiConnection() error {
 
 	var lastErr error
 	for i := 0; i < maxRetries; i++ {
+		if client.Ctx.Err() != nil {
+			return client.Ctx.Err()
+		}
 		time.Sleep((time.Duration)(math.Exp2(float64(i))) * 10 * time.Millisecond)
 
 		client.Logger.Debugf("Try to reestablish an API connection, %d/%d tries..", i+1, maxRetries)
@@ -373,9 +390,16 @@ func (client *Client) reestablishApiConnection() error {
 	return fmt.Errorf("cannot query API backend in %d tries, %w", maxRetries, lastErr)
 }
 
+// Process incoming objects and reconnect to the Event Stream with replaying objects if necessary.
+//
+// This method blocks as long as the Client runs, which, unless its context is cancelled, is forever. While its internal
+// loop takes care of reconnections, all those events will be logged while generated Events will be dispatched to the
+// callback function.
 func (client *Client) Process() {
 	client.eventsRingBuffer = make([]uint64, 1024)
 	client.eventsRingBufferPos = 0
+
+	defer client.Logger.Info("Event Stream Client has stopped")
 
 	for {
 		client.Logger.Info("Start listening on Icinga 2 Event Stream..")
