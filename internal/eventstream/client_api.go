@@ -76,7 +76,10 @@ func (client *Client) fetchHostGroups(host string) ([]string, error) {
 		return nil, fmt.Errorf("expected exactly one result for host %q instead of %d", host, len(objQueriesResults))
 	}
 
-	attrs := objQueriesResults[0].Attrs.(*HostServiceRuntimeAttributes)
+	attrs, ok := objQueriesResults[0].Attrs.(*HostServiceRuntimeAttributes)
+	if !ok {
+		return nil, fmt.Errorf("queried object's attrs are of wrong type %T", attrs)
+	}
 	return attrs.Groups, nil
 }
 
@@ -90,7 +93,10 @@ func (client *Client) fetchServiceGroups(host, service string) ([]string, error)
 		return nil, fmt.Errorf("expected exactly one result for service %q instead of %d", host+"!"+service, len(objQueriesResults))
 	}
 
-	attrs := objQueriesResults[0].Attrs.(*HostServiceRuntimeAttributes)
+	attrs, ok := objQueriesResults[0].Attrs.(*HostServiceRuntimeAttributes)
+	if !ok {
+		return nil, fmt.Errorf("queried object's attrs are of wrong type %T", attrs)
+	}
 	return attrs.Groups, nil
 }
 
@@ -116,7 +122,11 @@ func (client *Client) fetchAcknowledgementComment(host, service string, ackTime 
 
 	comments := make([]*Comment, len(objQueriesResults))
 	for i, objQueriesResult := range objQueriesResults {
-		comments[i] = objQueriesResult.Attrs.(*Comment)
+		c, ok := objQueriesResult.Attrs.(*Comment)
+		if !ok {
+			return nil, fmt.Errorf("queried object's attrs are of wrong type %T", c)
+		}
+		comments[i] = c
 	}
 
 	slices.SortFunc(comments, func(a, b *Comment) int {
@@ -150,7 +160,11 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 			return
 		}
 
-		attrs := objQueriesResult.Attrs.(*HostServiceRuntimeAttributes)
+		attrs, ok := objQueriesResult.Attrs.(*HostServiceRuntimeAttributes)
+		if !ok {
+			client.Logger.Errorf("Queried %s API response object's attrs are of wrong type %T", objType, attrs)
+			continue
+		}
 
 		var hostName, serviceName string
 		switch objQueriesResult.Type {
