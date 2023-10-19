@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal"
@@ -13,11 +14,14 @@ import (
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/utils"
 	"go.uber.org/zap"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
 	"time"
+
+	"github.com/icinga/icinga-notifications/internal/eventstream"
 )
 
 func main() {
@@ -95,6 +99,28 @@ func main() {
 	err = incident.LoadOpenIncidents(ctx, db, logs.GetChildLogger("incident"), runtimeConfig)
 	if err != nil {
 		logger.Fatalw("Can't load incidents from database", zap.Error(err))
+	}
+
+	for _, icinga2Api := range conf.Icinga2Apis {
+		logger := logs.GetChildLogger(fmt.Sprintf("eventstream-%d", icinga2Api.NotificationsEventSourceId))
+
+		esClient := eventstream.Client{
+			ApiHost:          icinga2Api.Host,
+			ApiBasicAuthUser: icinga2Api.AuthUser,
+			ApiBasicAuthPass: icinga2Api.AuthPass,
+
+			IcingaNotificationsEventSourceId: icinga2Api.NotificationsEventSourceId,
+			IcingaWebRoot:                    conf.Icingaweb2URL,
+
+			CallbackFn: eventstream.MakeProcessEvent(db, logger, logs, runtimeConfig),
+			Ctx:        ctx,
+			Logger:     logger,
+		}
+		if icinga2Api.InsecureTls {
+			esClient.ApiHttpTransport = http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+		}
+
+		go esClient.Process()
 	}
 
 	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {

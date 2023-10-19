@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -35,7 +36,11 @@ func (client *Client) queryObjectsApi(req *http.Request) ([]ObjectQueriesResult,
 
 // queryObjectsApiDirect performs a direct resp. "fast" API query against a specific object identified by its name.
 func (client *Client) queryObjectsApiDirect(objType, objName string) ([]ObjectQueriesResult, error) {
-	req, err := http.NewRequestWithContext(client.Ctx, http.MethodGet, client.ApiHost+"/v1/objects/"+objType+"s/"+objName, nil)
+	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/objects/", objType+"s/", objName)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(client.Ctx, http.MethodGet, apiUrl, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +58,11 @@ func (client *Client) queryObjectsApiQuery(objType string, query map[string]any)
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(client.Ctx, http.MethodPost, client.ApiHost+"/v1/objects/"+objType+"s", bytes.NewReader(reqBody))
+	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/objects/", objType+"s")
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(client.Ctx, http.MethodPost, apiUrl, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +207,7 @@ func (client *Client) checkMissedStateChanges(objType string) {
 	client.checkMissedChanges(objType, filterExpr, func(attrs *HostServiceRuntimeAttributes, host, service string) {
 		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, host, service)
 		if err != nil {
-			client.Logger.Error("Failed to construct Event from %s API: %v", objType, err)
+			client.Logger.Errorf("Failed to construct Event from %s API: %v", objType, err)
 			return
 		}
 
@@ -225,7 +234,7 @@ func (client *Client) checkMissedAcknowledgements(objType string) {
 			host, service,
 			ackComment.Author, ackComment.Text)
 		if err != nil {
-			client.Logger.Error("Failed to construct Event from Acknowledgement %s API: %v", objType, err)
+			client.Logger.Errorf("Failed to construct Event from Acknowledgement %s API: %v", objType, err)
 			return
 		}
 
@@ -239,7 +248,11 @@ func (client *Client) checkMissedAcknowledgements(objType string) {
 func (client *Client) reestablishApiConnection() error {
 	const maxRetries = 10
 
-	req, err := http.NewRequestWithContext(client.Ctx, http.MethodGet, client.ApiHost+"/v1/", nil)
+	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/")
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(client.Ctx, http.MethodGet, apiUrl, nil)
 	if err != nil {
 		return err
 	}

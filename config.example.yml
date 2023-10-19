@@ -9,6 +9,13 @@
 icingaweb2-url: http://localhost/icingaweb2/
 channel-plugin-dir: /usr/libexec/icinga-notifications/channel
 
+icinga2-apis:
+  - notifications-event-source-id: 1
+    host: https://localhost:5665
+    auth-user: root
+    auth-pass: icinga
+    # insecure-tls: true
+
 database:
   type: pgsql
   host: /run/postgresql
