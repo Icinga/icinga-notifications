@@ -8,10 +8,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/types"
+	"github.com/jmoiron/sqlx"
 	"regexp"
 	"sort"
 	"strings"
@@ -32,10 +33,10 @@ type Object struct {
 
 	ExtraTags map[string]string
 
-	db *icingadb.DB
+	db *database.DB
 }
 
-func NewObject(db *icingadb.DB, ev *event.Event) *Object {
+func NewObject(db *database.DB, ev *event.Event) *Object {
 	return &Object{
 		SourceId:  ev.SourceId,
 		Name:      ev.Name,
@@ -49,7 +50,7 @@ func NewObject(db *icingadb.DB, ev *event.Event) *Object {
 // FromEvent creates an object from the provided event tags if it's not in the cache
 // and syncs all object related types with the database.
 // Returns error on any database failure
-func FromEvent(ctx context.Context, db *icingadb.DB, ev *event.Event) (*Object, error) {
+func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, error) {
 	id := ID(ev.SourceId, ev.Tags)
 
 	cacheMu.Lock()
@@ -62,47 +63,44 @@ func FromEvent(ctx context.Context, db *icingadb.DB, ev *event.Event) (*Object, 
 		cache[id.String()] = object
 	}
 
-	tx, err := db.BeginTxx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to start object database transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	dbObj := &ObjectRow{
-		ID:       object.ID,
-		SourceID: ev.SourceId,
-		Name:     ev.Name,
-		URL:      utils.ToDBString(ev.URL),
-	}
-
-	stmt, _ := object.db.BuildUpsertStmt(&ObjectRow{})
-	_, err = tx.NamedExecContext(ctx, stmt, dbObj)
-	if err != nil {
-		return nil, fmt.Errorf("failed to insert object: %w", err)
-	}
-
-	stmt, _ = object.db.BuildUpsertStmt(&IdTagRow{})
-	_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(object.ID, ev.Tags))
-	if err != nil {
-		return nil, fmt.Errorf("failed to upsert object id tags: %w", err)
-	}
-
-	extraTag := &ExtraTagRow{ObjectId: object.ID}
-	_, err = tx.NamedExecContext(ctx, `DELETE FROM "object_extra_tag" WHERE "object_id" = :object_id`, extraTag)
-	if err != nil {
-		return nil, fmt.Errorf("failed to delete object extra tags: %w", err)
-	}
-
-	if len(ev.ExtraTags) > 0 {
-		stmt, _ := object.db.BuildInsertStmt(extraTag)
-		_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(object.ID, ev.ExtraTags))
-		if err != nil {
-			return nil, fmt.Errorf("failed to insert object extra tags: %w", err)
+	err := db.RunInTx(ctx, func(tx *sqlx.Tx) error {
+		dbObj := &ObjectRow{
+			ID:       object.ID,
+			SourceID: ev.SourceId,
+			Name:     ev.Name,
+			URL:      utils.ToDBString(ev.URL),
 		}
-	}
 
-	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("can't commit object database transaction: %w", err)
+		stmt, _ := object.db.BuildUpsertStmt(dbObj)
+		_, err := tx.NamedExecContext(ctx, stmt, dbObj)
+		if err != nil {
+			return fmt.Errorf("failed to insert object: %w", err)
+		}
+
+		stmt, _ = object.db.BuildUpsertStmt(&IdTagRow{})
+		_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(object.ID, ev.Tags))
+		if err != nil {
+			return fmt.Errorf("failed to upsert object id tags: %w", err)
+		}
+
+		extraTag := &ExtraTagRow{ObjectId: object.ID}
+		_, err = tx.NamedExecContext(ctx, `DELETE FROM "object_extra_tag" WHERE "object_id" = :object_id`, extraTag)
+		if err != nil {
+			return fmt.Errorf("failed to delete object extra tags: %w", err)
+		}
+
+		if len(ev.ExtraTags) > 0 {
+			stmt, _ := object.db.BuildInsertStmt(extraTag)
+			_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(object.ID, ev.ExtraTags))
+			if err != nil {
+				return fmt.Errorf("failed to insert object extra tags: %w", err)
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	object.ExtraTags = ev.ExtraTags

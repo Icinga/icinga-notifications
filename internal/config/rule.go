@@ -4,9 +4,9 @@ import (
 	"context"
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/rule"
-	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 )
 
 func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
@@ -200,7 +200,9 @@ func (r *RuntimeConfig) applyPendingRules() {
 					}
 				}
 
-				escalation.Recipients = utils.RemoveNils(escalation.Recipients)
+				escalation.Recipients = slices.DeleteFunc(escalation.Recipients, func(recipient *rule.EscalationRecipient) bool {
+					return recipient == nil
+				})
 			}
 
 			if currentRule := r.Rules[id]; currentRule != nil {

@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"github.com/icinga/icinga-notifications/pkg/rpc"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
 	"io"
 	"os"
@@ -166,7 +166,7 @@ func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
 }
 
 // UpsertPlugins upsert the available_channel_type table with working plugins
-func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *icingadb.DB) {
+func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *database.DB) {
 	logger.Debug("Updating available channel types")
 	files, err := os.ReadDir(channelPluginDir)
 	if err != nil {

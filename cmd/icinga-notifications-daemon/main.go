@@ -4,14 +4,16 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/driver"
+	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/utils"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
-	"github.com/icinga/icingadb/pkg/logging"
-	"github.com/icinga/icingadb/pkg/utils"
 	"go.uber.org/zap"
 	"os"
 	"os/signal"
@@ -68,7 +70,13 @@ func main() {
 
 	logger := logs.GetLogger()
 	logger.Infof("Starting Icinga Notifications daemon (%s)", internal.Version.Version)
-	db, err := conf.Database.Open(logs.GetChildLogger("database"))
+
+	dbLogger := logs.GetChildLogger("database")
+	// Icinga GO Library doesn't take care of the SQL drivers registration automatically.
+	// So, we have to do it on our own.
+	driver.Register(dbLogger)
+
+	db, err := database.NewDbFromConfig(&conf.Database, dbLogger)
 	if err != nil {
 		logger.Fatalw("cannot create database connection from config", zap.Error(err))
 	}

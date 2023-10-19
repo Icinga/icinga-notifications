@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -12,8 +14,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/types"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 	"sync"
@@ -43,7 +43,7 @@ type Incident struct {
 	// be reached solely based on the incident aging, so no more timer is necessary and timer stores nil.
 	timer *time.Timer
 
-	db            *icingadb.DB
+	db            *database.DB
 	logger        *zap.SugaredLogger
 	runtimeConfig *config.RuntimeConfig
 
@@ -51,7 +51,7 @@ type Incident struct {
 }
 
 func NewIncident(
-	db *icingadb.DB, obj *object.Object, runtimeConfig *config.RuntimeConfig, logger *zap.SugaredLogger,
+	db *database.DB, obj *object.Object, runtimeConfig *config.RuntimeConfig, logger *zap.SugaredLogger,
 ) *Incident {
 	return &Incident{
 		db:              db,
@@ -213,7 +213,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 
 	var notifications []*NotificationEntry
 	ctx := context.Background()
-	err = utils.RunInTx(ctx, i.db, func(tx *sqlx.Tx) error {
+	err = i.db.RunInTx(ctx, func(tx *sqlx.Tx) error {
 		err := ev.Sync(ctx, tx, i.db, i.Object.ID)
 		if err != nil {
 			return err

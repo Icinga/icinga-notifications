@@ -3,11 +3,10 @@ package incident
 import (
 	"context"
 	"fmt"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
-	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/types"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -35,7 +34,7 @@ func (i *IncidentRow) Upsert() interface{} {
 // Sync synchronizes incidents to the database.
 // Fetches the last inserted incident id and modifies this incident's id.
 // Returns an error on database failure.
-func (i *IncidentRow) Sync(ctx context.Context, tx *sqlx.Tx, db *icingadb.DB, upsert bool) error {
+func (i *IncidentRow) Sync(ctx context.Context, tx *sqlx.Tx, db *database.DB, upsert bool) error {
 	if upsert {
 		stmt, _ := db.BuildUpsertStmt(i)
 		_, err := tx.NamedExecContext(ctx, stmt, i)
@@ -43,12 +42,13 @@ func (i *IncidentRow) Sync(ctx context.Context, tx *sqlx.Tx, db *icingadb.DB, up
 			return fmt.Errorf("failed to upsert incident: %s", err)
 		}
 	} else {
-		incidentId, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, i, "id"), i)
+		stmt, _ := db.BuildInsertStmt(i, "id")
+		incidentId, err := database.InsertObtainID(ctx, tx, stmt, i)
 		if err != nil {
 			return err
 		}
 
-		i.ID = incidentId
+		i.ID = incidentId.Int64
 	}
 
 	return nil
@@ -141,11 +141,11 @@ func (h *HistoryRow) TableName() string {
 // to them of this type. The cached entries are then used to actually notify the contacts and mark the pending
 // notification entries as either NotificationStateSent or NotificationStateFailed.
 type NotificationEntry struct {
-	HistoryRowID int64 `db:"id"`
-	ContactID    int64
-	ChannelID    int64
+	HistoryRowID int64             `db:"id"`
+	ContactID    int64             `db:"-"`
+	ChannelID    int64             `db:"-"`
 	State        NotificationState `db:"notification_state"`
-	SentAt       types.UnixMilli   `db:"sent_at"`
+	SentAt       types.UnixMilli
 }
 
 // TableName implements the contracts.TableNamer interface.

@@ -9,16 +9,16 @@ import (
 )
 
 type Escalation struct {
-	ID            int64          `db:"id"`
-	RuleID        int64          `db:"rule_id"`
+	ID            int64 `db:"id"`
+	RuleID        int64
 	Name          string         `db:"-"`
 	NameRaw       sql.NullString `db:"name"`
 	Condition     filter.Filter  `db:"-"`
 	ConditionExpr sql.NullString `db:"condition"`
 	FallbackForID sql.NullInt64  `db:"fallback_for"`
-	Fallbacks     []*Escalation
+	Fallbacks     []*Escalation  `db:"-"`
 
-	Recipients []*EscalationRecipient
+	Recipients []*EscalationRecipient `db:"-"`
 }
 
 func (e *Escalation) DisplayName() string {
@@ -67,7 +67,7 @@ type EscalationRecipient struct {
 	EscalationID  int64         `db:"rule_escalation_id"`
 	ChannelID     sql.NullInt64 `db:"channel_id"`
 	recipient.Key `db:",inline"`
-	Recipient     recipient.Recipient
+	Recipient     recipient.Recipient `db:"-"`
 }
 
 func (r *EscalationRecipient) TableName() string {

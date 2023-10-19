@@ -4,16 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/icinga/icingadb/pkg/driver"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/types"
-	"github.com/icinga/icingadb/pkg/utils"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/driver"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/jmoiron/sqlx"
 	"strings"
 )
 
 // BuildInsertStmtWithout builds an insert stmt without the provided column.
-func BuildInsertStmtWithout(db *icingadb.DB, into interface{}, withoutColumn string) string {
+func BuildInsertStmtWithout(db *database.DB, into interface{}, withoutColumn string) string {
 	columns := db.BuildColumns(into)
 	for i, column := range columns {
 		if column == withoutColumn {
@@ -25,7 +24,7 @@ func BuildInsertStmtWithout(db *icingadb.DB, into interface{}, withoutColumn str
 
 	return fmt.Sprintf(
 		`INSERT INTO "%s" ("%s") VALUES (%s)`,
-		utils.TableName(into), strings.Join(columns, `", "`),
+		database.TableName(into), strings.Join(columns, `", "`),
 		fmt.Sprintf(":%s", strings.Join(columns, ", :")),
 	)
 }
@@ -35,7 +34,7 @@ func BuildInsertStmtWithout(db *icingadb.DB, into interface{}, withoutColumn str
 // A new transaction is started on db which is then passed to fn. After fn returns, the transaction is
 // committed unless an error was returned. If fn returns an error, that error is returned, otherwise an
 // error is returned if a database operation fails.
-func RunInTx(ctx context.Context, db *icingadb.DB, fn func(tx *sqlx.Tx) error) error {
+func RunInTx(ctx context.Context, db *database.DB, fn func(tx *sqlx.Tx) error) error {
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err

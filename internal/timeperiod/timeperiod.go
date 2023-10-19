@@ -7,9 +7,9 @@ import (
 )
 
 type TimePeriod struct {
-	ID      int64 `db:"id"`
-	Name    string
-	Entries []*Entry
+	ID      int64    `db:"id"`
+	Name    string   `db:"-"`
+	Entries []*Entry `db:"-"`
 }
 
 func (p *TimePeriod) TableName() string {

@@ -1,6 +1,6 @@
 package internal
 
-import "github.com/icinga/icingadb/pkg/version"
+import "github.com/icinga/icinga-go-library/version"
 
 // Version contains version and Git commit information.
 //
