@@ -69,12 +69,8 @@ type Downtime struct {
 // When catching up potentially missed changes, the following fields are holding relevant changes which, fortunately,
 // are identical for Icinga 2 Host and Service objects.
 //
-// According to the documentation, neither the Host nor the Service name is part of the attributes for Host resp.
-// Service objects. However, next to being part of the wrapping API response, see ObjectQueriesResult, it is also
-// available in the "__name" attribute, reflected in the Name field. For Service objects, it is "${host}!${service}".
-// Furthermore, Service objects have a required non-empty reference to their Host.
-//
 // NOTE:
+//   - Name is either the Host or the Service name.
 //   - Host is empty for Host objects; Host contains the Service's Host object name for Services.
 //   - State might be 0 = UP, 1 = DOWN for hosts and 0 = OK, 1 = WARNING, 2 = CRITICAL, 3 = UNKNOWN for services.
 //   - Acknowledgement type is 0 = NONE, 1 = NORMAL, 2 = STICKY.
@@ -82,7 +78,7 @@ type Downtime struct {
 // https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#host
 // https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#service
 type HostServiceRuntimeAttributes struct {
-	Name                      string      `json:"__name"`
+	Name                      string      `json:"name"`
 	Host                      string      `json:"host_name,omitempty"`
 	Groups                    []string    `json:"groups"`
 	State                     int         `json:"state"`

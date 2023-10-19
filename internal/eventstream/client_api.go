@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -165,7 +164,7 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 
 	for _, objQueriesResult := range objQueriesResults {
 		if client.Ctx.Err() != nil {
-			client.Logger.Info("Stopping %s API response processing as context is finished", objType)
+			client.Logger.Infof("Stopping %s API response processing as context is finished", objType)
 			return
 		}
 
@@ -181,12 +180,8 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 			hostName = attrs.Name
 
 		case "Service":
-			if !strings.HasPrefix(attrs.Name, attrs.Host+"!") {
-				client.Logger.Errorf("Queried API Service object's name mismatches, %q is no prefix of %q", attrs.Host, attrs.Name)
-				continue
-			}
 			hostName = attrs.Host
-			serviceName = attrs.Name[len(attrs.Host+"!"):]
+			serviceName = attrs.Name
 
 		default:
 			client.Logger.Errorf("Querying API delivered a %q object when expecting %s", objQueriesResult.Type, objType)
