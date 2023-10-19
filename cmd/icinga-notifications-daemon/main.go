@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal"
@@ -116,8 +117,27 @@ func main() {
 			Ctx:        ctx,
 			Logger:     logger,
 		}
-		if icinga2Api.InsecureTls {
+
+		switch {
+		case icinga2Api.IcingaCaFile != "":
+			caData, err := os.ReadFile(icinga2Api.IcingaCaFile)
+			if err != nil {
+				logger.Errorw("Cannot read CA file", zap.String("file", icinga2Api.IcingaCaFile), zap.Error(err))
+				continue
+			}
+
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM(caData) {
+				logger.Error("Cannot add CA file to cert pool")
+				continue
+			}
+
+			esClient.ApiHttpTransport = http.Transport{TLSClientConfig: &tls.Config{RootCAs: certPool}}
+			logger.Debug("Configured custom CA file for API HTTPS requests")
+
+		case icinga2Api.InsecureTls:
 			esClient.ApiHttpTransport = http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+			logger.Warn("Skipping TLS verification for API HTTPS requests")
 		}
 
 		go esClient.Process()
