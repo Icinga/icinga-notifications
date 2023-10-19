@@ -193,11 +193,8 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 }
 
 // checkMissedStateChanges fetches missed Host or Service state changes and feeds them into the handler.
-func (client *Client) checkMissedStateChanges(objType string) {
-	client.eventsHandlerMutex.RLock()
-	filterExpr := fmt.Sprintf("%s.last_state_change>%f",
-		objType, float64(client.eventsLastTs.UnixMicro())/1_000_000.0)
-	client.eventsHandlerMutex.RUnlock()
+func (client *Client) checkMissedStateChanges(objType string, since time.Time) {
+	filterExpr := fmt.Sprintf("%s.last_state_change>%f", objType, float64(since.UnixMicro())/1_000_000.0)
 
 	client.checkMissedChanges(objType, filterExpr, func(attrs *HostServiceRuntimeAttributes, host, service string) {
 		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, host, service)
@@ -211,11 +208,9 @@ func (client *Client) checkMissedStateChanges(objType string) {
 }
 
 // checkMissedAcknowledgements fetches missed set Host or Service Acknowledgements and feeds them into the handler.
-func (client *Client) checkMissedAcknowledgements(objType string) {
-	client.eventsHandlerMutex.RLock()
+func (client *Client) checkMissedAcknowledgements(objType string, since time.Time) {
 	filterExpr := fmt.Sprintf("%s.acknowledgement && %s.acknowledgement_last_change>%f",
-		objType, objType, float64(client.eventsLastTs.UnixMicro())/1_000_000.0)
-	client.eventsHandlerMutex.RUnlock()
+		objType, objType, float64(since.UnixMicro())/1_000_000.0)
 
 	client.checkMissedChanges(objType, filterExpr, func(attrs *HostServiceRuntimeAttributes, host, service string) {
 		ackComment, err := client.fetchAcknowledgementComment(host, service, attrs.AcknowledgementLastChange.Time)
