@@ -189,7 +189,7 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 				Name: "docker-master!ssh",
 				Type: "Service",
 				Attrs: &HostServiceRuntimeAttributes{
-					Name:   "docker-master!ssh",
+					Name:   "ssh",
 					Host:   "docker-master",
 					Groups: []string{},
 					State:  2,
