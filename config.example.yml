@@ -14,6 +14,9 @@ icinga2-apis:
     host: https://localhost:5665
     auth-user: root
     auth-pass: icinga
+    # The Icinga 2 API CA must either be in the system's CA store, be passed as
+    # icinga-ca-file or certificate verification can be disabled.
+    # icinga-ca-file: /path/to/icinga-ca.crt
     # insecure-tls: true
 
 database:

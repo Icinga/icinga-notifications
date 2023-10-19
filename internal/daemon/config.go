@@ -13,6 +13,7 @@ type Icinga2ApiConfig struct {
 	Host                       string `yaml:"host"`
 	AuthUser                   string `yaml:"auth-user"`
 	AuthPass                   string `yaml:"auth-pass"`
+	IcingaCaFile               string `yaml:"icinga-ca-file"`
 	InsecureTls                bool   `yaml:"insecure-tls"`
 }
 
