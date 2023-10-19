@@ -193,8 +193,11 @@ func (client *Client) handleEvent(ev *event.Event, source string) {
 // loop takes care of reconnections, all those events will be logged while generated Events will be dispatched to the
 // callback function.
 func (client *Client) Process() {
+	client.eventsHandlerMutex.Lock()
 	client.eventsRingBuffer = make([]uint64, 1024)
 	client.eventsRingBufferPos = 0
+	client.eventsLastTs = time.Time{}
+	client.eventsHandlerMutex.Unlock()
 
 	defer client.Logger.Info("Event Stream Client has stopped")
 
@@ -220,9 +223,13 @@ func (client *Client) Process() {
 			client.Logger.Errorf("Cannot reestablish an API connection: %v", err)
 		}
 
-		go client.checkMissedStateChanges("host")
-		go client.checkMissedStateChanges("service")
-		go client.checkMissedAcknowledgements("host")
-		go client.checkMissedAcknowledgements("service")
+		client.eventsHandlerMutex.RLock()
+		lastEventTime := client.eventsLastTs
+		client.eventsHandlerMutex.RUnlock()
+
+		go client.checkMissedStateChanges("host", lastEventTime)
+		go client.checkMissedStateChanges("service", lastEventTime)
+		go client.checkMissedAcknowledgements("host", lastEventTime)
+		go client.checkMissedAcknowledgements("service", lastEventTime)
 	}
 }
