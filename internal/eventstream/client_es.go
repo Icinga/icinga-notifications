@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"net/http"
+	"net/url"
 )
 
 // This file contains Event Stream related methods of the Client.
@@ -51,7 +52,11 @@ func (client *Client) listenEventStream() error {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(client.Ctx, http.MethodPost, client.ApiHost+"/v1/events", bytes.NewReader(reqBody))
+	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/events")
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(client.Ctx, http.MethodPost, apiUrl, bytes.NewReader(reqBody))
 	if err != nil {
 		return err
 	}
