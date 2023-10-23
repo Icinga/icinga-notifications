@@ -92,35 +92,10 @@ type HostServiceRuntimeAttributes struct {
 // ObjectQueriesResult represents the Icinga 2 API Object Queries Result wrapper object.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#object-queries-result
-type ObjectQueriesResult struct {
+type ObjectQueriesResult[T Comment | Downtime | HostServiceRuntimeAttributes] struct {
 	Name  string `json:"name"`
 	Type  string `json:"type"`
-	Attrs any    `json:"attrs"`
-}
-
-func (objQueriesRes *ObjectQueriesResult) UnmarshalJSON(bytes []byte) error {
-	var responseAttrs json.RawMessage
-	err := json.Unmarshal(bytes, &struct {
-		Name  *string          `json:"name"`
-		Type  *string          `json:"type"`
-		Attrs *json.RawMessage `json:"attrs"`
-	}{&objQueriesRes.Name, &objQueriesRes.Type, &responseAttrs})
-	if err != nil {
-		return err
-	}
-
-	switch objQueriesRes.Type {
-	case "Comment":
-		objQueriesRes.Attrs = new(Comment)
-	case "Downtime":
-		objQueriesRes.Attrs = new(Downtime)
-	case "Host", "Service":
-		objQueriesRes.Attrs = new(HostServiceRuntimeAttributes)
-	default:
-		return fmt.Errorf("unsupported type %q", objQueriesRes.Type)
-	}
-
-	return json.Unmarshal(responseAttrs, objQueriesRes.Attrs)
+	Attrs T      `json:"attrs"`
 }
 
 // The following constants list all implemented Icinga 2 API Event Stream Types to be used as a const instead of
