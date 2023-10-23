@@ -115,12 +115,15 @@ func (client *Client) fetchServiceGroups(host, service string) ([]string, error)
 // the Host's resp. Service's AcknowledgementLastChange field has NOT the same timestamp as the Comment; there is a
 // difference of some milliseconds. As there might be even multiple ACK comments, we have to find the closest one.
 func (client *Client) fetchAcknowledgementComment(host, service string, ackTime time.Time) (*Comment, error) {
-	filterExpr := `comment.entry_type == 4 && comment.host_name == "` + host + `"`
+	filterExpr := "comment.entry_type == 4 && comment.host_name == comment_host_name"
+	filterVars := map[string]string{"comment_host_name": host}
 	if service != "" {
-		filterExpr += ` && comment.service_name == "` + service + `"`
+		filterExpr += " && comment.service_name == comment_service_name"
+		filterVars["comment_service_name"] = service
 	}
 
-	objQueriesResults, err := client.queryObjectsApiQuery("comment", map[string]any{"filter": filterExpr})
+	objQueriesResults, err := client.queryObjectsApiQuery("comment",
+		map[string]any{"filter": filterExpr, "filter_vars": filterVars})
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +197,7 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 
 // checkMissedStateChanges fetches missed Host or Service state changes and feeds them into the handler.
 func (client *Client) checkMissedStateChanges(objType string, since time.Time) {
-	filterExpr := fmt.Sprintf("%s.last_state_change>%f", objType, float64(since.UnixMicro())/1_000_000.0)
+	filterExpr := fmt.Sprintf("%s.last_state_change > %f", objType, float64(since.UnixMicro())/1_000_000.0)
 
 	client.checkMissedChanges(objType, filterExpr, func(attrs *HostServiceRuntimeAttributes, host, service string) {
 		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, host, service)
@@ -209,7 +212,7 @@ func (client *Client) checkMissedStateChanges(objType string, since time.Time) {
 
 // checkMissedAcknowledgements fetches missed set Host or Service Acknowledgements and feeds them into the handler.
 func (client *Client) checkMissedAcknowledgements(objType string, since time.Time) {
-	filterExpr := fmt.Sprintf("%s.acknowledgement && %s.acknowledgement_last_change>%f",
+	filterExpr := fmt.Sprintf("%s.acknowledgement && %s.acknowledgement_last_change > %f",
 		objType, objType, float64(since.UnixMicro())/1_000_000.0)
 
 	client.checkMissedChanges(objType, filterExpr, func(attrs *HostServiceRuntimeAttributes, host, service string) {
