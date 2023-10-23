@@ -2,12 +2,19 @@ package eventstream
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"fmt"
+	"github.com/icinga/icinga-notifications/internal/config"
+	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"hash/fnv"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"sync"
 	"time"
@@ -41,6 +48,64 @@ type Client struct {
 	eventsRingBuffer    []uint64
 	eventsRingBufferPos int
 	eventsLastTs        time.Time
+}
+
+// NewClientsFromConfig returns all Clients defined in the conf.ConfigFile.
+//
+// Those are prepared and just needed to be started by calling their Process method.
+func NewClientsFromConfig(
+	ctx context.Context,
+	logs *logging.Logging,
+	db *icingadb.DB,
+	runtimeConfig *config.RuntimeConfig,
+	conf *daemon.ConfigFile,
+) ([]*Client, error) {
+	clients := make([]*Client, 0, len(conf.Icinga2Apis))
+
+	for _, icinga2Api := range conf.Icinga2Apis {
+		logger := logs.GetChildLogger(fmt.Sprintf("eventstream-%d", icinga2Api.NotificationsEventSourceId))
+
+		client := &Client{
+			ApiHost:          icinga2Api.Host,
+			ApiBasicAuthUser: icinga2Api.AuthUser,
+			ApiBasicAuthPass: icinga2Api.AuthPass,
+			ApiHttpTransport: http.Transport{
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS13,
+				},
+			},
+
+			IcingaNotificationsEventSourceId: icinga2Api.NotificationsEventSourceId,
+			IcingaWebRoot:                    conf.Icingaweb2URL,
+
+			CallbackFn: MakeProcessEvent(db, logger, logs, runtimeConfig),
+			Ctx:        ctx,
+			Logger:     logger,
+		}
+
+		if icinga2Api.IcingaCaFile != "" {
+			caData, err := os.ReadFile(icinga2Api.IcingaCaFile)
+			if err != nil {
+				return nil, fmt.Errorf("cannot read CA file %q for Event Stream ID %d, %w",
+					icinga2Api.IcingaCaFile, icinga2Api.NotificationsEventSourceId, err)
+			}
+
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM(caData) {
+				return nil, fmt.Errorf("cannot add custom CA file to CA pool for Event Stream ID %d, %w",
+					icinga2Api.NotificationsEventSourceId, err)
+			}
+
+			client.ApiHttpTransport.TLSClientConfig.RootCAs = certPool
+		}
+
+		if icinga2Api.InsecureTls {
+			client.ApiHttpTransport.TLSClientConfig.InsecureSkipVerify = true
+		}
+
+		clients = append(clients, client)
+	}
+	return clients, nil
 }
 
 // buildCommonEvent creates an event.Event based on Host and (optional) Service attributes to be specified later.
