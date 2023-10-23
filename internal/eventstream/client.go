@@ -11,6 +11,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
+	"go.uber.org/zap"
 	"hash/fnv"
 	"net/http"
 	"net/url"
@@ -275,17 +276,10 @@ func (client *Client) Process() {
 			client.Logger.Warn("Event Stream closed stream; maybe Icinga 2 is reloading")
 		}
 
-		for {
-			if client.Ctx.Err() != nil {
-				client.Logger.Info("Abort Icinga 2 API reconnections as context is finished")
-				return
-			}
-
-			err := client.reestablishApiConnection()
-			if err == nil {
-				break
-			}
-			client.Logger.Errorf("Cannot reestablish an API connection: %v", err)
+		err = client.waitForApiAvailability()
+		if err != nil {
+			client.Logger.Errorw("Cannot reestablish an API connection", zap.Error(err))
+			return
 		}
 
 		client.eventsHandlerMutex.RLock()
