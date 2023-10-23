@@ -94,34 +94,33 @@ func TestFilter(t *testing.T) {
 
 		rule, err = Parse("foo=bar&bar=foo")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		assert.IsType(t, &All{}, rule)
+		assert.IsType(t, &Chain{}, rule)
 
 		rule, err = Parse("foo=bar|bar=foo")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		assert.IsType(t, &Any{}, rule)
+		assert.IsType(t, &Chain{}, rule)
 
 		rule, err = Parse("!(foo=bar|bar=foo)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		assert.IsType(t, &None{}, rule)
+		assert.IsType(t, &Chain{}, rule)
 
 		rule, err = Parse("!foo")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-
-		assert.Equal(t, &None{rules: []Filter{NewExists("foo")}}, rule)
+		assert.Equal(t, &Chain{op: NONE, rules: []Filter{NewExists("foo")}}, rule)
 
 		rule, err = Parse("foo")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		assert.Equal(t, NewExists("foo"), rule)
+		assert.Equal(t, &Exists{column: "foo"}, rule)
 
 		rule, err = Parse("!(foo=bar|bar=foo)&(foo=bar|bar=foo)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 
-		expected := &All{rules: []Filter{
-			&None{rules: []Filter{
+		expected := &Chain{op: ALL, rules: []Filter{
+			&Chain{op: NONE, rules: []Filter{
 				&Equal{column: "foo", value: "bar"},
 				&Equal{column: "bar", value: "foo"},
 			}},
-			&Any{rules: []Filter{
+			&Chain{op: ANY, rules: []Filter{
 				&Equal{column: "foo", value: "bar"},
 				&Equal{column: "bar", value: "foo"},
 			}},
