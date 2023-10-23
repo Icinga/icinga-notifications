@@ -80,6 +80,31 @@ func (c *Chain) ExtractConditions() []*Condition {
 	return conditions
 }
 
+// pop pops the last filter from the rules slice (if not empty) and returns it.
+func (c *Chain) pop() Filter {
+	var rule Filter
+	if l := len(c.rules); l > 0 {
+		rule, c.rules = c.rules[l-1], c.rules[:l-1]
+	}
+
+	return rule
+}
+
+// top picks and erases the first element from its rules and returns it.
+func (c *Chain) top() Filter {
+	var rule Filter
+	if len(c.rules) > 0 {
+		rule, c.rules = c.rules[0], c.rules[1:]
+	}
+
+	return rule
+}
+
+// add adds the given filter rules to the current chain.
+func (c *Chain) add(rules ...Filter) {
+	c.rules = append(c.rules, rules...)
+}
+
 // CompOperator is a type used for grouping the individual comparison operators of a filter string.
 type CompOperator string
 
