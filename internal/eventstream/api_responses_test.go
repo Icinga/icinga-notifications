@@ -65,6 +65,7 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 		name     string
 		jsonData string
 		isError  bool
+		resp     any
 		expected any
 	}{
 		{
@@ -86,10 +87,11 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 			// $ curl -k -s -u root:icinga 'https://localhost:5665/v1/objects/comments' | jq -c '[.results[] | select(.attrs.service_name == "")][0]'
 			name:     "comment-host",
 			jsonData: `{"attrs":{"__name":"dummy-0!f1239b7d-6e13-4031-b7dd-4055fdd2cd80","active":true,"author":"icingaadmin","entry_time":1697454753.536457,"entry_type":1,"expire_time":0,"ha_mode":0,"host_name":"dummy-0","legacy_id":3,"name":"f1239b7d-6e13-4031-b7dd-4055fdd2cd80","original_attributes":null,"package":"_api","paused":false,"persistent":false,"service_name":"","source_location":{"first_column":0,"first_line":1,"last_column":68,"last_line":1,"path":"/var/lib/icinga2/api/packages/_api/997346d3-374d-443f-b734-80789fd59b31/conf.d/comments/dummy-0!f1239b7d-6e13-4031-b7dd-4055fdd2cd80.conf"},"templates":["f1239b7d-6e13-4031-b7dd-4055fdd2cd80"],"text":"foo bar","type":"Comment","version":1697454753.53647,"zone":"master"},"joins":{},"meta":{},"name":"dummy-0!f1239b7d-6e13-4031-b7dd-4055fdd2cd80","type":"Comment"}`,
-			expected: ObjectQueriesResult{
+			resp:     &ObjectQueriesResult[Comment]{},
+			expected: &ObjectQueriesResult[Comment]{
 				Name: "dummy-0!f1239b7d-6e13-4031-b7dd-4055fdd2cd80",
 				Type: "Comment",
-				Attrs: &Comment{
+				Attrs: Comment{
 					Host:      "dummy-0",
 					Author:    "icingaadmin",
 					Text:      "foo bar",
@@ -102,10 +104,11 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 			// $ curl -k -s -u root:icinga 'https://localhost:5665/v1/objects/comments' | jq -c '[.results[] | select(.attrs.service_name != "")][0]'
 			name:     "comment-service",
 			jsonData: `{"attrs":{"__name":"dummy-912!ping6!1b29580d-0a09-4265-ad1f-5e16f462443d","active":true,"author":"icingaadmin","entry_time":1697197701.307516,"entry_type":1,"expire_time":0,"ha_mode":0,"host_name":"dummy-912","legacy_id":1,"name":"1b29580d-0a09-4265-ad1f-5e16f462443d","original_attributes":null,"package":"_api","paused":false,"persistent":false,"service_name":"ping6","source_location":{"first_column":0,"first_line":1,"last_column":68,"last_line":1,"path":"/var/lib/icinga2/api/packages/_api/997346d3-374d-443f-b734-80789fd59b31/conf.d/comments/dummy-912!ping6!1b29580d-0a09-4265-ad1f-5e16f462443d.conf"},"templates":["1b29580d-0a09-4265-ad1f-5e16f462443d"],"text":"adfadsfasdfasdf","type":"Comment","version":1697197701.307536,"zone":"master"},"joins":{},"meta":{},"name":"dummy-912!ping6!1b29580d-0a09-4265-ad1f-5e16f462443d","type":"Comment"}`,
-			expected: ObjectQueriesResult{
+			resp:     &ObjectQueriesResult[Comment]{},
+			expected: &ObjectQueriesResult[Comment]{
 				Name: "dummy-912!ping6!1b29580d-0a09-4265-ad1f-5e16f462443d",
 				Type: "Comment",
-				Attrs: &Comment{
+				Attrs: Comment{
 					Host:      "dummy-912",
 					Service:   "ping6",
 					Author:    "icingaadmin",
@@ -119,10 +122,11 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 			// $ curl -k -s -u root:icinga 'https://localhost:5665/v1/objects/downtimes' | jq -c '[.results[] | select(.attrs.service_name == "")][0]'
 			name:     "downtime-host",
 			jsonData: `{"attrs":{"__name":"dummy-11!af73f9d9-2ed8-45f8-b541-cce3f3fe0f6c","active":true,"author":"icingaadmin","authoritative_zone":"","comment":"turn down for what","config_owner":"","config_owner_hash":"","duration":0,"end_time":1698096240,"entry_time":1697456415.667442,"fixed":true,"ha_mode":0,"host_name":"dummy-11","legacy_id":2,"name":"af73f9d9-2ed8-45f8-b541-cce3f3fe0f6c","original_attributes":null,"package":"_api","parent":"","paused":false,"remove_time":0,"scheduled_by":"","service_name":"","source_location":{"first_column":0,"first_line":1,"last_column":69,"last_line":1,"path":"/var/lib/icinga2/api/packages/_api/997346d3-374d-443f-b734-80789fd59b31/conf.d/downtimes/dummy-11!af73f9d9-2ed8-45f8-b541-cce3f3fe0f6c.conf"},"start_time":1697456292,"templates":["af73f9d9-2ed8-45f8-b541-cce3f3fe0f6c"],"trigger_time":1697456415.667442,"triggered_by":"","triggers":[],"type":"Downtime","version":1697456415.667458,"was_cancelled":false,"zone":"master"},"joins":{},"meta":{},"name":"dummy-11!af73f9d9-2ed8-45f8-b541-cce3f3fe0f6c","type":"Downtime"}`,
-			expected: ObjectQueriesResult{
+			resp:     &ObjectQueriesResult[Downtime]{},
+			expected: &ObjectQueriesResult[Downtime]{
 				Name: "dummy-11!af73f9d9-2ed8-45f8-b541-cce3f3fe0f6c",
 				Type: "Downtime",
-				Attrs: &Downtime{
+				Attrs: Downtime{
 					Host:    "dummy-11",
 					Author:  "icingaadmin",
 					Comment: "turn down for what",
@@ -133,10 +137,11 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 			// $ curl -k -s -u root:icinga 'https://localhost:5665/v1/objects/downtimes' | jq -c '[.results[] | select(.attrs.service_name != "")][0]'
 			name:     "downtime-service",
 			jsonData: `{"attrs":{"__name":"docker-master!load!c27b27c2-e0ab-45ff-8b9b-e95f29851eb0","active":true,"author":"icingaadmin","authoritative_zone":"master","comment":"Scheduled downtime for backup","config_owner":"docker-master!load!backup-downtime","config_owner_hash":"ca9502dc8fa5d29c1cb2686808b5d2ccf3ea4a9c6dc3f3c09bfc54614c03c765","duration":0,"end_time":1697511600,"entry_time":1697439555.095232,"fixed":true,"ha_mode":0,"host_name":"docker-master","legacy_id":1,"name":"c27b27c2-e0ab-45ff-8b9b-e95f29851eb0","original_attributes":null,"package":"_api","parent":"","paused":false,"remove_time":0,"scheduled_by":"docker-master!load!backup-downtime","service_name":"load","source_location":{"first_column":0,"first_line":1,"last_column":69,"last_line":1,"path":"/var/lib/icinga2/api/packages/_api/997346d3-374d-443f-b734-80789fd59b31/conf.d/downtimes/docker-master!load!c27b27c2-e0ab-45ff-8b9b-e95f29851eb0.conf"},"start_time":1697508000,"templates":["c27b27c2-e0ab-45ff-8b9b-e95f29851eb0"],"trigger_time":0,"triggered_by":"","triggers":[],"type":"Downtime","version":1697439555.095272,"was_cancelled":false,"zone":""},"joins":{},"meta":{},"name":"docker-master!load!c27b27c2-e0ab-45ff-8b9b-e95f29851eb0","type":"Downtime"}`,
-			expected: ObjectQueriesResult{
+			resp:     &ObjectQueriesResult[Downtime]{},
+			expected: &ObjectQueriesResult[Downtime]{
 				Name: "docker-master!load!c27b27c2-e0ab-45ff-8b9b-e95f29851eb0",
 				Type: "Downtime",
-				Attrs: &Downtime{
+				Attrs: Downtime{
 					Host:    "docker-master",
 					Service: "load",
 					Author:  "icingaadmin",
@@ -148,10 +153,11 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 			// $ curl -k -s -u root:icinga 'https://localhost:5665/v1/objects/hosts' | jq -c '.results[0]'
 			name:     "host",
 			jsonData: `{"attrs":{"__name":"dummy-244","acknowledgement":0,"acknowledgement_expiry":0,"acknowledgement_last_change":0,"action_url":"","active":true,"address":"127.0.0.1","address6":"::1","check_attempt":1,"check_command":"random fortune","check_interval":300,"check_period":"","check_timeout":null,"command_endpoint":"","display_name":"dummy-244","downtime_depth":0,"enable_active_checks":true,"enable_event_handler":true,"enable_flapping":false,"enable_notifications":true,"enable_passive_checks":true,"enable_perfdata":true,"event_command":"icinga-notifications-host-events","executions":null,"flapping":false,"flapping_current":0,"flapping_ignore_states":null,"flapping_last_change":0,"flapping_threshold":0,"flapping_threshold_high":30,"flapping_threshold_low":25,"force_next_check":false,"force_next_notification":false,"groups":["app-network","department-dev","env-qa","location-rome"],"ha_mode":0,"handled":false,"icon_image":"","icon_image_alt":"","last_check":1697459643.869006,"last_check_result":{"active":true,"check_source":"docker-master","command":["/bin/bash","-c","/usr/games/fortune; exit $0","0"],"execution_end":1697459643.868893,"execution_start":1697459643.863147,"exit_status":0,"output":"If you think last Tuesday was a drag, wait till you see what happens tomorrow!","performance_data":[],"previous_hard_state":99,"schedule_end":1697459643.869006,"schedule_start":1697459643.86287,"scheduling_source":"docker-master","state":0,"ttl":0,"type":"CheckResult","vars_after":{"attempt":1,"reachable":true,"state":0,"state_type":1},"vars_before":{"attempt":1,"reachable":true,"state":0,"state_type":1}},"last_hard_state":0,"last_hard_state_change":1697099900.637215,"last_reachable":true,"last_state":0,"last_state_change":1697099900.637215,"last_state_down":0,"last_state_type":1,"last_state_unreachable":0,"last_state_up":1697459643.868893,"max_check_attempts":3,"name":"dummy-244","next_check":1697459943.019035,"next_update":1697460243.031081,"notes":"","notes_url":"","original_attributes":null,"package":"_etc","paused":false,"previous_state_change":1697099900.637215,"problem":false,"retry_interval":60,"severity":0,"source_location":{"first_column":5,"first_line":2,"last_column":38,"last_line":2,"path":"/etc/icinga2/zones.d/master/03-dummys-hosts.conf"},"state":0,"state_type":1,"templates":["dummy-244","generic-icinga-notifications-host"],"type":"Host","vars":{"app":"network","department":"dev","env":"qa","is_dummy":true,"location":"rome"},"version":0,"volatile":false,"zone":"master"},"joins":{},"meta":{},"name":"dummy-244","type":"Host"}`,
-			expected: ObjectQueriesResult{
+			resp:     &ObjectQueriesResult[HostServiceRuntimeAttributes]{},
+			expected: &ObjectQueriesResult[HostServiceRuntimeAttributes]{
 				Name: "dummy-244",
 				Type: "Host",
-				Attrs: &HostServiceRuntimeAttributes{
+				Attrs: HostServiceRuntimeAttributes{
 					Name:   "dummy-244",
 					Groups: []string{"app-network", "department-dev", "env-qa", "location-rome"},
 					State:  0,
@@ -179,10 +185,11 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 			// $ curl -k -s -u root:icinga -d '{"filter": "service.acknowledgement != 0"}' -H 'Accept: application/json' -H 'X-HTTP-Method-Override: GET' 'https://localhost:5665/v1/objects/services' | jq -c '.results[0]'
 			name:     "service",
 			jsonData: `{"attrs":{"__name":"docker-master!ssh","acknowledgement":1,"acknowledgement_expiry":0,"acknowledgement_last_change":1697460655.878141,"action_url":"","active":true,"check_attempt":1,"check_command":"ssh","check_interval":60,"check_period":"","check_timeout":null,"command_endpoint":"","display_name":"ssh","downtime_depth":0,"enable_active_checks":true,"enable_event_handler":true,"enable_flapping":false,"enable_notifications":true,"enable_passive_checks":true,"enable_perfdata":true,"event_command":"icinga-notifications-service-events","executions":null,"flapping":false,"flapping_current":0,"flapping_ignore_states":null,"flapping_last_change":0,"flapping_threshold":0,"flapping_threshold_high":30,"flapping_threshold_low":25,"force_next_check":false,"force_next_notification":false,"groups":[],"ha_mode":0,"handled":true,"host_name":"docker-master","icon_image":"","icon_image_alt":"","last_check":1697460711.134904,"last_check_result":{"active":true,"check_source":"docker-master","command":["/usr/lib/nagios/plugins/check_ssh","127.0.0.1"],"execution_end":1697460711.134875,"execution_start":1697460711.130247,"exit_status":2,"output":"connect to address 127.0.0.1 and port 22: Connection refused","performance_data":[],"previous_hard_state":99,"schedule_end":1697460711.134904,"schedule_start":1697460711.13,"scheduling_source":"docker-master","state":2,"ttl":0,"type":"CheckResult","vars_after":{"attempt":1,"reachable":true,"state":2,"state_type":1},"vars_before":{"attempt":1,"reachable":true,"state":2,"state_type":1}},"last_hard_state":2,"last_hard_state_change":1697099980.820806,"last_reachable":true,"last_state":2,"last_state_change":1697099896.120829,"last_state_critical":1697460711.134875,"last_state_ok":0,"last_state_type":1,"last_state_unknown":0,"last_state_unreachable":0,"last_state_warning":0,"max_check_attempts":5,"name":"ssh","next_check":1697460771.1299999,"next_update":1697460831.1397498,"notes":"","notes_url":"","original_attributes":null,"package":"_etc","paused":false,"previous_state_change":1697099896.120829,"problem":true,"retry_interval":30,"severity":640,"source_location":{"first_column":1,"first_line":47,"last_column":19,"last_line":47,"path":"/etc/icinga2/conf.d/services.conf"},"state":2,"state_type":1,"templates":["ssh","generic-icinga-notifications-service","generic-service"],"type":"Service","vars":null,"version":0,"volatile":false,"zone":""},"joins":{},"meta":{},"name":"docker-master!ssh","type":"Service"}`,
-			expected: ObjectQueriesResult{
+			resp:     &ObjectQueriesResult[HostServiceRuntimeAttributes]{},
+			expected: &ObjectQueriesResult[HostServiceRuntimeAttributes]{
 				Name: "docker-master!ssh",
 				Type: "Service",
-				Attrs: &HostServiceRuntimeAttributes{
+				Attrs: HostServiceRuntimeAttributes{
 					Name:   "ssh",
 					Host:   "docker-master",
 					Groups: []string{},
@@ -209,14 +216,13 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			var resp ObjectQueriesResult
-			err := json.Unmarshal([]byte(test.jsonData), &resp)
+			err := json.Unmarshal([]byte(test.jsonData), test.resp)
 			assert.Equal(t, test.isError, err != nil, "unexpected error state; %v", err)
 			if err != nil {
 				return
 			}
 
-			assert.EqualValuesf(t, test.expected, resp, "unexpected ObjectQueriesResult")
+			assert.EqualValuesf(t, test.expected, test.resp, "unexpected ObjectQueriesResult")
 		})
 	}
 }
