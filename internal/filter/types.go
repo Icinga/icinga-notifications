@@ -1,63 +1,74 @@
 package filter
 
-// All represents a filter chain type that matches when all of its Rules matches.
-type All struct {
+import (
+	"fmt"
+)
+
+// LogicalOp is a type used for grouping the logical operators of a filter string.
+type LogicalOp string
+
+const (
+	// NONE represents a filter chain type that matches when none of its ruleset matches.
+	NONE LogicalOp = "!"
+	// ALL represents a filter chain type that matches when all of its ruleset matches.
+	ALL LogicalOp = "&"
+	// ANY represents a filter chain type that matches when at least one of its ruleset matches.
+	ANY LogicalOp = "|"
+)
+
+// Chain is a filter type that wraps other filter rules and itself.
+// Therefore, it implements the Filter interface to allow it to be part of its ruleset.
+// It supports also adding and popping filter rules individually.
+type Chain struct {
+	op    LogicalOp // The filter chain operator to be used to evaluate the rules
 	rules []Filter
 }
 
-func (a *All) Eval(filterable Filterable) (bool, error) {
-	for _, rule := range a.rules {
-		matched, err := rule.Eval(filterable)
-		if err != nil {
-			return false, err
+// Eval evaluates the filter rule sets recursively based on their operator type.
+func (c *Chain) Eval(filterable Filterable) (bool, error) {
+	switch c.op {
+	case NONE:
+		for _, rule := range c.rules {
+			matched, err := rule.Eval(filterable)
+			if err != nil {
+				return false, err
+			}
+
+			if matched {
+				return false, nil
+			}
 		}
 
-		if !matched {
-			return false, nil
+		return true, nil
+	case ALL:
+		for _, rule := range c.rules {
+			matched, err := rule.Eval(filterable)
+			if err != nil {
+				return false, err
+			}
+
+			if !matched {
+				return false, nil
+			}
 		}
+
+		return true, nil
+	case ANY:
+		for _, rule := range c.rules {
+			matched, err := rule.Eval(filterable)
+			if err != nil {
+				return false, err
+			}
+
+			if matched {
+				return true, nil
+			}
+		}
+
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid logical operator provided: %q", c.op)
 	}
-
-	return true, nil
-}
-
-// Any represents a filter chain type that matches when at least one of its Rules matches.
-type Any struct {
-	rules []Filter
-}
-
-func (a *Any) Eval(filterable Filterable) (bool, error) {
-	for _, rule := range a.rules {
-		matched, err := rule.Eval(filterable)
-		if err != nil {
-			return false, err
-		}
-
-		if matched {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
-// None represents a filter chain type that matches when none of its Rules matches.
-type None struct {
-	rules []Filter
-}
-
-func (n *None) Eval(filterable Filterable) (bool, error) {
-	for _, rule := range n.rules {
-		matched, err := rule.Eval(filterable)
-		if err != nil {
-			return false, err
-		}
-
-		if matched {
-			return false, nil
-		}
-	}
-
-	return true, nil
 }
 
 // Condition represents a single filter condition.
@@ -172,10 +183,7 @@ func (goe *GreaterThanOrEqual) Eval(filterable Filterable) (bool, error) {
 }
 
 var (
-	_ Filter = (*All)(nil)
-	_ Filter = (*Any)(nil)
-	_ Filter = (*None)(nil)
-
+	_ Filter = (*Chain)(nil)
 	_ Filter = (*Exists)(nil)
 	_ Filter = (*Equal)(nil)
 	_ Filter = (*UnEqual)(nil)
