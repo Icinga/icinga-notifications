@@ -2,27 +2,23 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"flag"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
+	"github.com/icinga/icinga-notifications/internal/eventstream"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/utils"
 	"go.uber.org/zap"
-	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
 	"time"
-
-	"github.com/icinga/icinga-notifications/internal/eventstream"
 )
 
 func main() {
@@ -102,44 +98,11 @@ func main() {
 		logger.Fatalw("Can't load incidents from database", zap.Error(err))
 	}
 
-	for _, icinga2Api := range conf.Icinga2Apis {
-		logger := logs.GetChildLogger(fmt.Sprintf("eventstream-%d", icinga2Api.NotificationsEventSourceId))
-
-		esClient := eventstream.Client{
-			ApiHost:          icinga2Api.Host,
-			ApiBasicAuthUser: icinga2Api.AuthUser,
-			ApiBasicAuthPass: icinga2Api.AuthPass,
-
-			IcingaNotificationsEventSourceId: icinga2Api.NotificationsEventSourceId,
-			IcingaWebRoot:                    conf.Icingaweb2URL,
-
-			CallbackFn: eventstream.MakeProcessEvent(db, logger, logs, runtimeConfig),
-			Ctx:        ctx,
-			Logger:     logger,
-		}
-
-		switch {
-		case icinga2Api.IcingaCaFile != "":
-			caData, err := os.ReadFile(icinga2Api.IcingaCaFile)
-			if err != nil {
-				logger.Errorw("Cannot read CA file", zap.String("file", icinga2Api.IcingaCaFile), zap.Error(err))
-				continue
-			}
-
-			certPool := x509.NewCertPool()
-			if !certPool.AppendCertsFromPEM(caData) {
-				logger.Error("Cannot add CA file to cert pool")
-				continue
-			}
-
-			esClient.ApiHttpTransport = http.Transport{TLSClientConfig: &tls.Config{RootCAs: certPool}}
-			logger.Debug("Configured custom CA file for API HTTPS requests")
-
-		case icinga2Api.InsecureTls:
-			esClient.ApiHttpTransport = http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-			logger.Warn("Skipping TLS verification for API HTTPS requests")
-		}
-
+	esClients, err := eventstream.NewClientsFromConfig(ctx, logs, db, runtimeConfig, conf)
+	if err != nil {
+		logger.Fatalw("cannot prepare Event Stream API Clients form config", zap.Error(err))
+	}
+	for _, esClient := range esClients {
 		go esClient.Process()
 	}
 
