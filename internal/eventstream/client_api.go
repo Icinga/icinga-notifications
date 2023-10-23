@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"go.uber.org/zap"
 	"math"
 	"net/http"
 	"net/url"
@@ -235,12 +236,8 @@ func (client *Client) checkMissedAcknowledgements(objType string, since time.Tim
 	})
 }
 
-// reestablishApiConnection tries to access the Icinga 2 API with an exponential backoff.
-//
-// With 10 retries, it might block up to (2^10 - 1) * 10 / 1_000 = 10.23 seconds plus additional HTTP delays.
-func (client *Client) reestablishApiConnection() error {
-	const maxRetries = 10
-
+// waitForApiAvailability reconnects to the Icinga 2 API until it either becomes available or the Client context is done.
+func (client *Client) waitForApiAvailability() error {
 	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/")
 	if err != nil {
 		return err
@@ -251,33 +248,38 @@ func (client *Client) reestablishApiConnection() error {
 	}
 	req.SetBasicAuth(client.ApiBasicAuthUser, client.ApiBasicAuthPass)
 
-	var lastErr error
-	for i := 0; i < maxRetries; i++ {
-		if client.Ctx.Err() != nil {
-			return client.Ctx.Err()
+	// To neither flood the API nor have to wait unnecessary long, at first the exponential function for the backoff
+	// time calculation will be used. When numbers are starting to get big, a logarithm will be used instead.
+	// 10ms, 27ms, 73ms, 200ms, 545ms, 1.484s, 2.584s, 2.807s, 3s, 3.169s, ...
+	backoffDelay := func(i int) time.Duration {
+		if i <= 5 {
+			return time.Duration(math.Exp(float64(i)) * 10 * float64(time.Millisecond))
 		}
-		time.Sleep((time.Duration)(math.Exp2(float64(i))) * 10 * time.Millisecond)
+		return time.Duration(math.Log2(float64(i)) * float64(time.Second))
+	}
 
-		client.Logger.Debugf("Try to reestablish an API connection, %d/%d tries..", i+1, maxRetries)
+	for i := 0; client.Ctx.Err() == nil; i++ {
+		time.Sleep(backoffDelay(i))
+		client.Logger.Debugw("Try to reestablish an API connection", zap.Int("try", i+1))
 
 		httpClient := &http.Client{
 			Transport: &client.ApiHttpTransport,
-			Timeout:   time.Second,
+			Timeout:   100 * time.Millisecond,
 		}
 		res, err := httpClient.Do(req)
 		if err != nil {
-			lastErr = err
-			client.Logger.Debugf("API probing failed: %v", lastErr)
+			client.Logger.Errorw("Reestablishing an API connection failed", zap.Error(err))
 			continue
 		}
 		_ = res.Body.Close()
 
 		if res.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("expected HTTP status %d, got %d", http.StatusOK, res.StatusCode)
-			client.Logger.Debugf("API probing failed: %v", lastErr)
+			client.Logger.Errorw("API returns unexpected status code during API reconnection", zap.Int("status", res.StatusCode))
 			continue
 		}
+
+		client.Logger.Debugw("Successfully reconnected to API", zap.Int("try", i+1))
 		return nil
 	}
-	return fmt.Errorf("cannot query API backend in %d tries, %w", maxRetries, lastErr)
+	return client.Ctx.Err()
 }
