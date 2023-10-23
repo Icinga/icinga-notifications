@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go.uber.org/zap"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -14,99 +15,117 @@ import (
 
 // This method contains Icinga 2 API related methods which are not directly related to the Event Stream.
 
-// queryObjectsApi takes a Request, executes it and hopefully returns an array of .
-func (client *Client) queryObjectsApi(req *http.Request) ([]ObjectQueriesResult, error) {
+// extractObjectQueriesResult parses a typed ObjectQueriesResult array out of a JSON io.ReaderCloser.
+//
+// As Go 1.21 does not allow type parameters in methods[0], the logic was extracted into a function transforming the
+// JSON response - passed as an io.ReaderCloser which will be closed within this function - into the typed response to
+// be used within the methods below.
+//
+// [0] https://github.com/golang/go/issues/49085
+func extractObjectQueriesResult[T Comment | Downtime | HostServiceRuntimeAttributes](jsonResp io.ReadCloser) ([]ObjectQueriesResult[T], error) {
+	defer func() { _ = jsonResp.Close() }()
+
+	var objQueriesResults []ObjectQueriesResult[T]
+	err := json.NewDecoder(jsonResp).Decode(&struct {
+		Results *[]ObjectQueriesResult[T] `json:"results"`
+	}{&objQueriesResults})
+	if err != nil {
+		return nil, err
+	}
+	return objQueriesResults, nil
+}
+
+// queryObjectsApi performs a configurable HTTP request against the Icinga 2 API and returns its raw response.
+func (client *Client) queryObjectsApi(urlPaths []string, method string, body io.Reader, headers map[string]string) (io.ReadCloser, error) {
+	apiUrl, err := url.JoinPath(client.ApiHost, urlPaths...)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(client.Ctx, method, apiUrl, body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.SetBasicAuth(client.ApiBasicAuthUser, client.ApiBasicAuthPass)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
 	httpClient := &http.Client{Transport: &client.ApiHttpTransport}
 	res, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = res.Body.Close() }()
 
-	var objQueriesResults []ObjectQueriesResult
-	err = json.NewDecoder(res.Body).Decode(&struct {
-		Results *[]ObjectQueriesResult `json:"results"`
-	}{&objQueriesResults})
-	if err != nil {
-		return nil, err
+	if res.StatusCode != http.StatusOK {
+		_ = res.Body.Close()
+		return nil, fmt.Errorf("unexpected status code %d", res.StatusCode)
 	}
 
-	return objQueriesResults, nil
+	return res.Body, nil
 }
 
 // queryObjectsApiDirect performs a direct resp. "fast" API query against a specific object identified by its name.
-func (client *Client) queryObjectsApiDirect(objType, objName string) ([]ObjectQueriesResult, error) {
-	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/objects/", objType+"s/", objName)
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(client.Ctx, http.MethodGet, apiUrl, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.SetBasicAuth(client.ApiBasicAuthUser, client.ApiBasicAuthPass)
-	req.Header.Set("Accept", "application/json")
-
-	return client.queryObjectsApi(req)
+func (client *Client) queryObjectsApiDirect(objType, objName string) (io.ReadCloser, error) {
+	return client.queryObjectsApi(
+		[]string{"/v1/objects/", objType + "s/", objName},
+		http.MethodGet,
+		nil,
+		map[string]string{"Accept": "application/json"})
 }
 
 // queryObjectsApiQuery sends a query to the Icinga 2 API /v1/objects to receive data of the given objType.
-func (client *Client) queryObjectsApiQuery(objType string, query map[string]any) ([]ObjectQueriesResult, error) {
+func (client *Client) queryObjectsApiQuery(objType string, query map[string]any) (io.ReadCloser, error) {
 	reqBody, err := json.Marshal(query)
 	if err != nil {
 		return nil, err
 	}
 
-	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/objects/", objType+"s")
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(client.Ctx, http.MethodPost, apiUrl, bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, err
-	}
-
-	req.SetBasicAuth(client.ApiBasicAuthUser, client.ApiBasicAuthPass)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Http-Method-Override", "GET")
-
-	return client.queryObjectsApi(req)
+	return client.queryObjectsApi(
+		[]string{"/v1/objects/", objType + "s"},
+		http.MethodPost,
+		bytes.NewReader(reqBody),
+		map[string]string{
+			"Accept":                 "application/json",
+			"Content-Type":           "application/json",
+			"X-Http-Method-Override": "GET",
+		})
 }
 
 // fetchHostGroup fetches all Host Groups for this host.
 func (client *Client) fetchHostGroups(host string) ([]string, error) {
-	objQueriesResults, err := client.queryObjectsApiDirect("host", host)
+	jsonRaw, err := client.queryObjectsApiDirect("host", host)
 	if err != nil {
 		return nil, err
 	}
+	objQueriesResults, err := extractObjectQueriesResult[HostServiceRuntimeAttributes](jsonRaw)
+	if err != nil {
+		return nil, err
+	}
+
 	if len(objQueriesResults) != 1 {
 		return nil, fmt.Errorf("expected exactly one result for host %q instead of %d", host, len(objQueriesResults))
 	}
 
-	attrs, ok := objQueriesResults[0].Attrs.(*HostServiceRuntimeAttributes)
-	if !ok {
-		return nil, fmt.Errorf("queried object's attrs are of wrong type %T", attrs)
-	}
-	return attrs.Groups, nil
+	return objQueriesResults[0].Attrs.Groups, nil
 }
 
 // fetchServiceGroups fetches all Service Groups for this service on this host.
 func (client *Client) fetchServiceGroups(host, service string) ([]string, error) {
-	objQueriesResults, err := client.queryObjectsApiDirect("service", host+"!"+service)
+	jsonRaw, err := client.queryObjectsApiDirect("host", host)
 	if err != nil {
 		return nil, err
 	}
+	objQueriesResults, err := extractObjectQueriesResult[HostServiceRuntimeAttributes](jsonRaw)
+	if err != nil {
+		return nil, err
+	}
+
 	if len(objQueriesResults) != 1 {
 		return nil, fmt.Errorf("expected exactly one result for service %q instead of %d", host+"!"+service, len(objQueriesResults))
 	}
 
-	attrs, ok := objQueriesResults[0].Attrs.(*HostServiceRuntimeAttributes)
-	if !ok {
-		return nil, fmt.Errorf("queried object's attrs are of wrong type %T", attrs)
-	}
-	return attrs.Groups, nil
+	return objQueriesResults[0].Attrs.Groups, nil
 }
 
 // fetchAcknowledgementComment fetches an Acknowledgement Comment for a Host (empty service) or for a Service at a Host.
@@ -123,43 +142,44 @@ func (client *Client) fetchAcknowledgementComment(host, service string, ackTime 
 		filterVars["comment_service_name"] = service
 	}
 
-	objQueriesResults, err := client.queryObjectsApiQuery("comment",
-		map[string]any{"filter": filterExpr, "filter_vars": filterVars})
+	jsonRaw, err := client.queryObjectsApiQuery("comment", map[string]any{"filter": filterExpr, "filter_vars": filterVars})
 	if err != nil {
 		return nil, err
 	}
+	objQueriesResults, err := extractObjectQueriesResult[Comment](jsonRaw)
+	if err != nil {
+		return nil, err
+	}
+
 	if len(objQueriesResults) == 0 {
 		return nil, fmt.Errorf("found no ACK Comments found for %q", filterExpr)
 	}
 
-	comments := make([]*Comment, len(objQueriesResults))
-	for i, objQueriesResult := range objQueriesResults {
-		c, ok := objQueriesResult.Attrs.(*Comment)
-		if !ok {
-			return nil, fmt.Errorf("queried object's attrs are of wrong type %T", c)
-		}
-		comments[i] = c
-	}
-
-	slices.SortFunc(comments, func(a, b *Comment) int {
-		distA := a.EntryTime.Time.Sub(ackTime).Abs()
-		distB := b.EntryTime.Time.Sub(ackTime).Abs()
+	slices.SortFunc(objQueriesResults, func(a, b ObjectQueriesResult[Comment]) int {
+		distA := a.Attrs.EntryTime.Time.Sub(ackTime).Abs()
+		distB := b.Attrs.EntryTime.Time.Sub(ackTime).Abs()
 		return int(distA - distB)
 	})
-	if comments[0].EntryTime.Sub(ackTime).Abs() > time.Second {
+	if objQueriesResults[0].Attrs.EntryTime.Sub(ackTime).Abs() > time.Second {
 		return nil, fmt.Errorf("found no ACK Comment for %q close to %v", filterExpr, ackTime)
 	}
 
-	return comments[0], nil
+	return &objQueriesResults[0].Attrs, nil
 }
 
 // checkMissedChanges queries for Service or Host objects with a specific filter to handle missed elements.
-func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallbackFn func(attrs *HostServiceRuntimeAttributes, host, service string)) {
-	objQueriesResults, err := client.queryObjectsApiQuery(objType, map[string]any{"filter": filterExpr})
+func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallbackFn func(attrs HostServiceRuntimeAttributes, host, service string)) {
+	jsonRaw, err := client.queryObjectsApiQuery(objType, map[string]any{"filter": filterExpr})
 	if err != nil {
 		client.Logger.Errorf("Quering %ss from API failed, %v", objType, err)
 		return
 	}
+	objQueriesResults, err := extractObjectQueriesResult[HostServiceRuntimeAttributes](jsonRaw)
+	if err != nil {
+		client.Logger.Errorf("Parsing %ss from API failed, %v", objType, err)
+		return
+	}
+
 	if len(objQueriesResults) == 0 {
 		return
 	}
@@ -172,27 +192,21 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 			return
 		}
 
-		attrs, ok := objQueriesResult.Attrs.(*HostServiceRuntimeAttributes)
-		if !ok {
-			client.Logger.Errorf("Queried %s API response object's attrs are of wrong type %T", objType, attrs)
-			continue
-		}
-
 		var hostName, serviceName string
 		switch objQueriesResult.Type {
 		case "Host":
-			hostName = attrs.Name
+			hostName = objQueriesResult.Attrs.Name
 
 		case "Service":
-			hostName = attrs.Host
-			serviceName = attrs.Name
+			hostName = objQueriesResult.Attrs.Host
+			serviceName = objQueriesResult.Attrs.Name
 
 		default:
 			client.Logger.Errorf("Querying API delivered a %q object when expecting %s", objQueriesResult.Type, objType)
 			continue
 		}
 
-		attrsCallbackFn(attrs, hostName, serviceName)
+		attrsCallbackFn(objQueriesResult.Attrs, hostName, serviceName)
 	}
 }
 
@@ -200,7 +214,7 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 func (client *Client) checkMissedStateChanges(objType string, since time.Time) {
 	filterExpr := fmt.Sprintf("%s.last_state_change > %f", objType, float64(since.UnixMicro())/1_000_000.0)
 
-	client.checkMissedChanges(objType, filterExpr, func(attrs *HostServiceRuntimeAttributes, host, service string) {
+	client.checkMissedChanges(objType, filterExpr, func(attrs HostServiceRuntimeAttributes, host, service string) {
 		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, host, service)
 		if err != nil {
 			client.Logger.Errorf("Failed to construct Event from %s API: %v", objType, err)
@@ -216,7 +230,7 @@ func (client *Client) checkMissedAcknowledgements(objType string, since time.Tim
 	filterExpr := fmt.Sprintf("%s.acknowledgement && %s.acknowledgement_last_change > %f",
 		objType, objType, float64(since.UnixMicro())/1_000_000.0)
 
-	client.checkMissedChanges(objType, filterExpr, func(attrs *HostServiceRuntimeAttributes, host, service string) {
+	client.checkMissedChanges(objType, filterExpr, func(attrs HostServiceRuntimeAttributes, host, service string) {
 		ackComment, err := client.fetchAcknowledgementComment(host, service, attrs.AcknowledgementLastChange.Time)
 		if err != nil {
 			client.Logger.Errorf("Cannot fetch ACK Comment for Acknowledgement, %v", err)
