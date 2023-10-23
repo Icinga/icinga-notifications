@@ -2,7 +2,7 @@ package eventstream
 
 import (
 	"encoding/json"
-	"reflect"
+	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
 )
@@ -50,18 +50,12 @@ func TestIcinga2Time_UnmarshalJSON(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var ici2time Icinga2Time
 			err := json.Unmarshal([]byte(test.jsonData), &ici2time)
-			if (err != nil) != test.isError {
-				t.Errorf("unexpected error state; got error: %t, expected: %t; %v", err != nil, test.isError, err)
-				return
-			} else if err != nil {
+			assert.Equal(t, test.isError, err != nil, "unexpected error state; %v", err)
+			if err != nil {
 				return
 			}
 
-			if ici2time.Compare(test.expected.Time) != 0 {
-				t.Logf("got:      %#v", ici2time)
-				t.Logf("expected: %#v", test.expected)
-				t.Error("unexpected response")
-			}
+			assert.WithinDuration(t, test.expected.Time, ici2time.Time, time.Duration(0))
 		})
 	}
 }
@@ -217,18 +211,12 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var resp ObjectQueriesResult
 			err := json.Unmarshal([]byte(test.jsonData), &resp)
-			if (err != nil) != test.isError {
-				t.Errorf("unexpected error state; got error: %t, expected: %t; %v", err != nil, test.isError, err)
-				return
-			} else if err != nil {
+			assert.Equal(t, test.isError, err != nil, "unexpected error state; %v", err)
+			if err != nil {
 				return
 			}
 
-			if !reflect.DeepEqual(resp, test.expected) {
-				t.Logf("got:      %#v", resp)
-				t.Logf("expected: %#v", test.expected)
-				t.Error("unexpected response")
-			}
+			assert.EqualValuesf(t, test.expected, resp, "unexpected ObjectQueriesResult")
 		})
 	}
 }
@@ -510,18 +498,12 @@ func TestApiResponseUnmarshal(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			resp, err := UnmarshalEventStreamResponse([]byte(test.jsonData))
-			if (err != nil) != test.isError {
-				t.Errorf("unexpected error state; got error: %t, expected: %t; %v", err != nil, test.isError, err)
-				return
-			} else if err != nil {
+			assert.Equal(t, test.isError, err != nil, "unexpected error state; %v", err)
+			if err != nil {
 				return
 			}
 
-			if !reflect.DeepEqual(resp, test.expected) {
-				t.Logf("got:      %#v", resp)
-				t.Logf("expected: %#v", test.expected)
-				t.Error("unexpected response")
-			}
+			assert.EqualValuesf(t, test.expected, resp, "unexpected Event Stream response")
 		})
 	}
 }
