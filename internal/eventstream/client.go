@@ -79,7 +79,7 @@ func NewClientsFromConfig(
 			IcingaNotificationsEventSourceId: icinga2Api.NotificationsEventSourceId,
 			IcingaWebRoot:                    conf.Icingaweb2URL,
 
-			CallbackFn: MakeProcessEvent(db, logger, logs, runtimeConfig),
+			CallbackFn: makeProcessEvent(ctx, db, logger, logs, runtimeConfig),
 			Ctx:        ctx,
 			Logger:     logger,
 		}
