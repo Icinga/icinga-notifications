@@ -9,7 +9,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
-	"github.com/icinga/icingadb/pkg/types"
 	"go.uber.org/zap"
 	"sync"
 	"time"
@@ -46,34 +45,11 @@ func Warmup(
 			continue
 		}
 
-		evaluateRulesAndEscalations := func(ctx context.Context) error {
-			ev := &event.Event{Time: time.Now(), Type: event.TypeEscalation}
-			if !incident.evaluateEscalations() {
-				return nil
-			}
-
-			tx, err := db.BeginTxx(ctx, nil)
-			if err != nil {
-				return err
-			}
-			defer func() { _ = tx.Rollback() }()
-
-			err = incident.notifyContacts(ctx, tx, ev, types.Int{})
-			if err != nil {
-				return err
-			}
-
-			if err = tx.Commit(); err != nil {
-				incident.logger.Errorw("Failed to commit database transaction", zap.Error(err))
-				return err
-			}
-
-			return nil
-		}
-
-		if evaluateRulesAndEscalations(ctx) != nil {
-			continue
-		}
+		incident.RetriggerEscalations(&event.Event{
+			Time:    time.Now(),
+			Type:    event.TypeEscalation,
+			Message: "Incident reevaluation at daemon startup",
+		})
 	}
 
 	return nil

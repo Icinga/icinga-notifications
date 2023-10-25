@@ -34,6 +34,8 @@ type Incident struct {
 
 	incidentRowID int64
 
+	timer *time.Timer
+
 	db            *icingadb.DB
 	logger        *zap.SugaredLogger
 	runtimeConfig *config.RuntimeConfig
@@ -149,7 +151,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 	}
 
 	// Re-evaluate escalations based on the newly evaluated rules.
-	if _, err := i.evaluateEscalations(ctx, tx, ev, causedBy); err != nil {
+	if _, err := i.evaluateEscalations(ctx, tx, ev, causedBy, time.Now()); err != nil {
 		return err
 	}
 
@@ -215,6 +217,10 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 			i.logger.Errorw("Can't insert incident closed history to the database", zap.Error(err))
 
 			return types.Int{}, errors.New("can't insert incident closed history to the database")
+		}
+
+		if i.timer != nil {
+			i.timer.Stop()
 		}
 	}
 
@@ -316,12 +322,23 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 
 // evaluateEscalations evaluates this incidents rule escalations if they aren't already.
 // Returns whether a new escalation triggered or an error on database failure.
-func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, causedBy types.Int) (bool, error) {
+func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, causedBy types.Int, eventTime time.Time) (bool, error) {
 	if i.EscalationState == nil {
 		i.EscalationState = make(map[int64]*EscalationState)
 	}
 
+	// Escalations are reevaluated now, reset any existing timer, if there might be future time-based escalations,
+	// this function will start a new timer.
+	if i.timer != nil {
+		i.logger.Info("stopping reevaluate timer due to escalation evaluation")
+		i.timer.Stop()
+		i.timer = nil
+	}
+
+	cond := &rule.EscalationFilter{IncidentAge: eventTime.Sub(i.StartedAt), IncidentSeverity: i.Severity}
+
 	newEscalationMatched := false
+	retryAfter := rule.RetryNever
 
 	for rID := range i.Rules {
 		r := i.runtimeConfig.Rules[rID]
@@ -338,13 +355,42 @@ func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *eve
 				if escalation.Condition == nil {
 					matched = true
 				} else {
-					cond := &rule.EscalationFilter{
-						IncidentAge:      time.Now().Sub(i.StartedAt),
-						IncidentSeverity: i.Severity,
+					// evaluateCond evaluates the specified escalation filter 1 nanosecond before, at and 1 nanosecond
+					// after the configured IncidentAge filter and returns error on any evaluation failure.
+					// This anonymous function serves simply for preventing duplicate codes.
+					evaluateCond := func(cond *rule.EscalationFilter) (bool, error) {
+						before := &rule.EscalationFilter{
+							IncidentAge:      cond.IncidentAge - time.Nanosecond,
+							IncidentSeverity: cond.IncidentSeverity,
+						}
+						// Evaluate whether the escalation filter evaluates to true 1 nanosecond
+						// before the configured incident age condition.
+						matched, err := escalation.Condition.Eval(before)
+						if err != nil {
+							return false, err
+						}
+
+						if !matched {
+							// Evaluate the configured escalation filter without any modifications.
+							matched, err = escalation.Condition.Eval(cond)
+							if err != nil {
+								return false, err
+							}
+						}
+
+						if !matched {
+							// Evaluate whether the escalation filter evaluates to true 1 nanosecond
+							// after the configured incident age condition.
+							return escalation.Condition.Eval(
+								&rule.EscalationFilter{IncidentAge: cond.IncidentAge + time.Nanosecond, IncidentSeverity: cond.IncidentSeverity},
+							)
+						}
+
+						return matched, nil
 					}
 
 					var err error
-					matched, err = escalation.Condition.Eval(cond)
+					matched, err = evaluateCond(cond)
 					if err != nil {
 						i.logger.Warnw(
 							"Failed to evaluate escalation condition", zap.String("rule", r.Name),
@@ -352,6 +398,9 @@ func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *eve
 						)
 
 						matched = false
+					} else if !matched {
+						incidentAgeFilter := cond.ExtractRetryAfter(escalation.Condition.ExtractConditions(), cond.IncidentAge)
+						retryAfter = min(retryAfter, incidentAgeFilter)
 					}
 				}
 
@@ -396,6 +445,21 @@ func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *eve
 				}
 			}
 		}
+	}
+
+	if retryAfter != rule.RetryNever {
+		nextEvalAt := i.StartedAt.Add(retryAfter)
+
+		i.logger.Infow("scheduling escalation reevaluation", zap.Duration("after", retryAfter), zap.Time("at", nextEvalAt))
+		i.timer = time.AfterFunc(time.Until(nextEvalAt), func() {
+			i.logger.Info("reevaluating escalations")
+
+			i.RetriggerEscalations(&event.Event{
+				Type:    event.TypeEscalation,
+				Time:    nextEvalAt,
+				Message: fmt.Sprintf("Incident reached age %v", retryAfter),
+			})
+		})
 	}
 
 	return newEscalationMatched, nil
@@ -570,6 +634,58 @@ func (i *Incident) getRecipientsChannel(t time.Time) contactChannels {
 	}
 
 	return contactChs
+}
+
+var noEscalationsTriggered = errors.New("no escalations triggered")
+
+// RetriggerEscalations tries to re-evaluate the escalations and notify contacts.
+func (i *Incident) RetriggerEscalations(ev *event.Event) {
+	i.Lock()
+	defer i.Unlock()
+
+	i.runtimeConfig.RLock()
+	defer i.runtimeConfig.RUnlock()
+
+	if !i.RecoveredAt.IsZero() {
+		// Incident is recovered in the meantime.
+		return
+	}
+
+	if !time.Now().After(ev.Time) {
+		i.logger.DPanicw("event from the future", zap.Time("event_time", ev.Time), zap.Any("event", ev))
+		return
+	}
+
+	ctx := context.TODO()
+	err := utils.RunInTx(ctx, i.db, func(tx *sqlx.Tx) error {
+		if matched, err := i.evaluateEscalations(ctx, tx, ev, types.Int{}, ev.Time); err != nil {
+			return err
+		} else if !matched {
+			// We do not need to re-notify contacts if no new escalations have been matched.
+			// TODO: a bit weird that this now needs a transaction. Just evaluating and checking if anything matched
+			// should probably be possible without one.
+			return noEscalationsTriggered
+		}
+
+		err := ev.Sync(ctx, tx, i.db, i.Object.ID)
+		if err != nil {
+			return err
+		}
+
+		notifications, err := i.addPendingNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time), types.Int{})
+		if err != nil {
+			return err
+		}
+
+		return i.notifyContacts(ctx, ev, notifications)
+	})
+	if errors.Is(err, noEscalationsTriggered) {
+		i.logger.Debug("reevaluated escalations, no new escalations triggered")
+	} else if err != nil {
+		i.logger.Errorw("Reevaluating time-based escalations failed", zap.Error(err))
+	} else {
+		i.logger.Info("reeval successful")
+	}
 }
 
 // RestoreRecipients reloads the current incident recipients from the database.
