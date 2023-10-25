@@ -30,6 +30,26 @@ func BuildInsertStmtWithout(db *icingadb.DB, into interface{}, withoutColumn str
 	)
 }
 
+// RunInTx allows running a function in a database transaction without requiring manual transaction handling.
+//
+// A new transaction is started on db which is then passed to fn. After fn returns, the transaction is
+// committed unless an error was returned. If fn returns an error, that error is returned, otherwise an
+// error is returned if a database operation fails.
+func RunInTx(ctx context.Context, db *icingadb.DB, fn func(tx *sqlx.Tx) error) error {
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	err = fn(tx)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 // InsertAndFetchId executes the given query and fetches the last inserted ID.
 func InsertAndFetchId(ctx context.Context, tx *sqlx.Tx, stmt string, args any) (int64, error) {
 	var lastInsertId int64
