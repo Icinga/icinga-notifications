@@ -3,12 +3,42 @@ package rule
 import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/filter"
+	"math"
 	"time"
 )
+
+// RetryNever indicates that an escalation condition should never be retried once it has been evaluated.
+const RetryNever = time.Duration(math.MaxInt64)
 
 type EscalationFilter struct {
 	IncidentAge      time.Duration
 	IncidentSeverity event.Severity
+}
+
+// ReevaluateAfter returns the duration after which escalationCond should be reevaluated the
+// next time on the incident represented by e.
+//
+// escalationCond must correspond to an escalation that did not trigger on the incident
+// represented by e before. If nothing in the incident changes apart from time passing by,
+// the escalation is guaranteed to not trigger within the returned duration. After that
+// duration, the escalation should be reevaluated, and it may or may not trigger. If anything
+// else changes, for example due to an external event, the escalation must be reevaluated as
+// well.
+func (e *EscalationFilter) ReevaluateAfter(escalationCond filter.Filter) time.Duration {
+	retryAfter := RetryNever
+	for _, condition := range escalationCond.ExtractConditions() {
+		if condition.Column() == "incident_age" {
+			v, err := time.ParseDuration(condition.Value())
+			if err == nil && v > e.IncidentAge {
+				// The incident age is compared with a value in the future. Once that age is
+				// reached, the escalation could trigger, so consider that time for reevaluation.
+				retryAfter = min(retryAfter, v-e.IncidentAge)
+			}
+		}
+	}
+
+	return retryAfter
 }
 
 func (e *EscalationFilter) EvalEqual(key string, value string) (bool, error) {
