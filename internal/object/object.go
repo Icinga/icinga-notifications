@@ -33,8 +33,6 @@ type Object struct {
 	ExtraTags map[string]string
 
 	db *icingadb.DB
-
-	mu sync.Mutex
 }
 
 func NewObject(db *icingadb.DB, ev *event.Event) *Object {
@@ -229,11 +227,7 @@ func (o *Object) EvalExists(key string) bool {
 	}
 
 	_, ok = o.ExtraTags[key]
-	if ok {
-		return true
-	}
-
-	return false
+	return ok
 }
 
 // TODO: the return value of this function must be stable like forever

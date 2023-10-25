@@ -48,7 +48,14 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 func (l *Listener) Run() error {
 	l.logger.Infof("Starting listener on http://%s", l.configFile.Listen)
-	return http.ListenAndServe(l.configFile.Listen, l)
+	server := &http.Server{
+		Addr:         l.configFile.Listen,
+		Handler:      l,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  30 * time.Second,
+	}
+	return server.ListenAndServe()
 }
 
 func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
