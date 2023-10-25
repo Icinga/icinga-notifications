@@ -321,7 +321,7 @@ func (i *Incident) evaluateEscalations(ctx context.Context, tx *sqlx.Tx, ev *eve
 					matched = true
 				} else {
 					cond := &rule.EscalationFilter{
-						IncidentAge:      time.Now().Sub(i.StartedAt),
+						IncidentAge:      time.Since(i.StartedAt),
 						IncidentSeverity: i.Severity,
 					}
 
@@ -416,7 +416,7 @@ func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, ch
 	if ch == nil {
 		i.logger.Errorw("Could not find config for channel", zap.Int64("channel_id", chID))
 
-		return errors.New(fmt.Sprintf("could not find config for channel ID: %d", chID))
+		return fmt.Errorf("could not find config for channel ID: %d", chID)
 	}
 
 	chType := ch.Type
