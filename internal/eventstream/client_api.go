@@ -237,10 +237,7 @@ func (client *Client) checkMissedAcknowledgements(objType string, since time.Tim
 			return
 		}
 
-		ev, err := client.buildAcknowledgementEvent(
-			attrs.AcknowledgementLastChange.Time,
-			host, service,
-			ackComment.Author, ackComment.Text)
+		ev, err := client.buildAcknowledgementEvent(host, service, ackComment.Author, ackComment.Text)
 		if err != nil {
 			client.Logger.Errorf("Failed to construct Event from Acknowledgement %s API: %v", objType, err)
 			return

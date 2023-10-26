@@ -13,19 +13,6 @@ import (
 
 // This file contains Event Stream related methods of the Client.
 
-// eventStreamHandleStateChange acts on a received Event Stream StateChange object.
-func (client *Client) eventStreamHandleStateChange(stateChange *StateChange) (*event.Event, error) {
-	return client.buildHostServiceEvent(stateChange.CheckResult, stateChange.State, stateChange.Host, stateChange.Service)
-}
-
-// eventStreamHandleAcknowledgementSet acts on a received Event Stream AcknowledgementSet object.
-func (client *Client) eventStreamHandleAcknowledgementSet(ackSet *AcknowledgementSet) (*event.Event, error) {
-	return client.buildAcknowledgementEvent(
-		ackSet.Timestamp.Time,
-		ackSet.Host, ackSet.Service,
-		ackSet.Author, ackSet.Comment)
-}
-
 // listenEventStream subscribes to the Icinga 2 API Event Stream and handles received objects.
 //
 // In case of a parsing or handling error, this error will be returned. If the server closes the connection, nil will
@@ -84,9 +71,9 @@ func (client *Client) listenEventStream() error {
 		var ev *event.Event
 		switch respT := resp.(type) {
 		case *StateChange:
-			ev, err = client.eventStreamHandleStateChange(respT)
+			ev, err = client.buildHostServiceEvent(respT.CheckResult, respT.State, respT.Host, respT.Service)
 		case *AcknowledgementSet:
-			ev, err = client.eventStreamHandleAcknowledgementSet(respT)
+			ev, err = client.buildAcknowledgementEvent(respT.Host, respT.Service, respT.Author, respT.Comment)
 		// case *AcknowledgementCleared:
 		// case *CommentAdded:
 		// case *CommentRemoved:

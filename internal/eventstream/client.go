@@ -111,8 +111,9 @@ func NewClientsFromConfig(
 
 // buildCommonEvent creates an event.Event based on Host and (optional) Service attributes to be specified later.
 //
+// The new Event's Time will be the current timestamp.
+//
 // The following fields will NOT be populated and might be altered later:
-//   - Time
 //   - Type
 //   - Severity
 //   - Username
@@ -160,6 +161,7 @@ func (client *Client) buildCommonEvent(host, service string) (*event.Event, erro
 	}
 
 	return &event.Event{
+		Time:      time.Now(),
 		SourceId:  client.IcingaNotificationsEventSourceId,
 		Name:      eventName,
 		URL:       client.IcingaWebRoot + eventUrlSuffix,
@@ -200,7 +202,6 @@ func (client *Client) buildHostServiceEvent(result CheckResult, state int, host,
 		return nil, err
 	}
 
-	ev.Time = result.ExecutionEnd.Time
 	ev.Type = event.TypeState
 	ev.Severity = eventSeverity
 	ev.Message = result.Output
@@ -209,13 +210,12 @@ func (client *Client) buildHostServiceEvent(result CheckResult, state int, host,
 }
 
 // buildAcknowledgementEvent from the given fields.
-func (client *Client) buildAcknowledgementEvent(ts time.Time, host, service, author, comment string) (*event.Event, error) {
+func (client *Client) buildAcknowledgementEvent(host, service, author, comment string) (*event.Event, error) {
 	ev, err := client.buildCommonEvent(host, service)
 	if err != nil {
 		return nil, err
 	}
 
-	ev.Time = ts
 	ev.Type = event.TypeAcknowledgement
 	ev.Username = author
 	ev.Message = comment
