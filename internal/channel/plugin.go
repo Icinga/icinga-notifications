@@ -118,7 +118,7 @@ func terminate(p *Plugin) {
 
 	<-p.rpc.Done()
 	timer.Stop()
-	p.logger.Debug("Successfully stopped channel plugin")
+	p.logger.Warn("Stopped channel plugin")
 }
 
 func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
