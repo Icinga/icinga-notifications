@@ -257,24 +257,24 @@ func (p *Parser) createCondition(column string, operator string, value string) (
 	switch operator {
 	case "=":
 		if strings.Contains(value, "*") {
-			return &Like{column: column, value: value}, nil
+			return &Condition{op: Like, column: column, value: value}, nil
 		}
 
-		return &Equal{column: column, value: value}, nil
+		return &Condition{op: Equal, column: column, value: value}, nil
 	case "!=":
 		if strings.Contains(value, "*") {
-			return &Unlike{column: column, value: value}, nil
+			return &Condition{op: UnLike, column: column, value: value}, nil
 		}
 
-		return &UnEqual{column: column, value: value}, nil
+		return &Condition{op: UnEqual, column: column, value: value}, nil
 	case ">":
-		return &GreaterThan{column: column, value: value}, nil
+		return &Condition{op: GreaterThan, column: column, value: value}, nil
 	case ">=":
-		return &GreaterThanOrEqual{column: column, value: value}, nil
+		return &Condition{op: GreaterThanEqual, column: column, value: value}, nil
 	case "<":
-		return &LessThan{column: column, value: value}, nil
+		return &Condition{op: LessThan, column: column, value: value}, nil
 	case "<=":
-		return &LessThanOrEqual{column: column, value: value}, nil
+		return &Condition{op: LessThanEqual, column: column, value: value}, nil
 	default:
 		return nil, fmt.Errorf("invalid operator %s provided", operator)
 	}
