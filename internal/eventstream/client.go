@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -12,12 +11,11 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
-	"hash/fnv"
 	"net/http"
 	"net/url"
 	"os"
-	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,11 +42,11 @@ type Client struct {
 	// Logger to log to.
 	Logger *logging.Logger
 
-	// All those variables are used internally to keep at least some state.
-	eventsHandlerMutex  sync.RWMutex
-	eventsRingBuffer    []uint64
-	eventsRingBufferPos int
-	eventsLastTs        time.Time
+	// replayPhase indicates that Events will be cached as the Event Stream Client is in the reconnection phase.
+	replayPhase atomic.Bool
+	// replayBuffer is the cache being populated during the reconnection phase and its mutex.
+	replayBuffer      []*event.Event
+	replayBufferMutex sync.Mutex
 }
 
 // NewClientsFromConfig returns all Clients defined in the conf.ConfigFile.
@@ -224,33 +222,71 @@ func (client *Client) buildAcknowledgementEvent(host, service, author, comment s
 }
 
 // handleEvent checks and dispatches generated Events.
-func (client *Client) handleEvent(ev *event.Event, source string) {
-	h := fnv.New64a()
-	_ = json.NewEncoder(h).Encode(ev)
-	evHash := h.Sum64()
-
-	client.Logger.Debugf("Start handling event %s received from %s", ev, source)
-
-	client.eventsHandlerMutex.RLock()
-	inCache := slices.Contains(client.eventsRingBuffer, evHash)
-	client.eventsHandlerMutex.RUnlock()
-	if inCache {
-		client.Logger.Warnf("Event %s received from %s is already in cache and will not be processed", ev, source)
+func (client *Client) handleEvent(ev *event.Event) {
+	if client.replayPhase.Load() {
+		client.replayBufferMutex.Lock()
+		client.replayBuffer = append(client.replayBuffer, ev)
+		client.replayBufferMutex.Unlock()
 		return
 	}
 
-	client.eventsHandlerMutex.Lock()
-	client.eventsRingBuffer[client.eventsRingBufferPos] = evHash
-	client.eventsRingBufferPos = (client.eventsRingBufferPos + 1) % len(client.eventsRingBuffer)
-
-	if ev.Time.Before(client.eventsLastTs) {
-		client.Logger.Infof("Event %s received from %s generated at %v before last known timestamp %v; might be a replay",
-			ev, source, ev.Time, client.eventsLastTs)
-	}
-	client.eventsLastTs = ev.Time
-	client.eventsHandlerMutex.Unlock()
-
 	client.CallbackFn(ev)
+}
+
+func (client *Client) replayBufferedEvents() {
+	client.replayBufferMutex.Lock()
+	client.replayBuffer = make([]*event.Event, 0, 1024)
+	client.replayBufferMutex.Unlock()
+	client.replayPhase.Store(true)
+
+	queryFns := []func(string){client.checkMissedAcknowledgements, client.checkMissedStateChanges}
+	objTypes := []string{"host", "service"}
+
+	var replayWg sync.WaitGroup
+	replayWg.Add(len(queryFns) * len(objTypes))
+
+	for _, fn := range queryFns {
+		for _, objType := range objTypes {
+			go func(fn func(string), objType string) {
+				fn(objType)
+				replayWg.Done()
+			}(fn, objType)
+		}
+	}
+
+	// Fork off the synchronization in a background goroutine to wait for all producers to finish. As the producers
+	// check the Client's context, they should finish early and this should not deadlock.
+	go func() {
+		replayWg.Wait()
+		client.Logger.Debug("Querying the Objects API for replaying finished")
+
+		if client.Ctx.Err() != nil {
+			client.Logger.Warn("Aborting Objects API replaying as the context is done")
+			return
+		}
+
+		for {
+			// Here is a race between filling the buffer from incoming Event Stream events and processing the buffered
+			// events. Thus, the buffer will be reset to catch up what happened in between, as otherwise Events would be
+			// processed out of order. Only when the buffer is empty, the replay mode will be reset.
+			client.replayBufferMutex.Lock()
+			tmpReplayBuffer := client.replayBuffer
+			client.replayBuffer = make([]*event.Event, 0, 1024)
+			client.replayBufferMutex.Unlock()
+
+			if len(tmpReplayBuffer) == 0 {
+				break
+			}
+
+			for _, ev := range tmpReplayBuffer {
+				client.CallbackFn(ev)
+			}
+			client.Logger.Debugf("Replayed %d events", len(tmpReplayBuffer))
+		}
+
+		client.replayPhase.Store(false)
+		client.Logger.Debug("Finished replay")
+	}()
 }
 
 // Process incoming objects and reconnect to the Event Stream with replaying objects if necessary.
@@ -259,12 +295,6 @@ func (client *Client) handleEvent(ev *event.Event, source string) {
 // loop takes care of reconnections, all those events will be logged while generated Events will be dispatched to the
 // callback function.
 func (client *Client) Process() {
-	client.eventsHandlerMutex.Lock()
-	client.eventsRingBuffer = make([]uint64, 1024)
-	client.eventsRingBufferPos = 0
-	client.eventsLastTs = time.Time{}
-	client.eventsHandlerMutex.Unlock()
-
 	defer client.Logger.Info("Event Stream Client has stopped")
 
 	for {
@@ -282,13 +312,6 @@ func (client *Client) Process() {
 			return
 		}
 
-		client.eventsHandlerMutex.RLock()
-		lastEventTime := client.eventsLastTs
-		client.eventsHandlerMutex.RUnlock()
-
-		go client.checkMissedStateChanges("host", lastEventTime)
-		go client.checkMissedStateChanges("service", lastEventTime)
-		go client.checkMissedAcknowledgements("host", lastEventTime)
-		go client.checkMissedAcknowledgements("service", lastEventTime)
+		client.replayBufferedEvents()
 	}
 }
