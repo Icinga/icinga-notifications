@@ -61,7 +61,7 @@ func (r *RuntimeConfig) applyPendingChannels() {
 
 	for id, pendingChannel := range r.pending.Channels {
 		if pendingChannel == nil {
-			r.Channels[id].Logger.Info("Channel has been removed, stopping channel plugin")
+			r.Channels[id].Logger.Info("Channel has been removed")
 			r.Channels[id].Stop()
 
 			delete(r.Channels, id)
@@ -75,7 +75,7 @@ func (r *RuntimeConfig) applyPendingChannels() {
 				currentChannel.Name = pendingChannel.Name
 				currentChannel.Config = pendingChannel.Config
 
-				currentChannel.Logger.Info("New config detected, reloading the channel plugin config")
+				currentChannel.Logger.Info("New config detected")
 				currentChannel.ReloadConfig()
 			}
 		} else {
