@@ -65,7 +65,7 @@ func (client *Client) queryObjectsApi(urlPaths []string, method string, body io.
 	return res.Body, nil
 }
 
-// queryObjectsApiDirect performs a direct resp. "fast" API query against a specific object identified by its name.
+// queryObjectsApiDirect performs a direct resp. "fast" API query against an object, optionally identified by its name.
 func (client *Client) queryObjectsApiDirect(objType, objName string) (io.ReadCloser, error) {
 	return client.queryObjectsApi(
 		[]string{"/v1/objects/", objType + "s/", objName},
@@ -167,13 +167,27 @@ func (client *Client) fetchAcknowledgementComment(host, service string, ackTime 
 	return &objQueriesResults[0].Attrs, nil
 }
 
-// checkMissedChanges queries for Service or Host objects with a specific filter to handle missed elements.
+// checkMissedChanges queries for Service or Host objects to handle missed elements.
+//
+// If a filterExpr is given (non-empty string), it will be used for the query. Otherwise, all objects will be requested.
+//
+// The callback function will be called f.e. object of the objType (i.e. "host" or "service") being retrieved from the
+// Icinga 2 Objects API. The callback function or a later caller must decide if this object should be replayed.
 func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallbackFn func(attrs HostServiceRuntimeAttributes, host, service string)) {
-	jsonRaw, err := client.queryObjectsApiQuery(objType, map[string]any{"filter": filterExpr})
+	var (
+		jsonRaw io.ReadCloser
+		err     error
+	)
+	if filterExpr == "" {
+		jsonRaw, err = client.queryObjectsApiDirect(objType, "")
+	} else {
+		jsonRaw, err = client.queryObjectsApiQuery(objType, map[string]any{"filter": filterExpr})
+	}
 	if err != nil {
 		client.Logger.Errorf("Quering %ss from API failed, %v", objType, err)
 		return
 	}
+
 	objQueriesResults, err := extractObjectQueriesResult[HostServiceRuntimeAttributes](jsonRaw)
 	if err != nil {
 		client.Logger.Errorf("Parsing %ss from API failed, %v", objType, err)
@@ -184,11 +198,11 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 		return
 	}
 
-	client.Logger.Infof("Querying %ss from API resulted in %d state changes to replay", objType, len(objQueriesResults))
+	client.Logger.Debugf("Querying %ss from API resulted in %d state changes for optional replay", objType, len(objQueriesResults))
 
 	for _, objQueriesResult := range objQueriesResults {
 		if client.Ctx.Err() != nil {
-			client.Logger.Infof("Stopping %s API response processing as context is finished", objType)
+			client.Logger.Warnf("Stopping %s API response processing as context is finished", objType)
 			return
 		}
 
@@ -210,26 +224,24 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 	}
 }
 
-// checkMissedStateChanges fetches missed Host or Service state changes and feeds them into the handler.
-func (client *Client) checkMissedStateChanges(objType string, since time.Time) {
-	filterExpr := fmt.Sprintf("%s.last_state_change > %f", objType, float64(since.UnixMicro())/1_000_000.0)
-
-	client.checkMissedChanges(objType, filterExpr, func(attrs HostServiceRuntimeAttributes, host, service string) {
+// checkMissedStateChanges fetches all objects of the requested type and feeds them into the handler.
+func (client *Client) checkMissedStateChanges(objType string) {
+	client.checkMissedChanges(objType, "", func(attrs HostServiceRuntimeAttributes, host, service string) {
 		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, host, service)
 		if err != nil {
 			client.Logger.Errorf("Failed to construct Event from %s API: %v", objType, err)
 			return
 		}
 
-		client.handleEvent(ev, "API "+objType)
+		client.handleEvent(ev)
 	})
 }
 
-// checkMissedAcknowledgements fetches missed set Host or Service Acknowledgements and feeds them into the handler.
-func (client *Client) checkMissedAcknowledgements(objType string, since time.Time) {
-	filterExpr := fmt.Sprintf("%s.acknowledgement && %s.acknowledgement_last_change > %f",
-		objType, objType, float64(since.UnixMicro())/1_000_000.0)
-
+// checkMissedAcknowledgements fetches all Host or Service Acknowledgements and feeds them into the handler.
+//
+// Currently only active acknowledgements are being processed.
+func (client *Client) checkMissedAcknowledgements(objType string) {
+	filterExpr := fmt.Sprintf("%s.acknowledgement", objType)
 	client.checkMissedChanges(objType, filterExpr, func(attrs HostServiceRuntimeAttributes, host, service string) {
 		ackComment, err := client.fetchAcknowledgementComment(host, service, attrs.AcknowledgementLastChange.Time)
 		if err != nil {
@@ -243,7 +255,7 @@ func (client *Client) checkMissedAcknowledgements(objType string, since time.Tim
 			return
 		}
 
-		client.handleEvent(ev, "ACK API "+objType)
+		client.handleEvent(ev)
 	})
 }
 
