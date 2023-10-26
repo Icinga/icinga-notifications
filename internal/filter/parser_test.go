@@ -70,12 +70,12 @@ func TestFilter(t *testing.T) {
 		expected = &Condition{op: UnEqual, column: "foo", value: "bar"}
 		assert.Equal(t, expected, rule)
 
-		rule, err = Parse("foo=bar*")
+		rule, err = Parse("foo~bar*")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 		expected = &Condition{op: Like, column: "foo", value: "bar*"}
 		assert.Equal(t, expected, rule)
 
-		rule, err = Parse("foo!=bar*")
+		rule, err = Parse("foo!~bar*")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 		expected = &Condition{op: UnLike, column: "foo", value: "bar*"}
 		assert.Equal(t, expected, rule)
