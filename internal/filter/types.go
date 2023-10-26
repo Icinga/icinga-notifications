@@ -71,20 +71,113 @@ func (c *Chain) Eval(filterable Filterable) (bool, error) {
 	}
 }
 
+// CompOperator is a type used for grouping the individual comparison operators of a filter string.
+type CompOperator string
+
+// List of the supported comparison operators.
+const (
+	Equal            CompOperator = "="
+	UnEqual          CompOperator = "!="
+	Like             CompOperator = "~"
+	UnLike           CompOperator = "!~"
+	LessThan         CompOperator = "<"
+	LessThanEqual    CompOperator = "<="
+	GreaterThan      CompOperator = ">"
+	GreaterThanEqual CompOperator = ">="
+)
+
 // Condition represents a single filter condition.
+// It provides an implementation of the Filter interface for each of the supported CompOperator.
+// All it's fields are read-only and aren't supposed to change at runtime. For read access, you can
+// check the available exported methods.
 type Condition struct {
+	op     CompOperator
 	column string
 	value  string
 }
 
-func NewCondition(column string, value string) *Condition {
-	return &Condition{
-		column: column,
-		value:  value,
+// Eval evaluates this Condition based on its operator.
+// Returns true when the filter evaluates to true false otherwise.
+func (c *Condition) Eval(filterable Filterable) (bool, error) {
+	if !filterable.EvalExists(c.column) {
+		return false, nil
+	}
+
+	switch c.op {
+	case Equal:
+		match, err := filterable.EvalEqual(c.column, c.value)
+		if err != nil {
+			return false, err
+		}
+
+		return match, nil
+	case UnEqual:
+		match, err := filterable.EvalEqual(c.column, c.value)
+		if err != nil {
+			return false, err
+		}
+
+		return !match, nil
+	case Like:
+		match, err := filterable.EvalLike(c.column, c.value)
+		if err != nil {
+			return false, err
+		}
+
+		return match, nil
+	case UnLike:
+		match, err := filterable.EvalLike(c.column, c.value)
+		if err != nil {
+			return false, err
+		}
+
+		return !match, nil
+	case LessThan:
+		match, err := filterable.EvalLess(c.column, c.value)
+		if err != nil {
+			return false, err
+		}
+
+		return match, nil
+	case LessThanEqual:
+		match, err := filterable.EvalLessOrEqual(c.column, c.value)
+		if err != nil {
+			return false, err
+		}
+
+		return match, nil
+	case GreaterThan:
+		match, err := filterable.EvalLessOrEqual(c.column, c.value)
+		if err != nil {
+			return false, err
+		}
+
+		return !match, nil
+	case GreaterThanEqual:
+		match, err := filterable.EvalLess(c.column, c.value)
+		if err != nil {
+			return false, err
+		}
+
+		return !match, nil
+	default:
+		return false, fmt.Errorf("invalid comparison operator provided: %q", c.op)
 	}
 }
 
-type Exists Condition
+// Column returns the column of this Condition.
+func (c *Condition) Column() string {
+	return c.column
+}
+
+// Value returns the value of this Condition.
+func (c *Condition) Value() string {
+	return c.value
+}
+
+type Exists struct {
+	column string
+}
 
 func NewExists(column string) *Exists {
 	return &Exists{column: column}
@@ -94,103 +187,8 @@ func (e *Exists) Eval(filterable Filterable) (bool, error) {
 	return filterable.EvalExists(e.column), nil
 }
 
-type Equal Condition
-
-func (e *Equal) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalEqual(e.column, e.value)
-	if err != nil {
-		return false, err
-	}
-
-	return match, nil
-}
-
-type UnEqual Condition
-
-func (u *UnEqual) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalEqual(u.column, u.value)
-	if err != nil {
-		return false, err
-	}
-
-	return filterable.EvalExists(u.column) && !match, nil
-}
-
-type Like Condition
-
-func (l *Like) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLike(l.column, l.value)
-	if err != nil {
-		return false, err
-	}
-
-	return match, nil
-}
-
-type Unlike Condition
-
-func (u *Unlike) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLike(u.column, u.value)
-	if err != nil {
-		return false, err
-	}
-
-	return filterable.EvalExists(u.column) && !match, nil
-}
-
-type LessThan Condition
-
-func (less *LessThan) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLess(less.column, less.value)
-	if err != nil {
-		return false, err
-	}
-
-	return match, nil
-}
-
-type LessThanOrEqual Condition
-
-func (loe *LessThanOrEqual) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLessOrEqual(loe.column, loe.value)
-	if err != nil {
-		return false, err
-	}
-
-	return match, nil
-}
-
-type GreaterThan Condition
-
-func (g *GreaterThan) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLessOrEqual(g.column, g.value)
-	if err != nil {
-		return false, err
-	}
-
-	return filterable.EvalExists(g.column) && !match, nil
-}
-
-type GreaterThanOrEqual Condition
-
-func (goe *GreaterThanOrEqual) Eval(filterable Filterable) (bool, error) {
-	match, err := filterable.EvalLess(goe.column, goe.value)
-	if err != nil {
-		return false, err
-	}
-
-	return filterable.EvalExists(goe.column) && !match, nil
-}
-
 var (
 	_ Filter = (*Chain)(nil)
 	_ Filter = (*Exists)(nil)
-	_ Filter = (*Equal)(nil)
-	_ Filter = (*UnEqual)(nil)
-	_ Filter = (*Like)(nil)
-	_ Filter = (*Unlike)(nil)
-	_ Filter = (*LessThan)(nil)
-	_ Filter = (*LessThanOrEqual)(nil)
-	_ Filter = (*GreaterThan)(nil)
-	_ Filter = (*GreaterThanOrEqual)(nil)
+	_ Filter = (*Condition)(nil)
 )
