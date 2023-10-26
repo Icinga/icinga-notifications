@@ -88,7 +88,7 @@ func (client *Client) listenEventStream() error {
 			return err
 		}
 
-		client.handleEvent(ev)
+		client.eventDispatch <- ev
 	}
 	return lineScanner.Err()
 }

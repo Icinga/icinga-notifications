@@ -233,7 +233,7 @@ func (client *Client) checkMissedStateChanges(objType string) {
 			return
 		}
 
-		client.handleEvent(ev)
+		client.eventDispatch <- ev
 	})
 }
 
@@ -255,7 +255,7 @@ func (client *Client) checkMissedAcknowledgements(objType string) {
 			return
 		}
 
-		client.handleEvent(ev)
+		client.eventDispatch <- ev
 	})
 }
 
