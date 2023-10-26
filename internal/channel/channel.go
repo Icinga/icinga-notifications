@@ -53,7 +53,7 @@ func (c *Channel) initPlugin() *Plugin {
 	}
 
 	if err := p.SetConfig(c.Config); err != nil {
-		c.Logger.Errorw("Failed to set channel plugin config", zap.Error(err))
+		c.Logger.Errorw("Failed to set channel plugin config, terminating the plugin", zap.Error(err))
 		p.Stop()
 		return nil
 	}
@@ -89,17 +89,17 @@ func (c *Channel) runPlugin() {
 
 		select {
 		case <-rpcDone():
-			c.Logger.Debug("rpc.Done(): Restarting plugin")
+			c.Logger.Debug("Receive plugin error signal")
 			stopIfRunning()
 
 			continue
 		case <-c.newConfigCh:
-			c.Logger.Debug("Plugin.ReloadConfig() triggered")
+			c.Logger.Debug("Receive reload plugin config signal")
 			stopIfRunning()
 
 			continue
 		case <-c.stopPluginCh:
-			c.Logger.Debug("Stopping the channel plugin")
+			c.Logger.Debug("Receive plugin stop signal")
 			stopIfRunning()
 
 			return
@@ -125,11 +125,13 @@ func (c *Channel) runPlugin() {
 // This should only be called when the channel is not more required.
 // Multiple calls on same channel cause panic
 func (c *Channel) Stop() {
+	c.Logger.Info("Stopping channel plugin")
 	close(c.stopPluginCh)
 }
 
 // ReloadConfig sends a signal to reload the channel plugin config
 func (c *Channel) ReloadConfig() {
+	c.Logger.Info("Reloading the channel plugin config")
 	c.newConfigCh <- struct{}{}
 }
 
