@@ -12,4 +12,5 @@ type Filterable interface {
 // Filter is implemented by every filter chains and filter conditions.
 type Filter interface {
 	Eval(filterable Filterable) (bool, error)
+	ExtractConditions() []*Condition
 }

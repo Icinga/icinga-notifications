@@ -71,6 +71,19 @@ func (c *Chain) Eval(filterable Filterable) (bool, error) {
 	}
 }
 
+func (c *Chain) ExtractConditions() []*Condition {
+	var conditions []*Condition
+	for _, rule := range c.rules {
+		if _, ok := rule.(*Exists); ok {
+			continue
+		}
+
+		conditions = append(conditions, rule.ExtractConditions()...)
+	}
+
+	return conditions
+}
+
 // CompOperator is a type used for grouping the individual comparison operators of a filter string.
 type CompOperator string
 
@@ -165,6 +178,10 @@ func (c *Condition) Eval(filterable Filterable) (bool, error) {
 	}
 }
 
+func (c *Condition) ExtractConditions() []*Condition {
+	return []*Condition{c}
+}
+
 // Column returns the column of this Condition.
 func (c *Condition) Column() string {
 	return c.column
@@ -177,6 +194,10 @@ func (c *Condition) Value() string {
 
 type Exists struct {
 	column string
+}
+
+func (e *Exists) ExtractConditions() []*Condition {
+	panic("filter exists doesn't support extract conditions")
 }
 
 func NewExists(column string) *Exists {
