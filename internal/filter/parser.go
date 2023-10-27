@@ -523,23 +523,27 @@ yydefault:
 			yyVAL.expr = reduceFilter(yyDollar[1].expr, yyDollar[2].text, yyDollar[3].expr)
 			yylex.(*Lexer).rule = yyVAL.expr
 		}
+	case 2:
+		yyDollar = yyS[yypt-1 : yypt+1]
+//line parser.y:103
+		{
+			yylex.(*Lexer).rule = yyVAL.expr
+		}
 	case 3:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:106
+//line parser.y:109
 		{
 			yyVAL.expr = reduceFilter(yyDollar[1].expr, yyDollar[2].text, yyDollar[3].expr)
-			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 5:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:114
+//line parser.y:116
 		{
 			yyVAL.expr = reduceFilter(yyDollar[1].expr, yyDollar[2].text, yyDollar[3].expr)
-			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 7:
 		yyDollar = yyS[yypt-2 : yypt+1]
-//line parser.y:122
+//line parser.y:123
 		{
 			if yyDollar[1].text != "" {
 				// NewChain is only going to return an error if an invalid operator is specified, and since
@@ -548,19 +552,16 @@ yydefault:
 			} else {
 				yyVAL.expr = yyDollar[2].expr
 			}
-
-			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 8:
 		yyDollar = yyS[yypt-3 : yypt+1]
 //line parser.y:135
 		{
 			yyVAL.expr = yyDollar[2].expr
-			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 9:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:140
+//line parser.y:139
 		{
 			cond, err := NewCondition(yyDollar[1].text, CompOperator(yyDollar[2].text), yyDollar[3].text)
 			if err != nil {
@@ -569,18 +570,16 @@ yydefault:
 			}
 
 			yyVAL.expr = cond
-			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 11:
 		yyDollar = yyS[yypt-1 : yypt+1]
-//line parser.y:154
+//line parser.y:152
 		{
 			yyVAL.expr = NewExists(yyDollar[1].text)
-			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 14:
 		yyDollar = yyS[yypt-0 : yypt+1]
-//line parser.y:164
+//line parser.y:161
 		{
 			yyVAL.text = ""
 		}
