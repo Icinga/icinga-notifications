@@ -129,6 +129,7 @@ maybe_negated_condition_expr: optional_negation condition_expr
 			$$ = $2
 		}
 	}
+	;
 
 condition_expr: "(" filter_chain ")"
 	{

@@ -12,16 +12,16 @@ import __yyfmt__ "fmt"
 // Otherwise, it will pop the last pushed rule of that chain (second argument) and append it to the new *And chain.
 //
 // Example: `foo=bar|bar~foo&col!~val`
-// The second argument `rule` is supposed to be a filter.ANY *Chain contains the first two conditions.
+// The second argument `rule` is supposed to be a filter.Any *Chain contains the first two conditions.
 // We then call this function when the parser is processing the logical `&` op and the Unlike condition,
 // and what this function will do is logically re-group the conditions into `foo=bar|(bar~foo&col!~val)`.
 //
 //line parser.y:3
 func reduceFilter(op string, rule Filter, rules ...Filter) Filter {
 	chain, ok := rule.(*Chain)
-	if ok && chain.op == ANY && LogicalOp(op) == ALL {
+	if ok && chain.op == Any && LogicalOp(op) == All {
 		// Retrieve the last pushed condition and append it to the new "And" chain instead
-		andChain, _ := NewChain(ALL, chain.pop())
+		andChain, _ := NewChain(All, chain.pop())
 		andChain.add(rules...)
 
 		chain.add(andChain)
@@ -31,7 +31,7 @@ func reduceFilter(op string, rule Filter, rules ...Filter) Filter {
 
 	// If the given operator is the same as the already existsing chains operator (*chain),
 	// we don't need to create another chain of the same operator type. Avoids something
-	// like &Chain{op: ALL, &Chain{op: ALL, ...}}
+	// like &Chain{op: All, &Chain{op: All, ...}}
 	if chain == nil || chain.op != LogicalOp(op) {
 		newChain, err := NewChain(LogicalOp(op), rule)
 		if err != nil {
@@ -545,8 +545,7 @@ yydefault:
 //line parser.y:123
 		{
 			if yyDollar[1].text != "" {
-				// NewChain is only going to return an error if an invalid operator is specified, and since
-				// we explicitly provide the NONE operator, we don't expect an error to be returned.
+				// we explicitly provide the None operator, we don't expect an error to be returned.
 				yyVAL.expr, _ = NewChain(None, yyDollar[2].expr)
 			} else {
 				yyVAL.expr = yyDollar[2].expr
@@ -554,13 +553,13 @@ yydefault:
 		}
 	case 8:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:134
+//line parser.y:135
 		{
 			yyVAL.expr = yyDollar[2].expr
 		}
 	case 9:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:138
+//line parser.y:139
 		{
 			cond, err := NewCondition(yyDollar[1].text, CompOperator(yyDollar[2].text), yyDollar[3].text)
 			if err != nil {
@@ -572,13 +571,13 @@ yydefault:
 		}
 	case 11:
 		yyDollar = yyS[yypt-1 : yypt+1]
-//line parser.y:151
+//line parser.y:152
 		{
 			yyVAL.expr = NewExists(yyDollar[1].text)
 		}
 	case 14:
 		yyDollar = yyS[yypt-0 : yypt+1]
-//line parser.y:166
+//line parser.y:167
 		{
 			yyVAL.text = ""
 		}
