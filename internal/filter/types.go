@@ -8,12 +8,12 @@ import (
 type LogicalOp string
 
 const (
-	// NONE represents a filter chain type that matches when none of its ruleset matches.
-	NONE LogicalOp = "!"
-	// ALL represents a filter chain type that matches when all of its ruleset matches.
-	ALL LogicalOp = "&"
-	// ANY represents a filter chain type that matches when at least one of its ruleset matches.
-	ANY LogicalOp = "|"
+	// None represents a filter chain type that matches when none of its ruleset matches.
+	None LogicalOp = "!"
+	// All represents a filter chain type that matches when all of its ruleset matches.
+	All LogicalOp = "&"
+	// Any represents a filter chain type that matches when at least one of its ruleset matches.
+	Any LogicalOp = "|"
 )
 
 // Chain is a filter type that wraps other filter rules and itself.
@@ -27,7 +27,7 @@ type Chain struct {
 // Eval evaluates the filter rule sets recursively based on their operator type.
 func (c *Chain) Eval(filterable Filterable) (bool, error) {
 	switch c.op {
-	case NONE:
+	case None:
 		for _, rule := range c.rules {
 			matched, err := rule.Eval(filterable)
 			if err != nil {
@@ -40,7 +40,7 @@ func (c *Chain) Eval(filterable Filterable) (bool, error) {
 		}
 
 		return true, nil
-	case ALL:
+	case All:
 		for _, rule := range c.rules {
 			matched, err := rule.Eval(filterable)
 			if err != nil {
@@ -53,7 +53,7 @@ func (c *Chain) Eval(filterable Filterable) (bool, error) {
 		}
 
 		return true, nil
-	case ANY:
+	case Any:
 		for _, rule := range c.rules {
 			matched, err := rule.Eval(filterable)
 			if err != nil {
