@@ -148,12 +148,13 @@ func TestParser(t *testing.T) {
 
 		var expected Filter
 		rule, err := Parse("!foo=bar")
-		expected = &Chain{op: NONE, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}}
+		expected = &Chain{op: None, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}}
+		assert.Nil(t, err, "There should be no errors but got: %s", err)
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("foo=bar&bar=foo")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: ALL, rules: []Filter{
+		expected = &Chain{op: All, rules: []Filter{
 			&Condition{op: Equal, column: "foo", value: "bar"},
 			&Condition{op: Equal, column: "bar", value: "foo"},
 		}}
@@ -161,8 +162,8 @@ func TestParser(t *testing.T) {
 
 		rule, err = Parse("foo=bar&bar=foo|col=val")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: ANY, rules: []Filter{
-			&Chain{op: ALL, rules: []Filter{
+		expected = &Chain{op: Any, rules: []Filter{
+			&Chain{op: All, rules: []Filter{
 				&Condition{op: Equal, column: "foo", value: "bar"},
 				&Condition{op: Equal, column: "bar", value: "foo"},
 			}},
@@ -172,7 +173,7 @@ func TestParser(t *testing.T) {
 
 		rule, err = Parse("foo=bar|bar=foo")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: ANY, rules: []Filter{
+		expected = &Chain{op: Any, rules: []Filter{
 			&Condition{op: Equal, column: "foo", value: "bar"},
 			&Condition{op: Equal, column: "bar", value: "foo"},
 		}}
@@ -185,18 +186,18 @@ func TestParser(t *testing.T) {
 
 		rule, err = Parse("(!foo=bar)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: NONE, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}}
+		expected = &Chain{op: None, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("!(foo=bar)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: NONE, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}}
+		expected = &Chain{op: None, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("!(!foo=bar)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: NONE, rules: []Filter{
-			&Chain{op: NONE, rules: []Filter{
+		expected = &Chain{op: None, rules: []Filter{
+			&Chain{op: None, rules: []Filter{
 				&Condition{op: Equal, column: "foo", value: "bar"},
 			}},
 		}}
@@ -204,8 +205,8 @@ func TestParser(t *testing.T) {
 
 		rule, err = Parse("!(foo=bar|bar=foo)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: NONE, rules: []Filter{
-			&Chain{op: ANY, rules: []Filter{
+		expected = &Chain{op: None, rules: []Filter{
+			&Chain{op: Any, rules: []Filter{
 				&Condition{op: Equal, column: "foo", value: "bar"},
 				&Condition{op: Equal, column: "bar", value: "foo"},
 			}},
@@ -214,25 +215,25 @@ func TestParser(t *testing.T) {
 
 		rule, err = Parse("((!foo=bar)&bar!=foo)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: ALL, rules: []Filter{
-			&Chain{op: NONE, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}},
+		expected = &Chain{op: All, rules: []Filter{
+			&Chain{op: None, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}},
 			&Condition{op: UnEqual, column: "bar", value: "foo"},
 		}}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("!foo&!bar")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: ALL, rules: []Filter{
-			&Chain{op: NONE, rules: []Filter{&Exists{column: "foo"}}},
-			&Chain{op: NONE, rules: []Filter{&Exists{column: "bar"}}},
+		expected = &Chain{op: All, rules: []Filter{
+			&Chain{op: None, rules: []Filter{&Exists{column: "foo"}}},
+			&Chain{op: None, rules: []Filter{&Exists{column: "bar"}}},
 		}}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("!(!foo|bar)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: NONE, rules: []Filter{
-			&Chain{op: ANY, rules: []Filter{
-				&Chain{op: NONE, rules: []Filter{&Exists{column: "foo"}}},
+		expected = &Chain{op: None, rules: []Filter{
+			&Chain{op: Any, rules: []Filter{
+				&Chain{op: None, rules: []Filter{&Exists{column: "foo"}}},
 				&Exists{column: "bar"},
 			}},
 		}}
@@ -240,9 +241,9 @@ func TestParser(t *testing.T) {
 
 		rule, err = Parse("!(!(foo|bar))")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: NONE, rules: []Filter{
-			&Chain{op: NONE, rules: []Filter{
-				&Chain{op: ANY, rules: []Filter{
+		expected = &Chain{op: None, rules: []Filter{
+			&Chain{op: None, rules: []Filter{
+				&Chain{op: Any, rules: []Filter{
 					&Exists{column: "foo"},
 					&Exists{column: "bar"}},
 				},
@@ -252,7 +253,7 @@ func TestParser(t *testing.T) {
 
 		rule, err = Parse("foo=bar&bar!=foo")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: ALL, rules: []Filter{
+		expected = &Chain{op: All, rules: []Filter{
 			&Condition{op: Equal, column: "foo", value: "bar"},
 			&Condition{op: UnEqual, column: "bar", value: "foo"},
 		}}
@@ -260,14 +261,14 @@ func TestParser(t *testing.T) {
 
 		rule, err = Parse("!(foo=bar|bar=foo)&(foo!=bar|bar!=foo)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: ALL, rules: []Filter{
-			&Chain{op: NONE, rules: []Filter{
-				&Chain{op: ANY, rules: []Filter{
+		expected = &Chain{op: All, rules: []Filter{
+			&Chain{op: None, rules: []Filter{
+				&Chain{op: Any, rules: []Filter{
 					&Condition{op: Equal, column: "foo", value: "bar"},
 					&Condition{op: Equal, column: "bar", value: "foo"},
 				}},
 			}},
-			&Chain{op: ANY, rules: []Filter{
+			&Chain{op: Any, rules: []Filter{
 				&Condition{op: UnEqual, column: "foo", value: "bar"},
 				&Condition{op: UnEqual, column: "bar", value: "foo"},
 			}},
@@ -277,14 +278,14 @@ func TestParser(t *testing.T) {
 		rule, err = Parse("foo=bar&bar!=foo&john>doe|doe<john&column!=value|column=value")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 
-		expected = &Chain{op: ANY, rules: []Filter{
-			&Chain{op: ALL, rules: []Filter{
+		expected = &Chain{op: Any, rules: []Filter{
+			&Chain{op: All, rules: []Filter{
 				&Condition{op: Equal, column: "foo", value: "bar"},
 				&Condition{op: UnEqual, column: "bar", value: "foo"},
 				&Condition{op: GreaterThan, column: "john", value: "doe"},
 			}},
-			&Chain{op: ANY, rules: []Filter{
-				&Chain{op: ALL, rules: []Filter{
+			&Chain{op: Any, rules: []Filter{
+				&Chain{op: All, rules: []Filter{
 					&Condition{op: LessThan, column: "doe", value: "john"},
 					&Condition{op: UnEqual, column: "column", value: "value"},
 				}},
@@ -296,13 +297,13 @@ func TestParser(t *testing.T) {
 		rule, err = Parse("foo=bar&bar!=foo&(john>doe|doe<john&column!=value)|column=value")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 
-		expected = &Chain{op: ANY, rules: []Filter{
-			&Chain{op: ALL, rules: []Filter{
+		expected = &Chain{op: Any, rules: []Filter{
+			&Chain{op: All, rules: []Filter{
 				&Condition{op: Equal, column: "foo", value: "bar"},
 				&Condition{op: UnEqual, column: "bar", value: "foo"},
-				&Chain{op: ANY, rules: []Filter{
+				&Chain{op: Any, rules: []Filter{
 					&Condition{op: GreaterThan, column: "john", value: "doe"},
-					&Chain{op: ALL, rules: []Filter{
+					&Chain{op: All, rules: []Filter{
 						&Condition{op: LessThan, column: "doe", value: "john"},
 						&Condition{op: UnEqual, column: "column", value: "value"},
 					}},
@@ -315,16 +316,16 @@ func TestParser(t *testing.T) {
 		rule, err = Parse("foo=bar&bar!=foo|(john>doe|doe<john&column!=value)&column=value")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 
-		expected = &Chain{op: ANY, rules: []Filter{
+		expected = &Chain{op: Any, rules: []Filter{
 			// The first two filter conditions
-			&Chain{op: ALL, rules: []Filter{
+			&Chain{op: All, rules: []Filter{
 				&Condition{op: Equal, column: "foo", value: "bar"},
 				&Condition{op: UnEqual, column: "bar", value: "foo"},
 			}},
-			&Chain{op: ALL, rules: []Filter{
-				&Chain{op: ANY, rules: []Filter{ // Represents the filter conditions within the parentheses
+			&Chain{op: All, rules: []Filter{
+				&Chain{op: Any, rules: []Filter{ // Represents the filter conditions within the parentheses
 					&Condition{op: GreaterThan, column: "john", value: "doe"},
-					&Chain{op: ALL, rules: []Filter{
+					&Chain{op: All, rules: []Filter{
 						&Condition{op: LessThan, column: "doe", value: "john"},
 						&Condition{op: UnEqual, column: "column", value: "value"},
 					}},
@@ -338,18 +339,18 @@ func TestParser(t *testing.T) {
 		rule, err = Parse("foo=bar&bar!=foo|(john>doe|doe<john&(column!=value|value!~column))&column=value")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 
-		expected = &Chain{op: ANY, rules: []Filter{
+		expected = &Chain{op: Any, rules: []Filter{
 			// The first two filter conditions
-			&Chain{op: ALL, rules: []Filter{
+			&Chain{op: All, rules: []Filter{
 				&Condition{op: Equal, column: "foo", value: "bar"},
 				&Condition{op: UnEqual, column: "bar", value: "foo"},
 			}},
-			&Chain{op: ALL, rules: []Filter{
-				&Chain{op: ANY, rules: []Filter{ // Represents the filter conditions within the parentheses
+			&Chain{op: All, rules: []Filter{
+				&Chain{op: Any, rules: []Filter{ // Represents the filter conditions within the parentheses
 					&Condition{op: GreaterThan, column: "john", value: "doe"},
-					&Chain{op: ALL, rules: []Filter{
+					&Chain{op: All, rules: []Filter{
 						&Condition{op: LessThan, column: "doe", value: "john"},
-						&Chain{op: ANY, rules: []Filter{ // Represents the filter conditions within the nested parentheses
+						&Chain{op: Any, rules: []Filter{ // Represents the filter conditions within the nested parentheses
 							&Condition{op: UnEqual, column: "column", value: "value"},
 							&Condition{op: UnLike, column: "value", value: "column"},
 						}},
