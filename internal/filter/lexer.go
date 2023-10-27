@@ -14,6 +14,12 @@ import (
 // Currently, it allows to match any character except these inside the curly braces.
 var regex = regexp.MustCompile("[^!&|~<>=()]")
 
+// init just sets the global yyErrorVerbose variable to true.
+func init() {
+	// Enable parsers error verbose to get more context of the parsing failures
+	yyErrorVerbose = true
+}
+
 // Parse wraps the auto generated yyParse function.
 // It parses the given filter string and returns on success a Filter instance.
 func Parse(expr string) (rule Filter, err error) {
@@ -25,15 +31,17 @@ func Parse(expr string) (rule Filter, err error) {
 	// our error function after the scanner initialization.
 	lex.Scanner.Error = lex.ScanError
 
-	// Enable parsers error verbose to get more context of the parsing failures
-	yyErrorVerbose = true
-
 	defer func() {
 		// All the grammar rules panics when encountering any errors while reducing the filter rules, so try
 		// to recover from it and return an error instead. Since we're used a named return values, we can set
 		// the err value even in deferred function. See https://go.dev/blog/defer-panic-and-recover
 		if r := recover(); r != nil {
 			err = errors.New(fmt.Sprint(r))
+		}
+
+		if err != nil {
+			// The lexer may contain some incomplete filter rules constructed before the parser panics, so reset it.
+			rule = nil
 		}
 	}()
 
@@ -129,7 +137,10 @@ func (l *Lexer) Lex(yyval *yySymType) int {
 // additional context instead. This function then wraps the provided err and adds line, column number and offset
 // to the error string. Error is equivalent to "yyerror" in the original yacc.
 func (l *Lexer) Error(s string) {
-	l.err = errors.New(fmt.Sprintf("%d:%d (%d): %s", l.Line, l.Column, l.Offset, s))
+	l.err = fmt.Errorf("%d:%d (%d): %s", l.Line, l.Column, l.Offset, s)
+
+	// Always reset the current filter rule when encountering an error.
+	l.rule = nil
 }
 
 // ScanError is used to capture all errors the Scanner encounters.
