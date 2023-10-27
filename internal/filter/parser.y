@@ -100,12 +100,14 @@ filter_rule: filter_chain logical_op filter_chain
 		yylex.(*Lexer).rule = $$
 	}
 	| filter_chain
+	{
+		yylex.(*Lexer).rule = $$
+	}
 	;
 
 filter_chain: conditions_expr logical_op maybe_negated_condition_expr
 	{
 		$$ = reduceFilter($1, $2, $3)
-		yylex.(*Lexer).rule = $$
 	}
 	| conditions_expr %prec PREFER_SHIFTING_LOGICAL_OP
 	;
@@ -113,7 +115,6 @@ filter_chain: conditions_expr logical_op maybe_negated_condition_expr
 conditions_expr: maybe_negated_condition_expr logical_op maybe_negated_condition_expr
 	{
 		$$ = reduceFilter($1, $2, $3)
-		yylex.(*Lexer).rule = $$
 	}
 	| maybe_negated_condition_expr %prec PREFER_SHIFTING_LOGICAL_OP
 	;
@@ -127,14 +128,11 @@ maybe_negated_condition_expr: optional_negation condition_expr
 		} else {
 			$$ = $2
 		}
-
-		yylex.(*Lexer).rule = $$
 	}
 
 condition_expr: "(" filter_chain ")"
 	{
 		$$ = $2
-		yylex.(*Lexer).rule = $$
 	}
 	| identifier comparison_op identifier
 	{
@@ -145,7 +143,6 @@ condition_expr: "(" filter_chain ")"
 		}
 
 		$$ = cond
-		yylex.(*Lexer).rule = $$
 	}
 	| exists_expr
 	;
@@ -153,7 +150,6 @@ condition_expr: "(" filter_chain ")"
 exists_expr: identifier
 	{
 		$$ = NewExists($1)
-		yylex.(*Lexer).rule = $$
 	}
 	;
 
