@@ -10,9 +10,9 @@ import (
 	"text/scanner"
 )
 
-// regex contains a compiled regexp and is used by the Lexer to match filter identifiers.
-// Currently, it allows to match any character except these inside the curly braces.
-var regex = regexp.MustCompile("[^!&|~<>=()]")
+// identifiersMatcher contains a compiled regexp and is used by the Lexer to match filter identifiers.
+// Currently, it allows to match any character except a LogicalOp and CompOperator.
+var identifiersMatcher = regexp.MustCompile("[^!&|~<>=()]")
 
 // init just sets the global yyErrorVerbose variable to true.
 func init() {
@@ -152,4 +152,4 @@ func (l *Lexer) ScanError(_ *scanner.Scanner, msg string) { l.Error(msg) }
 
 // isIdentRune provides custom implementation of scanner.IsIdentRune.
 // This function determines whether a given character is allowed to be part of an identifier.
-func isIdentRune(ch rune, _ int) bool { return regex.MatchString(string(ch)) }
+func isIdentRune(ch rune, _ int) bool { return identifiersMatcher.MatchString(string(ch)) }
