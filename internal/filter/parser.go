@@ -15,7 +15,7 @@ type Parser struct {
 func Parse(expression string) (Filter, error) {
 	parser := &Parser{tag: expression, length: len(expression)}
 	if parser.length == 0 {
-		return &Chain{op: ALL}, nil
+		return &Chain{op: All}, nil
 	}
 
 	return parser.readFilter(0, "", nil)
@@ -97,7 +97,7 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Filter) (
 			if operator != "!" && (next == "&" || next == "|") {
 				if operator == "&" {
 					if len(rules) > 1 {
-						rules = []Filter{&Chain{op: ALL, rules: rules}}
+						rules = []Filter{&Chain{op: All, rules: rules}}
 					}
 
 					operator = next
@@ -122,7 +122,7 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Filter) (
 		} else {
 			if negate {
 				negate = false
-				rules = append(rules, &Chain{op: NONE, rules: []Filter{condition}})
+				rules = append(rules, &Chain{op: None, rules: []Filter{condition}})
 			} else {
 				rules = append(rules, condition)
 			}
@@ -154,7 +154,7 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Filter) (
 			if next == "&" || next == "|" {
 				if operator == "" || operator == "&" {
 					if operator == "&" && len(rules) > 1 {
-						all := &Chain{op: ALL, rules: rules}
+						all := &Chain{op: All, rules: rules}
 						rules = []Filter{all}
 					}
 
@@ -195,18 +195,18 @@ func (p *Parser) readFilter(nestingLevel int, operator string, rules []Filter) (
 	var chain Filter
 	switch operator {
 	case "&":
-		chain = &Chain{op: ALL, rules: rules}
+		chain = &Chain{op: All, rules: rules}
 	case "|":
-		chain = &Chain{op: ANY, rules: rules}
+		chain = &Chain{op: Any, rules: rules}
 	case "!":
-		chain = &Chain{op: NONE, rules: rules}
+		chain = &Chain{op: None, rules: rules}
 	case "":
 		if nestingLevel == 0 && rules != nil {
 			// There is only one filter tag, no chain
 			return rules[0], nil
 		}
 
-		chain = &Chain{op: ALL, rules: rules}
+		chain = &Chain{op: All, rules: rules}
 	default:
 		return nil, p.parseError(operator, "")
 	}
