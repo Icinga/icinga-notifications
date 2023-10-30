@@ -11,6 +11,7 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -44,9 +45,9 @@ type Client struct {
 
 	// eventDispatch communicates Events to be processed between producer and consumer.
 	eventDispatch chan *event.Event
-	// replayTrigger signals the eventDispatcher method that the reconnection phase is finished.
+	// replayTrigger signals the eventDispatcher method that the replay phase is finished.
 	replayTrigger chan struct{}
-	// replayPhase indicates that Events will be cached as the Event Stream Client is in the reconnection phase.
+	// replayPhase indicates that Events will be cached as the Event Stream Client is in the replay phase.
 	replayPhase atomic.Bool
 }
 
@@ -70,6 +71,16 @@ func NewClientsFromConfig(
 			ApiBasicAuthUser: icinga2Api.AuthUser,
 			ApiBasicAuthPass: icinga2Api.AuthPass,
 			ApiHttpTransport: http.Transport{
+				// Limit the initial Dial timeout to enable a fast retry when the Icinga 2 API is offline. Due to the
+				// need for very long-lived connections against the Event Stream API afterward, Client.Timeout would
+				// limit the whole connection, which would be fatal.
+				//
+				// Check the "Client Timeout" section of the following (slightly outdated) blog post:
+				// https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					dialer := &net.Dialer{Timeout: 3 * time.Second}
+					return dialer.DialContext(ctx, network, addr)
+				},
 				TLSClientConfig: &tls.Config{
 					MinVersion: tls.VersionTLS13,
 				},
@@ -224,10 +235,10 @@ func (client *Client) buildAcknowledgementEvent(host, service, author, comment s
 
 // eventDispatcher receives generated event.Events to be either buffered or directly delivered to the CallbackFn.
 //
-// When the Client is in the reconnection phase, indicated in the enterReconnectionPhase method, than all received Events
+// When the Client is in the replay phase, indicated in the enterReplayPhase method, than all received Events
 // from the eventDispatch channel will be buffered until the replayTrigger fires.
 func (client *Client) eventDispatcher() {
-	var reconnectionBuffer []*event.Event
+	var replayBuffer []*event.Event
 
 	for {
 		select {
@@ -236,17 +247,17 @@ func (client *Client) eventDispatcher() {
 			return
 
 		case <-client.replayTrigger:
-			for _, ev := range reconnectionBuffer {
+			for _, ev := range replayBuffer {
 				client.CallbackFn(ev)
 			}
-			client.Logger.Debugf("Replayed %d events during reconnection phase", len(reconnectionBuffer))
+			client.Logger.Debugf("Replayed %d events during replay phase", len(replayBuffer))
 			client.replayPhase.Store(false)
-			reconnectionBuffer = []*event.Event{}
-			client.Logger.Info("Finished reconnection phase and returning normal operation")
+			replayBuffer = []*event.Event{}
+			client.Logger.Info("Finished replay phase and returning to normal operation")
 
 		case ev := <-client.eventDispatch:
 			if client.replayPhase.Load() {
-				reconnectionBuffer = append(reconnectionBuffer, ev)
+				replayBuffer = append(replayBuffer, ev)
 			} else {
 				client.CallbackFn(ev)
 			}
@@ -254,12 +265,12 @@ func (client *Client) eventDispatcher() {
 	}
 }
 
-// enterReconnectionPhase enters the reconnection phase.
+// enterReplayPhase enters the replay phase for the initial sync and after reconnections.
 //
 // This method starts multiple goroutines. First, some workers to query the Icinga 2 Objects API will be launched. When
 // all of those have finished, the replayTrigger will be used to indicate that the buffered Events should be replayed.
-func (client *Client) enterReconnectionPhase() {
-	client.Logger.Info("Entering reconnection phase to replay events")
+func (client *Client) enterReplayPhase() {
+	client.Logger.Info("Entering replay phase to replay events")
 	client.replayPhase.Store(true)
 
 	queryFns := []func(string){client.checkMissedAcknowledgements, client.checkMissedStateChanges}
@@ -301,20 +312,11 @@ func (client *Client) Process() {
 	go client.eventDispatcher()
 
 	for {
-		client.Logger.Info("Start listening on Icinga 2 Event Stream..")
 		err := client.listenEventStream()
 		if err != nil {
-			client.Logger.Errorf("Event Stream processing failed: %v", err)
+			client.Logger.Errorw("Event Stream processing failed", zap.Error(err))
 		} else {
 			client.Logger.Warn("Event Stream closed stream; maybe Icinga 2 is reloading")
 		}
-
-		err = client.waitForApiAvailability()
-		if err != nil {
-			client.Logger.Errorw("Cannot reestablish an API connection", zap.Error(err))
-			return
-		}
-
-		client.enterReconnectionPhase()
 	}
 }
