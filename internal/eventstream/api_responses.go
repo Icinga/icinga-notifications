@@ -46,7 +46,6 @@ type CheckResult struct {
 	ExitStatus     int         `json:"exit_status"`
 	Output         string      `json:"output"`
 	State          int         `json:"state"`
-	Command        []string    `json:"command"`
 	ExecutionStart Icinga2Time `json:"execution_start"`
 	ExecutionEnd   Icinga2Time `json:"execution_end"`
 }
