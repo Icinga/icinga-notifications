@@ -111,30 +111,6 @@ func (ch *Email) GetInfo() *plugin.Info {
 			},
 			Placeholder: "icinga@example.com",
 		},
-		{
-			Name: "password",
-			Type: "secret",
-			Label: map[string]string{
-				"en_US": "Password",
-				"de_DE": "Passwort",
-			},
-		},
-		{
-			Name: "tls",
-			Type: "bool",
-			Label: map[string]string{
-				"en_US": "TLS / SSL",
-				"de_DE": "TLS / SSL",
-			},
-		},
-		{
-			Name: "tls_certcheck",
-			Type: "bool",
-			Label: map[string]string{
-				"en_US": "Certificate Check",
-				"de_DE": "Zertifikat prüfen",
-			},
-		},
 	}
 
 	configAttrs, err := json.Marshal(elements)
