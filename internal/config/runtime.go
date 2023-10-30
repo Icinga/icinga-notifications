@@ -11,6 +11,7 @@ import (
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+	"strings"
 	"sync"
 	"time"
 )
@@ -125,11 +126,11 @@ func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Escalation {
 	return nil
 }
 
-// GetContact returns *recipient.Contact by the given username.
+// GetContact returns *recipient.Contact by the given username (case-insensitive).
 // Returns nil when the given username doesn't exist.
 func (r *RuntimeConfig) GetContact(username string) *recipient.Contact {
 	for _, contact := range r.Contacts {
-		if contact.Username.String == username {
+		if strings.EqualFold(contact.Username.String, username) {
 			return contact
 		}
 	}
