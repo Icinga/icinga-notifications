@@ -22,6 +22,12 @@ import (
 
 // This file contains the main resp. common methods for the Client.
 
+// outgoingEvent is a wrapper around an event.Event and its producer's origin to be sent to the eventDispatcher.
+type outgoingEvent struct {
+	event           *event.Event
+	fromEventStream bool
+}
+
 // Client for the Icinga 2 Event Stream API with extended support for other Icinga 2 APIs to gather additional
 // information and allow a replay in case of a connection loss.
 type Client struct {
@@ -44,7 +50,7 @@ type Client struct {
 	Logger *logging.Logger
 
 	// eventDispatch communicates Events to be processed between producer and consumer.
-	eventDispatch chan *event.Event
+	eventDispatch chan *outgoingEvent
 	// replayTrigger signals the eventDispatcher method that the replay phase is finished.
 	replayTrigger chan struct{}
 	// replayPhase indicates that Events will be cached as the Event Stream Client is in the replay phase.
@@ -235,8 +241,8 @@ func (client *Client) buildAcknowledgementEvent(host, service, author, comment s
 
 // eventDispatcher receives generated event.Events to be either buffered or directly delivered to the CallbackFn.
 //
-// When the Client is in the replay phase, indicated in the enterReplayPhase method, than all received Events
-// from the eventDispatch channel will be buffered until the replayTrigger fires.
+// When the Client is in the replay phase, events from the Event Stream API will be cached until the replay phase has
+// finished, while replayed events will be delivered directly.
 func (client *Client) eventDispatcher() {
 	var replayBuffer []*event.Event
 
@@ -256,10 +262,10 @@ func (client *Client) eventDispatcher() {
 			client.Logger.Info("Finished replay phase and returning to normal operation")
 
 		case ev := <-client.eventDispatch:
-			if client.replayPhase.Load() {
-				replayBuffer = append(replayBuffer, ev)
+			if client.replayPhase.Load() && ev.fromEventStream {
+				replayBuffer = append(replayBuffer, ev.event)
 			} else {
-				client.CallbackFn(ev)
+				client.CallbackFn(ev.event)
 			}
 		}
 	}
@@ -304,7 +310,7 @@ func (client *Client) Process() {
 	// only one consumer, eventDispatcher, there is no ideal closer. However, producers and the consumer will be
 	// finished by the Client's context. When this happens, the main application should either be stopped or the Client
 	// is restarted, and we can hope for the GC. To make sure that nothing gets stuck, make the event channel buffered.
-	client.eventDispatch = make(chan *event.Event, 1024)
+	client.eventDispatch = make(chan *outgoingEvent, 1024)
 	client.replayTrigger = make(chan struct{})
 
 	defer client.Logger.Info("Event Stream Client has stopped")
