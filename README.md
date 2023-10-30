@@ -32,16 +32,20 @@ The `listener_password_hash` is a [PHP `password_hash`](https://www.php.net/manu
 In the example above, this is "correct horse battery staple".
 This mimics Icinga Web 2's behavior, as stated in [its documentation](https://icinga.com/docs/icinga-web/latest/doc/20-Advanced-Topics/#manual-user-creation-for-database-authentication-backend).
 
+Currently, there are two ways how notifications get communicated between Icinga 2 and Icinga Notifications.
+Please select only one, whereby the first is recommended:
+
+* Icinga Notifications can pull those from the Icinga 2 API when being configured in the YAML configuration file.
+  For each `source`, as inserted in the database above, an `icinga2-apis` endpoint must be defined.
+* Otherwise, Icinga 2 can push the notifications to the Icinga Notification daemon.
+  Therefore, you need to copy the [Icinga 2 config](icinga2.conf) to `/etc/icinga2/features-enabled` on your master node(s) and restart the Icinga 2 service.
+  At the top of this file, you will find multiple configurations options that can be set in `/etc/icinga2/constants.conf`.
+  There are also Icinga2 `EventCommand` definitions in this file that will automatically match all your **checkables**, which may not work properly if the configuration already uses event commands for something else.
+
 Then, you can launch the daemon with the following command.
 ```go
 go run ./cmd/icinga-notifications-daemon --config config.yml
 ```
-
-Last but not least, in order for the daemon to receive events from Icinga 2, you need to copy the [Icinga 2 config](icinga2.conf)
-to `/etc/icinga2/features-enabled` on your master node(s) and restart the Icinga 2 service. At the top of this file,
-you will find multiple configurations options that can be set in `/etc/icinga2/constants.conf`. There are also Icinga2
-`EventCommand` definitions in this file that will automatically match all your **checkables**, which may not work
-properly if the configuration already uses event commands for something else.
 
 ## License
 
