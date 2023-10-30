@@ -61,7 +61,7 @@ func (client *Client) queryObjectsApi(urlPaths []string, method string, body io.
 
 	if res.StatusCode != http.StatusOK {
 		_ = res.Body.Close()
-		return nil, fmt.Errorf("unexpected status code %d", res.StatusCode)
+		return nil, fmt.Errorf("unexpected HTTP status code %d", res.StatusCode)
 	}
 
 	return res.Body, nil
@@ -154,7 +154,7 @@ func (client *Client) fetchAcknowledgementComment(host, service string, ackTime 
 	}
 
 	if len(objQueriesResults) == 0 {
-		return nil, fmt.Errorf("found no ACK Comments found for %q", filterExpr)
+		return nil, fmt.Errorf("found no ACK Comments for %q with %v", filterExpr, filterVars)
 	}
 
 	slices.SortFunc(objQueriesResults, func(a, b ObjectQueriesResult[Comment]) int {
@@ -163,7 +163,7 @@ func (client *Client) fetchAcknowledgementComment(host, service string, ackTime 
 		return int(distA - distB)
 	})
 	if objQueriesResults[0].Attrs.EntryTime.Sub(ackTime).Abs() > time.Second {
-		return nil, fmt.Errorf("found no ACK Comment for %q close to %v", filterExpr, ackTime)
+		return nil, fmt.Errorf("found no ACK Comment for %q with %v close to %v", filterExpr, filterVars, ackTime)
 	}
 
 	return &objQueriesResults[0].Attrs, nil
@@ -177,6 +177,8 @@ func (client *Client) fetchAcknowledgementComment(host, service string, ackTime 
 // Icinga 2 Objects API. The callback function or a later caller must decide if this object should be replayed.
 func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallbackFn func(attrs HostServiceRuntimeAttributes, host, service string)) {
 	var (
+		logger = client.Logger.With(zap.String("object type", objType))
+
 		jsonRaw io.ReadCloser
 		err     error
 	)
@@ -186,13 +188,13 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 		jsonRaw, err = client.queryObjectsApiQuery(objType, map[string]any{"filter": filterExpr})
 	}
 	if err != nil {
-		client.Logger.Errorf("Quering %ss from API failed, %v", objType, err)
+		logger.Errorw("Querying API failed", zap.Error(err))
 		return
 	}
 
 	objQueriesResults, err := extractObjectQueriesResult[HostServiceRuntimeAttributes](jsonRaw)
 	if err != nil {
-		client.Logger.Errorf("Parsing %ss from API failed, %v", objType, err)
+		logger.Errorw("Parsing API response failed", zap.Error(err))
 		return
 	}
 
@@ -200,11 +202,11 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 		return
 	}
 
-	client.Logger.Debugf("Querying %ss from API resulted in %d state changes for optional replay", objType, len(objQueriesResults))
+	logger.Debugw("Querying API resulted in state changes", zap.Int("changes", len(objQueriesResults)))
 
 	for _, objQueriesResult := range objQueriesResults {
 		if client.Ctx.Err() != nil {
-			client.Logger.Warnf("Stopping %s API response processing as context is finished", objType)
+			logger.Warnw("Stopping API response processing as context is finished", zap.Error(client.Ctx.Err()))
 			return
 		}
 
@@ -218,7 +220,7 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 			serviceName = objQueriesResult.Attrs.Name
 
 		default:
-			client.Logger.Errorf("Querying API delivered a %q object when expecting %s", objQueriesResult.Type, objType)
+			logger.Errorw("Querying API delivered a wrong object type", zap.String("result type", objQueriesResult.Type))
 			continue
 		}
 
@@ -231,7 +233,7 @@ func (client *Client) checkMissedStateChanges(objType string) {
 	client.checkMissedChanges(objType, "", func(attrs HostServiceRuntimeAttributes, host, service string) {
 		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, host, service)
 		if err != nil {
-			client.Logger.Errorf("Failed to construct Event from %s API: %v", objType, err)
+			client.Logger.Errorw("Failed to construct Event from API", zap.String("object type", objType), zap.Error(err))
 			return
 		}
 
@@ -248,15 +250,17 @@ func (client *Client) checkMissedStateChanges(objType string) {
 func (client *Client) checkMissedAcknowledgements(objType string) {
 	filterExpr := fmt.Sprintf("%s.acknowledgement", objType)
 	client.checkMissedChanges(objType, filterExpr, func(attrs HostServiceRuntimeAttributes, host, service string) {
+		logger := client.Logger.With(zap.String("object type", objType))
+
 		ackComment, err := client.fetchAcknowledgementComment(host, service, attrs.AcknowledgementLastChange.Time)
 		if err != nil {
-			client.Logger.Errorf("Cannot fetch ACK Comment for Acknowledgement, %v", err)
+			logger.Errorw("Cannot fetch ACK Comment for Acknowledgement", zap.Error(err))
 			return
 		}
 
 		ev, err := client.buildAcknowledgementEvent(host, service, ackComment.Author, ackComment.Text)
 		if err != nil {
-			client.Logger.Errorf("Failed to construct Event from Acknowledgement %s API: %v", objType, err)
+			logger.Errorw("Failed to construct Event from Acknowledgement API", zap.Error(err))
 			return
 		}
 

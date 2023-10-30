@@ -256,10 +256,9 @@ func (client *Client) eventDispatcher() {
 			for _, ev := range replayBuffer {
 				client.CallbackFn(ev)
 			}
-			client.Logger.Debugf("Replayed %d events during replay phase", len(replayBuffer))
+			client.Logger.Infow("Finished replay phase, returning to normal operation", zap.Int("cached events", len(replayBuffer)))
 			client.replayPhase.Store(false)
 			replayBuffer = []*event.Event{}
-			client.Logger.Info("Finished replay phase and returning to normal operation")
 
 		case ev := <-client.eventDispatch:
 			if client.replayPhase.Load() && ev.fromEventStream {
@@ -276,7 +275,7 @@ func (client *Client) eventDispatcher() {
 // This method starts multiple goroutines. First, some workers to query the Icinga 2 Objects API will be launched. When
 // all of those have finished, the replayTrigger will be used to indicate that the buffered Events should be replayed.
 func (client *Client) enterReplayPhase() {
-	client.Logger.Info("Entering replay phase to replay events")
+	client.Logger.Info("Entering replay phase to replay stored events first")
 	client.replayPhase.Store(true)
 
 	queryFns := []func(string){client.checkMissedAcknowledgements, client.checkMissedStateChanges}
