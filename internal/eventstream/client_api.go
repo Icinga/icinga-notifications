@@ -1,19 +1,21 @@
 package eventstream
 
 import (
+	"bufio"
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/event"
 	"go.uber.org/zap"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"slices"
 	"time"
 )
 
-// This method contains Icinga 2 API related methods which are not directly related to the Event Stream.
+// This file contains Icinga 2 API related methods.
 
 // extractObjectQueriesResult parses a typed ObjectQueriesResult array out of a JSON io.ReaderCloser.
 //
@@ -259,50 +261,92 @@ func (client *Client) checkMissedAcknowledgements(objType string) {
 	})
 }
 
-// waitForApiAvailability reconnects to the Icinga 2 API until it either becomes available or the Client context is done.
-func (client *Client) waitForApiAvailability() error {
-	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/")
+// listenEventStream subscribes to the Icinga 2 API Event Stream and handles received objects.
+//
+// In case of a parsing or handling error, this error will be returned. If the server closes the connection, nil will
+// be returned.
+func (client *Client) listenEventStream() error {
+	queueNameRndBuff := make([]byte, 16)
+	_, _ = rand.Read(queueNameRndBuff)
+
+	reqBody, err := json.Marshal(map[string]any{
+		"queue": fmt.Sprintf("icinga-notifications-%x", queueNameRndBuff),
+		"types": []string{
+			typeStateChange,
+			typeAcknowledgementSet,
+			// typeAcknowledgementCleared,
+			// typeCommentAdded,
+			// typeCommentRemoved,
+			// typeDowntimeAdded,
+			// typeDowntimeRemoved,
+			// typeDowntimeStarted,
+			// typeDowntimeTriggered,
+		},
+	})
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(client.Ctx, http.MethodGet, apiUrl, nil)
+
+	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/events")
 	if err != nil {
 		return err
 	}
+	req, err := http.NewRequestWithContext(client.Ctx, http.MethodPost, apiUrl, bytes.NewReader(reqBody))
+	if err != nil {
+		return err
+	}
+
 	req.SetBasicAuth(client.ApiBasicAuthUser, client.ApiBasicAuthPass)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 
-	// To neither flood the API nor have to wait unnecessary long, at first the exponential function for the backoff
-	// time calculation will be used. When numbers are starting to get big, a logarithm will be used instead.
-	// 10ms, 27ms, 73ms, 200ms, 545ms, 1.484s, 2.584s, 2.807s, 3s, 3.169s, ...
-	backoffDelay := func(i int) time.Duration {
-		if i <= 5 {
-			return time.Duration(math.Exp(float64(i)) * 10 * float64(time.Millisecond))
+	httpClient := &http.Client{Transport: &client.ApiHttpTransport}
+
+	var res *http.Response
+	for {
+		client.Logger.Info("Try to establish an Event Stream API connection")
+		res, err = httpClient.Do(req)
+		if err == nil {
+			break
 		}
-		return time.Duration(math.Log2(float64(i)) * float64(time.Second))
+		client.Logger.Warnw("Establishing an Event Stream API connection failed; will be retried", zap.Error(err))
 	}
+	defer func() { _ = res.Body.Close() }()
 
-	for i := 0; client.Ctx.Err() == nil; i++ {
-		time.Sleep(backoffDelay(i))
-		client.Logger.Debugw("Try to reestablish an API connection", zap.Int("try", i+1))
+	client.enterReplayPhase()
 
-		httpClient := &http.Client{
-			Transport: &client.ApiHttpTransport,
-			Timeout:   100 * time.Millisecond,
-		}
-		res, err := httpClient.Do(req)
+	client.Logger.Info("Start listening on Icinga 2 Event Stream..")
+
+	lineScanner := bufio.NewScanner(res.Body)
+	for lineScanner.Scan() {
+		rawJson := lineScanner.Bytes()
+
+		resp, err := UnmarshalEventStreamResponse(rawJson)
 		if err != nil {
-			client.Logger.Errorw("Reestablishing an API connection failed", zap.Error(err))
-			continue
-		}
-		_ = res.Body.Close()
-
-		if res.StatusCode != http.StatusOK {
-			client.Logger.Errorw("API returns unexpected status code during API reconnection", zap.Int("status", res.StatusCode))
-			continue
+			return err
 		}
 
-		client.Logger.Debugw("Successfully reconnected to API", zap.Int("try", i+1))
-		return nil
+		var ev *event.Event
+		switch respT := resp.(type) {
+		case *StateChange:
+			ev, err = client.buildHostServiceEvent(respT.CheckResult, respT.State, respT.Host, respT.Service)
+		case *AcknowledgementSet:
+			ev, err = client.buildAcknowledgementEvent(respT.Host, respT.Service, respT.Author, respT.Comment)
+		// case *AcknowledgementCleared:
+		// case *CommentAdded:
+		// case *CommentRemoved:
+		// case *DowntimeAdded:
+		// case *DowntimeRemoved:
+		// case *DowntimeStarted:
+		// case *DowntimeTriggered:
+		default:
+			err = fmt.Errorf("unsupported type %T", resp)
+		}
+		if err != nil {
+			return err
+		}
+
+		client.eventDispatch <- ev
 	}
-	return client.Ctx.Err()
+	return lineScanner.Err()
 }
