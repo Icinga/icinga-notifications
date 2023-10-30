@@ -235,7 +235,10 @@ func (client *Client) checkMissedStateChanges(objType string) {
 			return
 		}
 
-		client.eventDispatch <- ev
+		client.eventDispatch <- &outgoingEvent{
+			event:           ev,
+			fromEventStream: false,
+		}
 	})
 }
 
@@ -257,7 +260,10 @@ func (client *Client) checkMissedAcknowledgements(objType string) {
 			return
 		}
 
-		client.eventDispatch <- ev
+		client.eventDispatch <- &outgoingEvent{
+			event:           ev,
+			fromEventStream: false,
+		}
 	})
 }
 
@@ -346,7 +352,10 @@ func (client *Client) listenEventStream() error {
 			return err
 		}
 
-		client.eventDispatch <- ev
+		client.eventDispatch <- &outgoingEvent{
+			event:           ev,
+			fromEventStream: true,
+		}
 	}
 	return lineScanner.Err()
 }
