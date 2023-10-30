@@ -132,8 +132,6 @@ func makeProcessEvent(
 			return
 		}
 
-		l.Debugw("Processing incident event")
-
 		if err := currentIncident.ProcessEvent(ctx, ev, created); err != nil {
 			logger.Errorw("Failed to process current incident", zap.Error(err))
 			return
