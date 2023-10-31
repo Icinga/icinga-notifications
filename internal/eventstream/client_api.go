@@ -94,7 +94,7 @@ func (client *Client) queryObjectsApiQuery(objType string, query map[string]any)
 		})
 }
 
-// fetchHostGroup fetches all Host Groups for this host.
+// fetchHostGroups fetches all Host Groups for this host.
 func (client *Client) fetchHostGroups(host string) ([]string, error) {
 	jsonRaw, err := client.queryObjectsApiDirect("host", host)
 	if err != nil {
@@ -114,7 +114,7 @@ func (client *Client) fetchHostGroups(host string) ([]string, error) {
 
 // fetchServiceGroups fetches all Service Groups for this service on this host.
 func (client *Client) fetchServiceGroups(host, service string) ([]string, error) {
-	jsonRaw, err := client.queryObjectsApiDirect("host", host)
+	jsonRaw, err := client.queryObjectsApiDirect("service", host+"!"+service)
 	if err != nil {
 		return nil, err
 	}
@@ -231,15 +231,18 @@ func (client *Client) checkMissedChanges(objType, filterExpr string, attrsCallba
 // checkMissedStateChanges fetches all objects of the requested type and feeds them into the handler.
 func (client *Client) checkMissedStateChanges(objType string) {
 	client.checkMissedChanges(objType, "", func(attrs HostServiceRuntimeAttributes, host, service string) {
+		logger := client.Logger.With(zap.String("object type", objType))
+
 		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, host, service)
 		if err != nil {
-			client.Logger.Errorw("Failed to construct Event from API", zap.String("object type", objType), zap.Error(err))
+			logger.Errorw("Failed to construct Event from API", zap.Error(err))
 			return
 		}
 
-		client.eventDispatch <- &outgoingEvent{
-			event:           ev,
-			fromEventStream: false,
+		select {
+		case <-client.Ctx.Done():
+			logger.Warnw("Cannot dispatch replayed event as context is finished", zap.Error(client.Ctx.Err()))
+		case client.eventDispatcherReplay <- ev:
 		}
 	})
 }
@@ -264,9 +267,10 @@ func (client *Client) checkMissedAcknowledgements(objType string) {
 			return
 		}
 
-		client.eventDispatch <- &outgoingEvent{
-			event:           ev,
-			fromEventStream: false,
+		select {
+		case <-client.Ctx.Done():
+			logger.Warnw("Cannot dispatch replayed event as context is finished", zap.Error(client.Ctx.Err()))
+		case client.eventDispatcherReplay <- ev:
 		}
 	})
 }
@@ -356,9 +360,11 @@ func (client *Client) listenEventStream() error {
 			return err
 		}
 
-		client.eventDispatch <- &outgoingEvent{
-			event:           ev,
-			fromEventStream: true,
+		select {
+		case <-client.Ctx.Done():
+			client.Logger.Warnw("Cannot dispatch Event Stream event as context is finished", zap.Error(client.Ctx.Err()))
+			return client.Ctx.Err()
+		case client.eventDispatcherEventStream <- ev:
 		}
 	}
 	return lineScanner.Err()
