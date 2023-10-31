@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -21,12 +22,6 @@ import (
 )
 
 // This file contains the main resp. common methods for the Client.
-
-// outgoingEvent is a wrapper around an event.Event and its producer's origin to be sent to the eventDispatcher.
-type outgoingEvent struct {
-	event           *event.Event
-	fromEventStream bool
-}
 
 // Client for the Icinga 2 Event Stream API with extended support for other Icinga 2 APIs to gather additional
 // information and allow a replay in case of a connection loss.
@@ -49,8 +44,11 @@ type Client struct {
 	// Logger to log to.
 	Logger *logging.Logger
 
-	// eventDispatch communicates Events to be processed between producer and consumer.
-	eventDispatch chan *outgoingEvent
+	// eventDispatcherEventStream communicates Events to be processed from the Event Stream API.
+	eventDispatcherEventStream chan *event.Event
+	// eventDispatcherReplay communicates Events to be processed from the Icinga 2 API replay during replay phase.
+	eventDispatcherReplay chan *event.Event
+
 	// replayTrigger signals the eventDispatcher method that the replay phase is finished.
 	replayTrigger chan struct{}
 	// replayPhase indicates that Events will be cached as the Event Stream Client is in the replay phase.
@@ -193,22 +191,22 @@ func (client *Client) buildHostServiceEvent(result CheckResult, state int, host,
 
 	if service != "" {
 		switch state {
-		case 0:
+		case 0: // OK
 			eventSeverity = event.SeverityOK
-		case 1:
+		case 1: // WARNING
 			eventSeverity = event.SeverityWarning
-		case 2:
+		case 2: // CRITICAL
 			eventSeverity = event.SeverityCrit
-		default:
+		default: // UNKNOWN or faulty
 			eventSeverity = event.SeverityErr
 		}
 	} else {
 		switch state {
-		case 0:
+		case 0: // UP
 			eventSeverity = event.SeverityOK
-		case 1:
+		case 1: // DOWN
 			eventSeverity = event.SeverityCrit
-		default:
+		default: // faulty
 			eventSeverity = event.SeverityErr
 		}
 	}
@@ -249,7 +247,7 @@ func (client *Client) eventDispatcher() {
 	for {
 		select {
 		case <-client.Ctx.Done():
-			client.Logger.Warnw("Closing event dispatcher as context is done", zap.Error(client.Ctx.Err()))
+			client.Logger.Warnw("Closing event dispatcher as its context is done", zap.Error(client.Ctx.Err()))
 			return
 
 		case <-client.replayTrigger:
@@ -260,12 +258,18 @@ func (client *Client) eventDispatcher() {
 			client.replayPhase.Store(false)
 			replayBuffer = []*event.Event{}
 
-		case ev := <-client.eventDispatch:
-			if client.replayPhase.Load() && ev.fromEventStream {
-				replayBuffer = append(replayBuffer, ev.event)
+		case ev := <-client.eventDispatcherEventStream:
+			if client.replayPhase.Load() {
+				replayBuffer = append(replayBuffer, ev)
 			} else {
-				client.CallbackFn(ev.event)
+				client.CallbackFn(ev)
 			}
+
+		case ev := <-client.eventDispatcherReplay:
+			if !client.replayPhase.Load() {
+				client.Logger.Errorw("Dispatcher received replay event during normal operation", zap.Stringer("event", ev))
+			}
+			client.CallbackFn(ev)
 		}
 	}
 }
@@ -276,7 +280,10 @@ func (client *Client) eventDispatcher() {
 // all of those have finished, the replayTrigger will be used to indicate that the buffered Events should be replayed.
 func (client *Client) enterReplayPhase() {
 	client.Logger.Info("Entering replay phase to replay stored events first")
-	client.replayPhase.Store(true)
+	if !client.replayPhase.CompareAndSwap(false, true) {
+		client.Logger.Error("The Event Stream Client is already in the replay phase")
+		return
+	}
 
 	queryFns := []func(string){client.checkMissedAcknowledgements, client.checkMissedStateChanges}
 	objTypes := []string{"host", "service"}
@@ -294,7 +301,9 @@ func (client *Client) enterReplayPhase() {
 	}
 
 	go func() {
+		startTime := time.Now()
 		replayWg.Wait()
+		client.Logger.Debugw("All replay phase workers have finished", zap.Duration("duration", time.Since(startTime)))
 		client.replayTrigger <- struct{}{}
 	}()
 }
@@ -305,22 +314,23 @@ func (client *Client) enterReplayPhase() {
 // loop takes care of reconnections, all those events will be logged while generated Events will be dispatched to the
 // callback function.
 func (client *Client) Process() {
-	// These two channels will be used to communicate the Events and are crucial. As there are multiple producers and
-	// only one consumer, eventDispatcher, there is no ideal closer. However, producers and the consumer will be
-	// finished by the Client's context. When this happens, the main application should either be stopped or the Client
-	// is restarted, and we can hope for the GC. To make sure that nothing gets stuck, make the event channel buffered.
-	client.eventDispatch = make(chan *outgoingEvent, 1024)
+	client.eventDispatcherEventStream = make(chan *event.Event)
+	client.eventDispatcherReplay = make(chan *event.Event)
 	client.replayTrigger = make(chan struct{})
-
-	defer client.Logger.Info("Event Stream Client has stopped")
 
 	go client.eventDispatcher()
 
 	for {
 		err := client.listenEventStream()
-		if err != nil {
+		switch {
+		case errors.Is(err, context.Canceled):
+			client.Logger.Warnw("Stopping Event Stream Client as its context is done", zap.Error(err))
+			return
+
+		case err != nil:
 			client.Logger.Errorw("Event Stream processing failed", zap.Error(err))
-		} else {
+
+		default:
 			client.Logger.Warn("Event Stream closed stream; maybe Icinga 2 is reloading")
 		}
 	}
