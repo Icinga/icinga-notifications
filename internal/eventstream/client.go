@@ -14,10 +14,10 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 	"net/http"
 	"net/url"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -324,25 +324,29 @@ func (client *Client) enterReplayPhase() {
 		return
 	}
 
-	queryFns := []func(string){client.checkMissedAcknowledgements, client.checkMissedStateChanges}
+	queryFns := []func(string, context.Context) error{client.checkMissedAcknowledgements, client.checkMissedStateChanges}
 	objTypes := []string{"host", "service"}
 
-	var replayWg sync.WaitGroup
-	replayWg.Add(len(queryFns) * len(objTypes))
-
+	group, groupCtx := errgroup.WithContext(client.Ctx)
 	for _, fn := range queryFns {
 		for _, objType := range objTypes {
-			go func(fn func(string), objType string) {
-				fn(objType)
-				replayWg.Done()
-			}(fn, objType)
+			fn, objType := fn, objType // https://go.dev/doc/faq#closures_and_goroutines
+			group.Go(func() error {
+				return fn(objType, groupCtx)
+			})
 		}
 	}
 
 	go func() {
 		startTime := time.Now()
-		replayWg.Wait()
-		client.Logger.Debugw("All replay phase workers have finished", zap.Duration("duration", time.Since(startTime)))
+
+		err := group.Wait()
+		if err != nil {
+			client.Logger.Errorw("Replaying the API resulted in errors", zap.Error(err), zap.Duration("duration", time.Since(startTime)))
+		} else {
+			client.Logger.Debugw("All replay phase workers have finished", zap.Duration("duration", time.Since(startTime)))
+		}
+
 		client.replayTrigger <- struct{}{}
 	}()
 }
