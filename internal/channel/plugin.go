@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -27,13 +28,13 @@ type Plugin struct {
 }
 
 // NewPlugin starts and returns a new plugin instance. If the start of the plugin fails, an error is returned
-func NewPlugin(pluginName string, logger *zap.SugaredLogger) (*Plugin, error) {
+func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 	p := &Plugin{logger: logger}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	file := filepath.Join(daemon.Config().ChannelPluginDir, pluginName)
+	file := filepath.Join(daemon.Config().ChannelPluginDir, pluginType)
 	cmd := exec.Command(file)
 
 	writer, err := cmd.StdinPipe()
@@ -134,6 +135,7 @@ func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
 
 // UpsertPlugins upsert the available_channel_type table with working plugins
 func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *icingadb.DB) {
+	logger.Infof("Upserting working plugins")
 	files, err := os.ReadDir(channelPluginDir)
 	if err != nil {
 		logger.Errorw("Failed to read the channel plugin directory", zap.Error(err))
@@ -143,8 +145,14 @@ func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *icingadb
 	var pluginTypes []string
 
 	for _, file := range files {
-		pluginLogger := logger.With(zap.String("name", file.Name()))
-		p, err := NewPlugin(file.Name(), pluginLogger)
+		pluginType := file.Name()
+		pluginLogger := logger.With(zap.String("type", pluginType))
+		if err := ValidateType(pluginType); err != nil {
+			pluginLogger.Warnw("Ignoring plugin", zap.Error(err))
+			continue
+		}
+
+		p, err := NewPlugin(pluginType, pluginLogger)
 		if err != nil {
 			pluginLogger.Errorw("Failed to start plugin", zap.Error(err))
 			continue
@@ -158,7 +166,7 @@ func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *icingadb
 		}
 		p.Stop()
 
-		pluginTypes = append(pluginTypes, file.Name())
+		pluginTypes = append(pluginTypes, pluginType)
 		pluginInfos = append(pluginInfos, info)
 	}
 
@@ -177,4 +185,16 @@ func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *icingadb
 			len(pluginInfos),
 			strings.Join(pluginTypes, ", "))
 	}
+}
+
+// pluginTypeValidateRegex defines Regexp with only allowed characters of the channel plugin type
+var pluginTypeValidateRegex = regexp.MustCompile("^[a-zA-Z0-9]+$")
+
+// ValidateType returns an error if non-allowed chars are detected, nil otherwise
+func ValidateType(t string) error {
+	if !pluginTypeValidateRegex.MatchString(t) {
+		return fmt.Errorf("type contains invalid chars, may only contain a-zA-Z0-9, %q given", t)
+	}
+
+	return nil
 }

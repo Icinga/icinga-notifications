@@ -5,11 +5,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"regexp"
 )
-
-// channelTypeNameRegex is to filter allowed channel type name
-var channelTypeNameRegex = regexp.MustCompile("^[a-zA-Z0-9]+$")
 
 func (r *RuntimeConfig) fetchChannels(ctx context.Context, tx *sqlx.Tx) error {
 	var channelPtr *channel.Channel
@@ -31,8 +27,8 @@ func (r *RuntimeConfig) fetchChannels(ctx context.Context, tx *sqlx.Tx) error {
 		)
 		if channelsById[c.ID] != nil {
 			channelLogger.Warnw("ignoring duplicate config for channel type")
-		} else if !channelTypeNameRegex.MatchString(c.Type) {
-			channelLogger.Errorf("Channel type must only contain a-zA-Z0-9, %q given", c.Type)
+		} else if err := channel.ValidateType(c.Type); err != nil {
+			channelLogger.Errorw("Cannot load channel config", zap.Error(err))
 		} else {
 			channelsById[c.ID] = c
 
