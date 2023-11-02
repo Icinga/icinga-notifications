@@ -19,17 +19,9 @@ type Channel struct {
 
 	Logger *zap.SugaredLogger
 
-	newConfigCh    chan struct{}
-	stopPluginCh   chan struct{}
-	notificationCh chan Req
-}
-
-// Req is a wrapper for plugin.NotificationRequest. It provides an errCh channel for Req state.
-// Any error that occurs while processing plugin.NotificationRequest should be sent to this channel
-// to mark Req as failed.If errCh receives nil, Req was successful.
-type Req struct {
-	req   *plugin.NotificationRequest
-	errCh chan<- error
+	newConfigCh  chan struct{}
+	stopPluginCh chan struct{}
+	pluginCh     chan *Plugin
 }
 
 // Start initializes the channel and starts the plugin in the background
@@ -37,7 +29,7 @@ func (c *Channel) Start(logger *zap.SugaredLogger) {
 	c.Logger = logger
 	c.newConfigCh = make(chan struct{})
 	c.stopPluginCh = make(chan struct{})
-	c.notificationCh = make(chan Req, 1)
+	c.pluginCh = make(chan *Plugin)
 
 	go c.runPlugin()
 }
@@ -103,22 +95,22 @@ func (c *Channel) runPlugin() {
 			stopIfRunning()
 
 			return
-		case req := <-c.notificationCh:
-			if currentlyRunningPlugin == nil {
-				currentlyRunningPlugin = c.initPlugin()
-			}
-
-			if currentlyRunningPlugin == nil {
-				c.Logger.Debug("Cannot send notification, plugin could not be started")
-				req.errCh <- errors.New("plugin could not be started")
-			} else {
-				go func(p *Plugin) {
-					// the return can take time
-					req.errCh <- p.SendNotification(req.req)
-				}(currentlyRunningPlugin)
-			}
+		case c.pluginCh <- currentlyRunningPlugin:
 		}
 	}
+}
+
+// getPlugin returns a fully initialized plugin that can be used for sending notifications. If there
+// currently is no such plugin, for example because starting it failed, nil is returned instead.
+func (c *Channel) getPlugin() *Plugin {
+	p := <-c.pluginCh
+	if p == nil {
+		// The above receive might have woken runPlugin after the select was blocked for a long time.
+		// In that case, a second receive gives it another chance to successfully start the plugin.
+		p = <-c.pluginCh
+	}
+
+	return p
 }
 
 // Stop ends the lifecycle of its plugin.
@@ -137,6 +129,12 @@ func (c *Channel) ReloadConfig() {
 
 // Notify prepares and sends the notification request, returns a non-error on fails, nil on success
 func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *event.Event, icingaweb2Url string) error {
+	p := c.getPlugin()
+	if p == nil {
+		c.Logger.Debug("Cannot send notification, plugin could not be started")
+		return errors.New("plugin could not be started")
+	}
+
 	contactStruct := &plugin.Contact{FullName: contact.FullName}
 	for _, addr := range contact.Addresses {
 		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
@@ -164,8 +162,5 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 		},
 	}
 
-	errCh := make(chan error, 1)
-	c.notificationCh <- Req{req: req, errCh: errCh}
-
-	return <-errCh
+	return p.SendNotification(req)
 }
