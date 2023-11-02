@@ -12,7 +12,6 @@ import (
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -75,16 +74,6 @@ func NewClientsFromConfig(
 			ApiBasicAuthUser: icinga2Api.AuthUser,
 			ApiBasicAuthPass: icinga2Api.AuthPass,
 			ApiHttpTransport: http.Transport{
-				// Limit the initial Dial timeout to enable a fast retry when the Icinga 2 API is offline. Due to the
-				// need for very long-lived connections against the Event Stream API afterward, Client.Timeout would
-				// limit the whole connection, which would be fatal.
-				//
-				// Check the "Client Timeout" section of the following (slightly outdated) blog post:
-				// https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/
-				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-					dialer := &net.Dialer{Timeout: 3 * time.Second}
-					return dialer.DialContext(ctx, network, addr)
-				},
 				TLSClientConfig: &tls.Config{
 					MinVersion: tls.VersionTLS13,
 				},

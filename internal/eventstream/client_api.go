@@ -3,6 +3,7 @@ package eventstream
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -305,33 +306,58 @@ func (client *Client) listenEventStream() error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(client.Ctx, http.MethodPost, apiUrl, bytes.NewReader(reqBody))
-	if err != nil {
-		return err
-	}
 
-	req.SetBasicAuth(client.ApiBasicAuthUser, client.ApiBasicAuthPass)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-
-	httpClient := &http.Client{Transport: &client.ApiHttpTransport}
-
-	var res *http.Response
+	var response *http.Response
+connectionLoop:
 	for {
-		client.Logger.Info("Try to establish an Event Stream API connection")
-		res, err = httpClient.Do(req)
-		if err == nil {
-			break
+		// Sub-context which might get canceled early if connecting takes to long.
+		// The reqCancel function will be called in the select below or when leaving the function, mostly because its
+		// parent context, client.Ctx, was finished before.
+		reqCtx, reqCancel := context.WithCancel(client.Ctx)
+		defer reqCancel()
+
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, apiUrl, bytes.NewReader(reqBody))
+		if err != nil {
+			return err
 		}
-		client.Logger.Warnw("Establishing an Event Stream API connection failed; will be retried", zap.Error(err))
+
+		req.SetBasicAuth(client.ApiBasicAuthUser, client.ApiBasicAuthPass)
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Content-Type", "application/json")
+
+		resCh := make(chan *http.Response)
+
+		go func() {
+			client.Logger.Info("Try to establish an Event Stream API connection")
+			httpClient := &http.Client{Transport: &client.ApiHttpTransport}
+
+			res, err := httpClient.Do(req)
+			if err != nil {
+				client.Logger.Warnw("Establishing an Event Stream API connection failed; will be retried", zap.Error(err))
+				close(resCh)
+				return
+			}
+			resCh <- res
+		}()
+
+		select {
+		case res, ok := <-resCh:
+			if ok {
+				response = res
+				break connectionLoop
+			}
+
+		case <-time.After(3 * time.Second):
+		}
+		reqCancel()
 	}
-	defer func() { _ = res.Body.Close() }()
+	defer func() { _ = response.Body.Close() }()
 
 	client.enterReplayPhase()
 
 	client.Logger.Info("Start listening on Icinga 2 Event Stream..")
 
-	lineScanner := bufio.NewScanner(res.Body)
+	lineScanner := bufio.NewScanner(response.Body)
 	for lineScanner.Scan() {
 		rawJson := lineScanner.Bytes()
 
