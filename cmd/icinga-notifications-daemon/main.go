@@ -11,7 +11,9 @@ import (
 	"github.com/icinga/icingadb/pkg/utils"
 	"go.uber.org/zap"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 )
 
@@ -73,12 +75,15 @@ func main() {
 		}
 	}
 
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
 	runtimeConfig := config.NewRuntimeConfig(db, logs)
-	if err := runtimeConfig.UpdateFromDatabase(context.TODO()); err != nil {
+	if err := runtimeConfig.UpdateFromDatabase(ctx); err != nil {
 		logger.Fatalw("failed to load config from database", zap.Error(err))
 	}
 
-	go runtimeConfig.PeriodicUpdates(context.TODO(), 1*time.Second)
+	go runtimeConfig.PeriodicUpdates(ctx, 1*time.Second)
 
 	if err := listener.NewListener(db, conf, runtimeConfig, logs).Run(); err != nil {
 		panic(err)
