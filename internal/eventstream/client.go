@@ -2,8 +2,10 @@ package eventstream
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -21,6 +23,12 @@ import (
 )
 
 // This file contains the main resp. common methods for the Client.
+
+// eventMsg is an internal struct for passing events with additional information from producers to the dispatcher.
+type eventMsg struct {
+	event   *event.Event
+	apiTime time.Time
+}
 
 // Client for the Icinga 2 Event Stream API with extended support for other Icinga 2 APIs to gather additional
 // information and allow a replay in case of a connection loss.
@@ -44,9 +52,9 @@ type Client struct {
 	Logger *logging.Logger
 
 	// eventDispatcherEventStream communicates Events to be processed from the Event Stream API.
-	eventDispatcherEventStream chan *event.Event
+	eventDispatcherEventStream chan *eventMsg
 	// eventDispatcherReplay communicates Events to be processed from the Icinga 2 API replay during replay phase.
-	eventDispatcherReplay chan *event.Event
+	eventDispatcherReplay chan *eventMsg
 
 	// replayTrigger signals the eventDispatcher method that the replay phase is finished.
 	replayTrigger chan struct{}
@@ -231,7 +239,32 @@ func (client *Client) buildAcknowledgementEvent(host, service, author, comment s
 // When the Client is in the replay phase, events from the Event Stream API will be cached until the replay phase has
 // finished, while replayed events will be delivered directly.
 func (client *Client) eventDispatcher() {
-	var replayBuffer []*event.Event
+	var (
+		// replayBuffer holds Event Stream events to be replayed after the replay phase has finished.
+		replayBuffer = make([]*event.Event, 0)
+		// replayCache maps eventHash(ev) to API time to skip replaying outdated Event Stream events.
+		replayCache = make(map[[sha256.Size]byte]time.Time)
+	)
+
+	// eventHash maps a subset of an event.Event to a hash. This is necessary for the replayCache below. As flapping
+	// events should be ignored, only some of the event fields will be encoded. By excluding some, e.g., the severity,
+	// events concerning the same host or service are grouped anyway.
+	eventHash := func(ev *event.Event) [sha256.Size]byte {
+		h := sha256.New()
+		_ = binary.Write(h, binary.BigEndian, ev.SourceId)
+		_, _ = fmt.Fprint(h, ev.Name)
+		_, _ = fmt.Fprint(h, ev.Type)
+		return [sha256.Size]byte(h.Sum(nil))
+	}
+
+	// eventHashUpdate updates the replayCache if this eventMsg seems to be the latest of its kind.
+	eventHashUpdate := func(ev *eventMsg) {
+		h := eventHash(ev.event)
+		ts, ok := replayCache[h]
+		if !ok || ev.apiTime.After(ts) {
+			replayCache[h] = ev.apiTime
+		}
+	}
 
 	for {
 		select {
@@ -240,25 +273,42 @@ func (client *Client) eventDispatcher() {
 			return
 
 		case <-client.replayTrigger:
+			skipCounter := 0
 			for _, ev := range replayBuffer {
+				ts, ok := replayCache[eventHash(ev)]
+				if ok && ev.Time.Before(ts) {
+					client.Logger.Debugw("Skip replaying outdated Event Stream event", zap.Stringer("event", ev),
+						zap.Time("event timestamp", ev.Time), zap.Time("cache timestamp", ts))
+					skipCounter++
+					continue
+				}
+
 				client.CallbackFn(ev)
 			}
-			client.Logger.Infow("Finished replay phase, returning to normal operation", zap.Int("cached events", len(replayBuffer)))
+			client.Logger.Infow("Finished replay phase, returning to normal operation",
+				zap.Int("cached events", len(replayBuffer)), zap.Int("skipped events", skipCounter))
+
+			replayBuffer = make([]*event.Event, 0)
+			replayCache = make(map[[sha256.Size]byte]time.Time)
 			client.replayPhase.Store(false)
-			replayBuffer = []*event.Event{}
 
 		case ev := <-client.eventDispatcherEventStream:
-			if client.replayPhase.Load() {
-				replayBuffer = append(replayBuffer, ev)
-			} else {
-				client.CallbackFn(ev)
+			if !client.replayPhase.Load() {
+				client.CallbackFn(ev.event)
+				continue
 			}
+
+			replayBuffer = append(replayBuffer, ev.event)
+			eventHashUpdate(ev)
 
 		case ev := <-client.eventDispatcherReplay:
 			if !client.replayPhase.Load() {
-				client.Logger.Errorw("Dispatcher received replay event during normal operation", zap.Stringer("event", ev))
+				client.Logger.Errorw("Dispatcher received replay event during normal operation", zap.Stringer("event", ev.event))
+				continue
 			}
-			client.CallbackFn(ev)
+
+			client.CallbackFn(ev.event)
+			eventHashUpdate(ev)
 		}
 	}
 }
@@ -303,8 +353,8 @@ func (client *Client) enterReplayPhase() {
 // loop takes care of reconnections, all those events will be logged while generated Events will be dispatched to the
 // callback function.
 func (client *Client) Process() {
-	client.eventDispatcherEventStream = make(chan *event.Event)
-	client.eventDispatcherReplay = make(chan *event.Event)
+	client.eventDispatcherEventStream = make(chan *eventMsg)
+	client.eventDispatcherReplay = make(chan *eventMsg)
 	client.replayTrigger = make(chan struct{})
 
 	go client.eventDispatcher()
