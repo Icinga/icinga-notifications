@@ -23,16 +23,14 @@ import (
 type Plugin struct {
 	cmd    *exec.Cmd
 	rpc    *rpc.RPC
-	mu     sync.Mutex
 	logger *zap.SugaredLogger
+
+	stopOnce sync.Once
 }
 
 // NewPlugin starts and returns a new plugin instance. If the start of the plugin fails, an error is returned
 func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 	p := &Plugin{logger: logger}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	file := filepath.Join(daemon.Config().ChannelPluginDir, pluginType)
 	cmd := exec.Command(file)
@@ -65,9 +63,23 @@ func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 	return p, nil
 }
 
-// Stop stops the plugin
+// Stop stops the plugin. Multiple calls are safe because sync.Once is used internally
 func (p *Plugin) Stop() {
-	go terminate(p)
+	p.stopOnce.Do(func() {
+		go func() {
+			p.logger.Debug("Stopping the channel plugin")
+
+			_ = p.rpc.Close()
+			timer := time.AfterFunc(5*time.Second, func() {
+				p.logger.Debug("killing the channel plugin")
+				_ = p.cmd.Process.Kill()
+			})
+
+			<-p.rpc.Done()
+			timer.Stop()
+			p.logger.Warn("Stopped channel plugin")
+		}()
+	})
 }
 
 // GetInfo sends the PluginInfo request and returns the response or an error if an error occurred
@@ -103,23 +115,6 @@ func (p *Plugin) SendNotification(req *plugin.NotificationRequest) error {
 	_, err = p.rpc.Call(plugin.MethodSendNotification, params)
 
 	return err
-}
-
-func terminate(p *Plugin) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.logger.Debug("Stopping the channel plugin")
-
-	_ = p.rpc.Close()
-	timer := time.AfterFunc(5*time.Second, func() {
-		p.logger.Debug("killing the channel plugin")
-		_ = p.cmd.Process.Kill()
-	})
-
-	<-p.rpc.Done()
-	timer.Stop()
-	p.logger.Warn("Stopped channel plugin")
 }
 
 func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
