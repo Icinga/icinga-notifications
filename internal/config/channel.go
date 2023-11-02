@@ -71,8 +71,8 @@ func (r *RuntimeConfig) applyPendingChannels() {
 				currentChannel.Name = pendingChannel.Name
 				currentChannel.Config = pendingChannel.Config
 
-				currentChannel.Logger.Info("New config detected")
-				currentChannel.ReloadConfig()
+				currentChannel.Logger.Info("New changes detected")
+				currentChannel.Restart()
 			}
 		} else {
 			pendingChannel.Start(context.TODO(), r.logs.GetChildLogger("channel").With(

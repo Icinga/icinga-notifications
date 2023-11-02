@@ -20,34 +20,40 @@ type Channel struct {
 
 	Logger *zap.SugaredLogger
 
-	newConfigCh chan struct{}
-	pluginCh    chan *Plugin
+	restartCh chan newConfig
+	pluginCh  chan *Plugin
 
 	pluginCtx       context.Context
 	pluginCtxCancel func()
 }
 
+// newConfig helps to store the channel's updated properties
+type newConfig struct {
+	ctype  string
+	config string
+}
+
 // Start initializes the channel and starts the plugin in the background
 func (c *Channel) Start(ctx context.Context, logger *zap.SugaredLogger) {
 	c.Logger = logger
-	c.newConfigCh = make(chan struct{})
+	c.restartCh = make(chan newConfig)
 	c.pluginCh = make(chan *Plugin)
 	c.pluginCtx, c.pluginCtxCancel = context.WithCancel(ctx)
 
-	go c.runPlugin()
+	go c.runPlugin(c.Type, c.Config)
 }
 
 // initPlugin returns a new Plugin or nil if an error occurred during initialization
-func (c *Channel) initPlugin() *Plugin {
+func (c *Channel) initPlugin(cType string, config string) *Plugin {
 	c.Logger.Debug("Initializing channel plugin")
 
-	p, err := NewPlugin(c.Type, c.Logger)
+	p, err := NewPlugin(cType, c.Logger)
 	if err != nil {
 		c.Logger.Errorw("Failed to initialize channel plugin", zap.Error(err))
 		return nil
 	}
 
-	if err := p.SetConfig(c.Config); err != nil {
+	if err := p.SetConfig(config); err != nil {
 		c.Logger.Errorw("Failed to set channel plugin config, terminating the plugin", zap.Error(err))
 		p.Stop()
 		return nil
@@ -57,9 +63,9 @@ func (c *Channel) initPlugin() *Plugin {
 }
 
 // runPlugin is called as go routine to initialize and maintain the plugin by receiving signals on given chan(s)
-func (c *Channel) runPlugin() {
+func (c *Channel) runPlugin(initType string, initConfig string) {
 	var currentlyRunningPlugin *Plugin
-
+	cType, config := initType, initConfig
 	// Helper function for the following loop to stop a running plugin. Does nothing if no plugin is running.
 	stopIfRunning := func() {
 		if currentlyRunningPlugin != nil {
@@ -79,7 +85,7 @@ func (c *Channel) runPlugin() {
 
 	for {
 		if currentlyRunningPlugin == nil {
-			currentlyRunningPlugin = c.initPlugin()
+			currentlyRunningPlugin = c.initPlugin(cType, config)
 		}
 
 		select {
@@ -88,8 +94,9 @@ func (c *Channel) runPlugin() {
 			stopIfRunning()
 
 			continue
-		case <-c.newConfigCh:
-			c.Logger.Debug("Receive reload plugin config signal")
+		case reload := <-c.restartCh:
+			c.Logger.Debug("Received new plugin config")
+			cType, config = reload.ctype, reload.config
 			stopIfRunning()
 
 			continue
@@ -123,10 +130,10 @@ func (c *Channel) Stop() {
 	c.pluginCtxCancel()
 }
 
-// ReloadConfig sends a signal to reload the channel plugin config
-func (c *Channel) ReloadConfig() {
-	c.Logger.Info("Reloading the channel plugin config")
-	c.newConfigCh <- struct{}{}
+// Restart signals to restart the channel plugin with the updated channel config
+func (c *Channel) Restart() {
+	c.Logger.Info("Restarting the channel plugin with the updated channel config")
+	c.restartCh <- newConfig{c.Type, c.Config}
 }
 
 // Notify prepares and sends the notification request, returns a non-error on fails, nil on success
