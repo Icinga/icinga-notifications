@@ -75,7 +75,7 @@ func (r *RuntimeConfig) applyPendingChannels() {
 				currentChannel.ReloadConfig()
 			}
 		} else {
-			pendingChannel.Start(r.logs.GetChildLogger("channel").With(
+			pendingChannel.Start(context.TODO(), r.logs.GetChildLogger("channel").With(
 				zap.Int64("id", pendingChannel.ID),
 				zap.String("name", pendingChannel.Name)))
 
