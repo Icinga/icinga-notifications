@@ -54,7 +54,10 @@ func (client *Client) queryObjectsApi(urlPaths []string, method string, body io.
 		req.Header.Set(k, v)
 	}
 
-	httpClient := &http.Client{Transport: &client.ApiHttpTransport}
+	httpClient := &http.Client{
+		Transport: &client.ApiHttpTransport,
+		Timeout:   3 * time.Second,
+	}
 	res, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -71,7 +74,7 @@ func (client *Client) queryObjectsApi(urlPaths []string, method string, body io.
 // queryObjectsApiDirect performs a direct resp. "fast" API query against an object, optionally identified by its name.
 func (client *Client) queryObjectsApiDirect(objType, objName string) (io.ReadCloser, error) {
 	return client.queryObjectsApi(
-		[]string{"/v1/objects/", objType + "s/", objName},
+		[]string{"/v1/objects/", objType + "s/", url.PathEscape(objName)},
 		http.MethodGet,
 		nil,
 		map[string]string{"Accept": "application/json"})
