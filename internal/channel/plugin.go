@@ -30,8 +30,6 @@ type Plugin struct {
 
 // NewPlugin starts and returns a new plugin instance. If the start of the plugin fails, an error is returned
 func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
-	p := &Plugin{logger: logger}
-
 	file := filepath.Join(daemon.Config().ChannelPluginDir, pluginType)
 	cmd := exec.Command(file)
 
@@ -53,12 +51,16 @@ func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 	if err = cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start cmd: %w", err)
 	}
-	p.logger.Info("Successfully started channel plugin")
 
-	go forwardLogs(errPipe, p.logger)
+	l := logger.With(zap.Int("pid", cmd.Process.Pid))
+	p := &Plugin{
+		cmd:    cmd,
+		rpc:    rpc.NewRPC(writer, reader, l),
+		logger: l,
+	}
 
-	p.cmd = cmd
-	p.rpc = rpc.NewRPC(writer, reader, p.logger)
+	go forwardLogs(errPipe, l)
+	l.Info("Successfully started channel plugin")
 
 	return p, nil
 }
