@@ -75,7 +75,7 @@ func (r *RuntimeConfig) PeriodicUpdates(ctx context.Context, interval time.Durat
 				r.logger.Errorw("periodic config update failed, continuing with previous config", zap.Error(err))
 			}
 		case <-ctx.Done():
-			break
+			return
 		}
 	}
 }
