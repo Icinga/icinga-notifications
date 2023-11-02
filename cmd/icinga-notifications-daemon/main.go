@@ -85,7 +85,9 @@ func main() {
 
 	go runtimeConfig.PeriodicUpdates(ctx, 1*time.Second)
 
-	if err := listener.NewListener(db, conf, runtimeConfig, logs).Run(); err != nil {
-		panic(err)
+	if err := listener.NewListener(db, conf, runtimeConfig, logs).Run(ctx); err != nil {
+		logger.Errorw("Listener has finished with an error", zap.Error(err))
+	} else {
+		logger.Info("Listener has finished")
 	}
 }

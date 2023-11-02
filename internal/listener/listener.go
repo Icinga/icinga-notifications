@@ -46,7 +46,13 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	l.mux.ServeHTTP(rw, req)
 }
 
-func (l *Listener) Run() error {
+// Run the Listener's web server and block until the server has finished.
+//
+// The web server either returns (early) when its ListenAndServe fails or when the given context is finished. After the
+// context is done, the web server shuts down gracefully with a hard limit of three seconds.
+//
+// An error is returned in every case except for a gracefully context-based shutdown without hitting the time limit.
+func (l *Listener) Run(ctx context.Context) error {
 	l.logger.Infof("Starting listener on http://%s", l.configFile.Listen)
 	server := &http.Server{
 		Addr:         l.configFile.Listen,
@@ -55,7 +61,21 @@ func (l *Listener) Run() error {
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,
 	}
-	return server.ListenAndServe()
+
+	serverErr := make(chan error)
+	go func() {
+		serverErr <- server.ListenAndServe()
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		return server.Shutdown(shutdownCtx)
+
+	case err := <-serverErr:
+		return err
+	}
 }
 
 func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
