@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/contracts"
@@ -19,17 +20,19 @@ type Channel struct {
 
 	Logger *zap.SugaredLogger
 
-	newConfigCh  chan struct{}
-	stopPluginCh chan struct{}
-	pluginCh     chan *Plugin
+	newConfigCh chan struct{}
+	pluginCh    chan *Plugin
+
+	pluginCtx       context.Context
+	pluginCtxCancel func()
 }
 
 // Start initializes the channel and starts the plugin in the background
-func (c *Channel) Start(logger *zap.SugaredLogger) {
+func (c *Channel) Start(ctx context.Context, logger *zap.SugaredLogger) {
 	c.Logger = logger
 	c.newConfigCh = make(chan struct{})
-	c.stopPluginCh = make(chan struct{})
 	c.pluginCh = make(chan *Plugin)
+	c.pluginCtx, c.pluginCtxCancel = context.WithCancel(ctx)
 
 	go c.runPlugin()
 }
@@ -90,7 +93,7 @@ func (c *Channel) runPlugin() {
 			stopIfRunning()
 
 			continue
-		case <-c.stopPluginCh:
+		case <-c.pluginCtx.Done():
 			c.Logger.Debug("Receive plugin stop signal")
 			stopIfRunning()
 
@@ -115,10 +118,9 @@ func (c *Channel) getPlugin() *Plugin {
 
 // Stop ends the lifecycle of its plugin.
 // This should only be called when the channel is not more required.
-// Multiple calls on same channel cause panic
 func (c *Channel) Stop() {
 	c.Logger.Info("Stopping channel plugin")
-	close(c.stopPluginCh)
+	c.pluginCtxCancel()
 }
 
 // ReloadConfig sends a signal to reload the channel plugin config
