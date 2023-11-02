@@ -243,7 +243,7 @@ func (client *Client) checkMissedStateChanges(objType string) {
 		select {
 		case <-client.Ctx.Done():
 			logger.Warnw("Cannot dispatch replayed event as context is finished", zap.Error(client.Ctx.Err()))
-		case client.eventDispatcherReplay <- ev:
+		case client.eventDispatcherReplay <- &eventMsg{ev, attrs.LastStateChange.Time}:
 		}
 	})
 }
@@ -271,7 +271,7 @@ func (client *Client) checkMissedAcknowledgements(objType string) {
 		select {
 		case <-client.Ctx.Done():
 			logger.Warnw("Cannot dispatch replayed event as context is finished", zap.Error(client.Ctx.Err()))
-		case client.eventDispatcherReplay <- ev:
+		case client.eventDispatcherReplay <- &eventMsg{ev, attrs.AcknowledgementLastChange.Time}:
 		}
 	})
 }
@@ -366,12 +366,19 @@ connectionLoop:
 			return err
 		}
 
-		var ev *event.Event
+		var (
+			ev     *event.Event
+			evTime time.Time
+		)
 		switch respT := resp.(type) {
 		case *StateChange:
 			ev, err = client.buildHostServiceEvent(respT.CheckResult, respT.State, respT.Host, respT.Service)
+			evTime = respT.Timestamp.Time
+
 		case *AcknowledgementSet:
 			ev, err = client.buildAcknowledgementEvent(respT.Host, respT.Service, respT.Author, respT.Comment)
+			evTime = respT.Timestamp.Time
+
 		// case *AcknowledgementCleared:
 		// case *CommentAdded:
 		// case *CommentRemoved:
@@ -390,7 +397,7 @@ connectionLoop:
 		case <-client.Ctx.Done():
 			client.Logger.Warnw("Cannot dispatch Event Stream event as context is finished", zap.Error(client.Ctx.Err()))
 			return client.Ctx.Err()
-		case client.eventDispatcherEventStream <- ev:
+		case client.eventDispatcherEventStream <- &eventMsg{ev, evTime}:
 		}
 	}
 	return lineScanner.Err()
