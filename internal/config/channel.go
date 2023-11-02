@@ -77,7 +77,8 @@ func (r *RuntimeConfig) applyPendingChannels() {
 		} else {
 			pendingChannel.Start(r.logs.GetChildLogger("channel").With(
 				zap.Int64("id", pendingChannel.ID),
-				zap.String("name", pendingChannel.Name)))
+				zap.String("name", pendingChannel.Name)),
+				context.TODO())
 
 			r.Channels[id] = pendingChannel
 		}
