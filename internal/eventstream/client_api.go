@@ -75,7 +75,7 @@ func (client *Client) queryObjectsApi(urlPaths []string, method string, body io.
 // queryObjectsApiDirect performs a direct resp. "fast" API query against an object, optionally identified by its name.
 func (client *Client) queryObjectsApiDirect(objType, objName string) (io.ReadCloser, error) {
 	return client.queryObjectsApi(
-		[]string{"/v1/objects/", objType + "s/", url.PathEscape(objName)},
+		[]string{"/v1/objects/", objType + "s/", rawurlencode(objName)},
 		http.MethodGet,
 		nil,
 		map[string]string{"Accept": "application/json"})
