@@ -345,7 +345,7 @@ func (client *Client) enterReplayPhase() {
 		return
 	}
 
-	queryFns := []func(string, context.Context) error{client.checkMissedAcknowledgements, client.checkMissedStateChanges}
+	queryFns := []func(context.Context, string) error{client.checkMissedAcknowledgements, client.checkMissedStateChanges}
 	objTypes := []string{"host", "service"}
 
 	group, groupCtx := errgroup.WithContext(client.Ctx)
@@ -353,7 +353,7 @@ func (client *Client) enterReplayPhase() {
 		for _, objType := range objTypes {
 			fn, objType := fn, objType // https://go.dev/doc/faq#closures_and_goroutines
 			group.Go(func() error {
-				return fn(objType, groupCtx)
+				return fn(groupCtx, objType)
 			})
 		}
 	}

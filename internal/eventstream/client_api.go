@@ -233,7 +233,7 @@ func (client *Client) checkMissedChanges(
 }
 
 // checkMissedStateChanges fetches all objects of the requested type and feeds them into the handler.
-func (client *Client) checkMissedStateChanges(objType string, ctx context.Context) error {
+func (client *Client) checkMissedStateChanges(ctx context.Context, objType string) error {
 	return client.checkMissedChanges(objType, "", func(attrs HostServiceRuntimeAttributes, host, service string) error {
 		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, host, service)
 		if err != nil {
@@ -252,7 +252,7 @@ func (client *Client) checkMissedStateChanges(objType string, ctx context.Contex
 // checkMissedAcknowledgements fetches all Host or Service Acknowledgements and feeds them into the handler.
 //
 // Currently only active acknowledgements are being processed.
-func (client *Client) checkMissedAcknowledgements(objType string, ctx context.Context) error {
+func (client *Client) checkMissedAcknowledgements(ctx context.Context, objType string) error {
 	filterExpr := fmt.Sprintf("%s.acknowledgement", objType)
 	return client.checkMissedChanges(objType, filterExpr, func(attrs HostServiceRuntimeAttributes, host, service string) error {
 		ackComment, err := client.fetchAcknowledgementComment(host, service, attrs.AcknowledgementLastChange.Time)
