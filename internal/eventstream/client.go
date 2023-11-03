@@ -2,10 +2,8 @@ package eventstream
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -263,27 +261,15 @@ func (client *Client) eventDispatcher() {
 	var (
 		// replayBuffer holds Event Stream events to be replayed after the replay phase has finished.
 		replayBuffer = make([]*event.Event, 0)
-		// replayCache maps eventHash(ev) to API time to skip replaying outdated Event Stream events.
-		replayCache = make(map[[sha256.Size]byte]time.Time)
+		// replayCache maps event.Events.Name to API time to skip replaying outdated events.
+		replayCache = make(map[string]time.Time)
 	)
 
-	// eventHash maps a subset of an event.Event to a hash. This is necessary for the replayCache below. As flapping
-	// events should be ignored, only some of the event fields will be encoded. By excluding some, e.g., the severity,
-	// events concerning the same host or service are grouped anyway.
-	eventHash := func(ev *event.Event) [sha256.Size]byte {
-		h := sha256.New()
-		_ = binary.Write(h, binary.BigEndian, ev.SourceId)
-		_, _ = fmt.Fprint(h, ev.Name)
-		_, _ = fmt.Fprint(h, ev.Type)
-		return [sha256.Size]byte(h.Sum(nil))
-	}
-
-	// eventHashUpdate updates the replayCache if this eventMsg seems to be the latest of its kind.
-	eventHashUpdate := func(ev *eventMsg) {
-		h := eventHash(ev.event)
-		ts, ok := replayCache[h]
+	// replayCacheUpdate updates the replayCache if this eventMsg seems to be the latest of its kind.
+	replayCacheUpdate := func(ev *eventMsg) {
+		ts, ok := replayCache[ev.event.Name]
 		if !ok || ev.apiTime.After(ts) {
-			replayCache[h] = ev.apiTime
+			replayCache[ev.event.Name] = ev.apiTime
 		}
 	}
 
@@ -296,7 +282,7 @@ func (client *Client) eventDispatcher() {
 		case <-client.replayTrigger:
 			skipCounter := 0
 			for _, ev := range replayBuffer {
-				ts, ok := replayCache[eventHash(ev)]
+				ts, ok := replayCache[ev.Name]
 				if ok && ev.Time.Before(ts) {
 					client.Logger.Debugw("Skip replaying outdated Event Stream event", zap.Stringer("event", ev),
 						zap.Time("event timestamp", ev.Time), zap.Time("cache timestamp", ts))
@@ -310,7 +296,7 @@ func (client *Client) eventDispatcher() {
 				zap.Int("cached events", len(replayBuffer)), zap.Int("skipped events", skipCounter))
 
 			replayBuffer = make([]*event.Event, 0)
-			replayCache = make(map[[sha256.Size]byte]time.Time)
+			replayCache = make(map[string]time.Time)
 			client.replayPhase.Store(false)
 
 		case ev := <-client.eventDispatcherEventStream:
@@ -320,7 +306,7 @@ func (client *Client) eventDispatcher() {
 			}
 
 			replayBuffer = append(replayBuffer, ev.event)
-			eventHashUpdate(ev)
+			replayCacheUpdate(ev)
 
 		case ev := <-client.eventDispatcherReplay:
 			if !client.replayPhase.Load() {
@@ -329,7 +315,7 @@ func (client *Client) eventDispatcher() {
 			}
 
 			client.CallbackFn(ev.event)
-			eventHashUpdate(ev)
+			replayCacheUpdate(ev)
 		}
 	}
 }
