@@ -66,8 +66,8 @@ func (r *RuntimeConfig) applyPendingChannels() {
 			// Prevent restarting the plugin processes every time by explicitly checking for config changes.
 			// The if condition should no longer be necessary when https://github.com/Icinga/icinga-notifications/issues/5
 			// is solved properly.
-			if currentChannel.ID != pendingChannel.ID || currentChannel.Name != pendingChannel.Name || currentChannel.Config != pendingChannel.Config {
-				currentChannel.ID = pendingChannel.ID
+			if currentChannel.Type != pendingChannel.Type || currentChannel.Name != pendingChannel.Name || currentChannel.Config != pendingChannel.Config {
+				currentChannel.Type = pendingChannel.Type
 				currentChannel.Name = pendingChannel.Name
 				currentChannel.Config = pendingChannel.Config
 
