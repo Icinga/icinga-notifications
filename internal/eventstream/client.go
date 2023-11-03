@@ -82,8 +82,20 @@ func NewClientsFromConfig(
 			ApiBasicAuthUser: icinga2Api.AuthUser,
 			ApiBasicAuthPass: icinga2Api.AuthPass,
 			ApiHttpTransport: http.Transport{
+				// Hardened TLS config adjusted to Icinga 2's configuration:
+				// - https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#objecttype-apilistener
+				// - https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#security
+				// - https://ssl-config.mozilla.org/#server=go&config=intermediate
 				TLSClientConfig: &tls.Config{
-					MinVersion: tls.VersionTLS13,
+					MinVersion: tls.VersionTLS12,
+					CipherSuites: []uint16{
+						tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+						tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+						tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+						tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+						tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+						tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+					},
 				},
 			},
 
