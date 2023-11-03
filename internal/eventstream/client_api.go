@@ -10,6 +10,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"go.uber.org/zap"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -273,49 +274,38 @@ func (client *Client) checkMissedAcknowledgements(objType string, ctx context.Co
 	})
 }
 
-// listenEventStream subscribes to the Icinga 2 API Event Stream and handles received objects.
+// connectEventStream connects to the EventStream within an infinite loop until a connection was established.
 //
-// In case of a parsing or handling error, this error will be returned. If the server closes the connection, nil will
-// be returned.
-func (client *Client) listenEventStream() error {
-	queueNameRndBuff := make([]byte, 16)
-	_, _ = rand.Read(queueNameRndBuff)
-
-	reqBody, err := json.Marshal(map[string]any{
-		"queue": fmt.Sprintf("icinga-notifications-%x", queueNameRndBuff),
-		"types": []string{
-			typeStateChange,
-			typeAcknowledgementSet,
-			// typeAcknowledgementCleared,
-			// typeCommentAdded,
-			// typeCommentRemoved,
-			// typeDowntimeAdded,
-			// typeDowntimeRemoved,
-			// typeDowntimeStarted,
-			// typeDowntimeTriggered,
-		},
-	})
-	if err != nil {
-		return err
-	}
-
+// The esTypes is a string array of required Event Stream types.
+//
+// An error will be returned if reconnecting resp. retrying the (almost) same thing will not help fix it.
+func (client *Client) connectEventStream(esTypes []string) (*http.Response, context.CancelFunc, error) {
 	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/events")
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
-	var response *http.Response
-connectionLoop:
-	for {
+	for i := 0; ; i++ {
+		// Always ensure an unique queue name to ensure no conflicts might occur.
+		queueNameRndBuff := make([]byte, 16)
+		_, _ = rand.Read(queueNameRndBuff)
+
+		reqBody, err := json.Marshal(map[string]any{
+			"queue": fmt.Sprintf("icinga-notifications-%x", queueNameRndBuff),
+			"types": esTypes,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+
 		// Sub-context which might get canceled early if connecting takes to long.
-		// The reqCancel function will be called in the select below or when leaving the function, mostly because its
-		// parent context, client.Ctx, was finished before.
+		// The reqCancel function will be called after the select below or when leaving the function with an error.
 		reqCtx, reqCancel := context.WithCancel(client.Ctx)
-		defer reqCancel()
 
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, apiUrl, bytes.NewReader(reqBody))
 		if err != nil {
-			return err
+			reqCancel()
+			return nil, nil, err
 		}
 
 		req.SetBasicAuth(client.ApiBasicAuthUser, client.ApiBasicAuthPass)
@@ -325,29 +315,66 @@ connectionLoop:
 		resCh := make(chan *http.Response)
 
 		go func() {
+			defer close(resCh)
+
 			client.Logger.Info("Try to establish an Event Stream API connection")
 			httpClient := &http.Client{Transport: &client.ApiHttpTransport}
-
 			res, err := httpClient.Do(req)
 			if err != nil {
 				client.Logger.Warnw("Establishing an Event Stream API connection failed; will be retried", zap.Error(err))
-				close(resCh)
 				return
 			}
-			resCh <- res
+
+			select {
+			case resCh <- res:
+
+			case <-reqCtx.Done():
+				// This case might happen when this httpClient.Do and the time.After in the select below finish at round
+				// about the exact same time, but httpClient.Do was slightly faster than reqCancel().
+				_ = res.Body.Close()
+			}
 		}()
 
 		select {
 		case res, ok := <-resCh:
 			if ok {
-				response = res
-				break connectionLoop
+				return res, reqCancel, nil
 			}
 
 		case <-time.After(3 * time.Second):
 		}
 		reqCancel()
+
+		// Rate limit API reconnections: slow down for successive failed attempts but limit to three minutes.
+		// 1s, 2s, 4s, 8s, 16s, 32s, 1m4s, 2m8s, 3m, 3m, 3m, ...
+		select {
+		case <-time.After(min(3*time.Minute, time.Duration(math.Exp2(float64(i)))*time.Second)):
+		case <-client.Ctx.Done():
+			return nil, client.Ctx.Err()
+		}
 	}
+}
+
+// listenEventStream subscribes to the Icinga 2 API Event Stream and handles received objects.
+//
+// In case of a parsing or handling error, this error will be returned. If the server closes the connection, nil will
+// be returned.
+func (client *Client) listenEventStream() error {
+	response, cancel, err := client.connectEventStream([]string{
+		typeStateChange,
+		typeAcknowledgementSet,
+		// typeAcknowledgementCleared,
+		// typeCommentAdded,
+		// typeCommentRemoved,
+		// typeDowntimeAdded,
+		// typeDowntimeRemoved,
+		// typeDowntimeStarted,
+		// typeDowntimeTriggered,
+	})
+	if err != nil {
+		return err
+	}
+	defer cancel()
 	defer func() { _ = response.Body.Close() }()
 
 	client.enterReplayPhase()
