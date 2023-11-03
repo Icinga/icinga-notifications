@@ -349,7 +349,7 @@ func (client *Client) connectEventStream(esTypes []string) (*http.Response, cont
 		select {
 		case <-time.After(min(3*time.Minute, time.Duration(math.Exp2(float64(i))*0.1)*time.Second)):
 		case <-client.Ctx.Done():
-			return nil, client.Ctx.Err()
+			return nil, nil, client.Ctx.Err()
 		}
 	}
 }

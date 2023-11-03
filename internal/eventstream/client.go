@@ -157,7 +157,7 @@ func (client *Client) buildCommonEvent(host, service string) (*event.Event, erro
 		eventName = host + "!" + service
 
 		eventUrl = eventUrl.JoinPath("/icingadb/service")
-		eventUrl.RawQuery = "name=" + url.PathEscape(service) + "&host.name=" + url.PathEscape(host)
+		eventUrl.RawQuery = "name=" + rawurlencode(service) + "&host.name=" + rawurlencode(host)
 
 		eventTags = map[string]string{
 			"host":    host,
@@ -175,7 +175,7 @@ func (client *Client) buildCommonEvent(host, service string) (*event.Event, erro
 		eventName = host
 
 		eventUrl = eventUrl.JoinPath("/icingadb/host")
-		eventUrl.RawQuery = "name=" + url.PathEscape(host)
+		eventUrl.RawQuery = "name=" + rawurlencode(host)
 
 		eventTags = map[string]string{
 			"host": host,
