@@ -145,14 +145,21 @@ func NewClientsFromConfig(
 func (client *Client) buildCommonEvent(host, service string) (*event.Event, error) {
 	var (
 		eventName      string
-		eventUrlSuffix string
+		eventUrl       *url.URL
 		eventTags      map[string]string
 		eventExtraTags = make(map[string]string)
 	)
 
+	eventUrl, err := url.Parse(client.IcingaWebRoot)
+	if err != nil {
+		return nil, err
+	}
+
 	if service != "" {
 		eventName = host + "!" + service
-		eventUrlSuffix = "/icingadb/service?name=" + url.PathEscape(service) + "&host.name=" + url.PathEscape(host)
+
+		eventUrl = eventUrl.JoinPath("/icingadb/service")
+		eventUrl.RawQuery = "name=" + url.PathEscape(service) + "&host.name=" + url.PathEscape(host)
 
 		eventTags = map[string]string{
 			"host":    host,
@@ -168,7 +175,9 @@ func (client *Client) buildCommonEvent(host, service string) (*event.Event, erro
 		}
 	} else {
 		eventName = host
-		eventUrlSuffix = "/icingadb/host?name=" + url.PathEscape(host)
+
+		eventUrl = eventUrl.JoinPath("/icingadb/host")
+		eventUrl.RawQuery = "name=" + url.PathEscape(host)
 
 		eventTags = map[string]string{
 			"host": host,
@@ -187,7 +196,7 @@ func (client *Client) buildCommonEvent(host, service string) (*event.Event, erro
 		Time:      time.Now(),
 		SourceId:  client.IcingaNotificationsEventSourceId,
 		Name:      eventName,
-		URL:       client.IcingaWebRoot + eventUrlSuffix,
+		URL:       eventUrl.String(),
 		Tags:      eventTags,
 		ExtraTags: eventExtraTags,
 	}, nil
