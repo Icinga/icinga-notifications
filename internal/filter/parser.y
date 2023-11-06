@@ -67,7 +67,6 @@ func reduceFilter(rule Filter, op string, rules ...Filter) Filter {
 %token T_GREATER_THAN ">"
 %token T_LESS_THAN_OR_EQUAL "<" T_EQUAL
 %token T_GREATER_THAN_OR_EQUAL ">" T_EQUAL
-%token <text> T_STRING
 %token <text> T_IDENTIFIER
 
 %type <text> T_EQUAL
@@ -79,7 +78,7 @@ func reduceFilter(rule Filter, op string, rules ...Filter) Filter {
 %type <text> T_LESS_THAN_OR_EQUAL
 %type <text> T_GREATER_THAN_OR_EQUAL
 
-%type <text> "!" "&" "|"
+%type <text> "|" "&" "!"
 
 // This is just used for declaring explicit precedence and resolves shift/reduce conflicts
 // in `filter_chain` and `conditions_expr` rules.
@@ -155,7 +154,6 @@ exists_expr: identifier
 	;
 
 identifier: T_IDENTIFIER
-	| T_STRING
 	;
 
 optional_negation:  /* empty */ { $$ = "" }
@@ -175,3 +173,5 @@ comparison_op: T_EQUAL
 	| T_GREATER_THAN
 	| T_GREATER_THAN_OR_EQUAL
 	;
+
+%%
