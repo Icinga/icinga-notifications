@@ -27,13 +27,19 @@ func Parse(expr string) (rule Filter, err error) {
 	lex.IsIdentRune = isIdentRune
 	lex.Init(strings.NewReader(expr))
 
+	// Set the scanner mode to recognize only identifiers. This way all unrecognized tokens will be returned
+	// just as they are, and our Lexer#Lex() method will then recognize whatever valid input is required.
+	// Note: This is in fact not necessary, as our custom function `isIdentRune` accepts any token that matches the
+	// regex pattern `identifiersMatcher`, so the scanner would never match all the scanner.GoTokens except ScanIdents.
+	lex.Mode = scanner.ScanIdents
+
 	// scanner.Init sets the error function to nil, therefore, we have to register
 	// our error function after the scanner initialization.
 	lex.Scanner.Error = lex.ScanError
 
 	defer func() {
 		// All the grammar rules panics when encountering any errors while reducing the filter rules, so try
-		// to recover from it and return an error instead. Since we're used a named return values, we can set
+		// to recover from it and return an error instead. Since we're using a named return values, we can set
 		// the err value even in deferred function. See https://go.dev/blog/defer-panic-and-recover
 		if r := recover(); r != nil {
 			lex.err = errors.New(fmt.Sprint(r))
@@ -50,7 +56,7 @@ func Parse(expr string) (rule Filter, err error) {
 	return lex.rule, lex.err
 }
 
-// Lexer is used to tokenize the filter input into a set literals.
+// Lexer is used to tokenize the filter input into a set of literals.
 // This is just a wrapper around the Scanner type and implements the yyLexer interface used by the parser.
 type Lexer struct {
 	scanner.Scanner
