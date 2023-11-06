@@ -2,6 +2,8 @@
 
 package filter
 
+import "net/url"
+
 // reduceFilter reduces the given filter rules into a single filter chain (initiated with the provided operator).
 // When the operator type of the first argument (Filter) is not of type filter.Any or the given operator is not
 // of type filter.All, this will just create a new chain with the new op and append all the filter rules to it.
@@ -59,26 +61,18 @@ func reduceFilter(rule Filter, op string, rules ...Filter) Filter {
 %type <text> identifier
 %type <text> logical_op
 
-%token T_EQUAL "="
-%token T_UNEQUAL "!" T_EQUAL
-%token T_LIKE "~"
-%token T_UNLIKE "!" T_LIKE
-%token T_LESS_THAN "<"
-%token T_GREATER_THAN ">"
-%token T_LESS_THAN_OR_EQUAL "<" T_EQUAL
-%token T_GREATER_THAN_OR_EQUAL ">" T_EQUAL
+%token <text> T_EQUAL
+%token <text> T_UNEQUAL
+%token <text> T_LIKE
+%token <text> T_UNLIKE
+%token <text> T_LESS_THAN
+%token <text> T_GREATER_THAN
+%token <text> T_LESS_THAN_OR_EQUAL
+%token <text> T_GREATER_THAN_OR_EQUAL
 %token <text> T_IDENTIFIER
 
-%type <text> T_EQUAL
-%type <text> T_UNEQUAL
-%type <text> T_LIKE
-%type <text> T_UNLIKE
-%type <text> T_LESS_THAN
-%type <text> T_GREATER_THAN
-%type <text> T_LESS_THAN_OR_EQUAL
-%type <text> T_GREATER_THAN_OR_EQUAL
-
-%type <text> "|" "&" "!"
+%type <text> "|" "&"
+%type <text> "!"
 
 // This is just used for declaring explicit precedence and resolves shift/reduce conflicts
 // in `filter_chain` and `conditions_expr` rules.
@@ -87,7 +81,8 @@ func reduceFilter(rule Filter, op string, rules ...Filter) Filter {
 %nonassoc T_EQUAL T_UNEQUAL T_LIKE T_UNLIKE
 %nonassoc T_LESS_THAN T_LESS_THAN_OR_EQUAL T_GREATER_THAN T_GREATER_THAN_OR_EQUAL
 
-%left "!" "&" "|"
+%left "|" "&"
+%left "!"
 %left "("
 %right ")"
 
@@ -154,9 +149,18 @@ exists_expr: identifier
 	;
 
 identifier: T_IDENTIFIER
+    {
+        column, err := url.QueryUnescape($1)
+        if err != nil {
+            // Something went wrong, so just panic and filter.Parse will try to recover from this.
+            panic(err)
+        }
+
+        $$ = column
+    }
 	;
 
-optional_negation:  /* empty */ { $$ = "" }
+optional_negation: /* empty */ { $$ = "" }
 	| "!"
 	;
 
