@@ -131,21 +131,14 @@ func (r *RPC) Close() error {
 	r.encoderMu.Lock()
 	defer r.encoderMu.Unlock()
 
-	r.requestedShutdown = true
 	return r.writer.Close()
 }
 
 // setErr sets the err encoder/decoder fails and closes errChannel
 func (r *RPC) setErr(err error) {
 	r.errOnce.Do(func() {
-		if r.requestedShutdown {
-			r.logger.Info("Plugin shutdown triggered")
-		} else {
-			r.logger.Warn("Plugin terminated unexpectedly")
-		}
-
 		if reqCount := len(r.pendingRequests); reqCount > 0 {
-			r.logger.Infof("Cancelling %d pending request(s)", reqCount)
+			r.logger.Debugf("Cancelling %d pending request(s)", reqCount)
 		}
 
 		r.err = &Error{cause: err}
