@@ -14,6 +14,21 @@ import (
 // Currently, it allows to match any character except a LogicalOp and CompOperator.
 var identifiersMatcher = regexp.MustCompile("[^!&|~<>=()]")
 
+// tokenDisplayNames contains a list of all the defined parser tokens and their respective
+// friendly names used to output in error messages.
+var tokenDisplayNames = map[string]string{
+	"$unk":                    `"unknown"`,
+	"T_EQUAL":                 `"="`,
+	"T_UNEQUAL":               `"!="`,
+	"T_LIKE":                  `"~"`,
+	"T_UNLIKE":                `"!~"`,
+	"T_LESS_THAN":             `"<"`,
+	"T_GREATER_THAN":          `">"`,
+	"T_LESS_THAN_OR_EQUAL":    `"<="`,
+	"T_GREATER_THAN_OR_EQUAL": `">="`,
+	"T_IDENTIFIER":            `"column or value"`,
+}
+
 // init just sets the global yyErrorVerbose variable to true.
 func init() {
 	// Enable parsers error verbose to get more context of the parsing failures
@@ -139,6 +154,11 @@ func (l *Lexer) Lex(yyval *yySymType) int {
 // additional context instead. This function then wraps the provided err and adds line, column number and offset
 // to the error string. Error is equivalent to "yyerror" in the original yacc.
 func (l *Lexer) Error(s string) {
+	// Replace all parser token names by their corresponding friendly names.
+	for token, name := range tokenDisplayNames {
+		s = strings.ReplaceAll(s, token, name)
+	}
+
 	l.err = fmt.Errorf("%d:%d (%d): %s", l.Line, l.Column, l.Offset, s)
 
 	// Always reset the current filter rule when encountering an error.
