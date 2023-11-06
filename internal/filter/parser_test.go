@@ -77,6 +77,13 @@ func TestParser(t *testing.T) {
 
 		_, err = Parse("((0&((((((((((((((((((((((0=0)")
 		assert.EqualError(t, err, "1:31 (30): syntax error: unexpected $end, expecting \")\"")
+
+		// IPL web filter parser accepts such invalid strings, but our Lexer doesn't.
+		_, err = Parse("foo\x00")
+		assert.EqualError(t, err, "1:1 (0): invalid character NUL")
+
+		_, err = Parse("\xff")
+		assert.EqualError(t, err, "0:0 (0): invalid UTF-8 encoding")
 	})
 
 	t.Run("ParseAllKindOfSimpleFilters", func(t *testing.T) {
