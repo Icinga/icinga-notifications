@@ -2,7 +2,10 @@
 
 package filter
 
-import "net/url"
+import (
+	"net/url"
+	"slices"
+)
 
 // reduceFilter reduces the given filter rules into a single filter chain (initiated with the provided operator).
 // When the operator type of the first argument (Filter) is not of type filter.Any or the given operator is not
@@ -10,35 +13,59 @@ import "net/url"
 // Otherwise, it will pop the last pushed rule of that chain (first argument) and append it to the new *And chain.
 //
 // Example: `foo=bar|bar~foo&col!~val`
-// The first argument `rule` is supposed to be a filter.Any Chain containing the first two conditions.
+// The first argument `left` is supposed to be a filter.Any Chain containing the first two conditions.
 // We then call this function when the parser is processing the logical `&` op and the Unlike condition,
 // and what this function will do is logically re-group the conditions into `foo=bar|(bar~foo&col!~val)`.
-func reduceFilter(rule Filter, op string, rules ...Filter) Filter {
-	chain, ok := rule.(*Chain);
+func reduceFilter(left Filter, op string, right Filter) Filter {
+	chain, ok := left.(*Chain)
 	if ok && chain.op == Any && LogicalOp(op) == All {
-	    // Retrieve the last pushed condition and append it to the new "And" chain instead
-	    andChain, _ := NewChain(All, chain.pop())
-	    andChain.add(rules...)
+		// Retrieve the last pushed filter Condition and append it to the new "And" chain instead
+		back := chain.pop()
+		// Chain#pop can return a filter Chain, and since we are only allowed to regroup two filter conditions,
+		// we must traverse the last element of every single popped Chain till we reach a filter condition.
+		for back != nil {
+			if backChain, ok := back.(*Chain); !ok || backChain.grouped {
+				// If the popped element is not of type filter Chain or the filter chain is parenthesized,
+				// we don't need to continue here, so break out of the loop.
+				break
+			}
 
-	    chain.add(andChain)
+			// Re-add the just popped item before stepping into it and popping its last item.
+			chain.add(back)
 
-	    return chain
+			chain = back.(*Chain)
+			back = chain.pop()
+		}
+
+		andChain, _ := NewChain(All, back)
+		// We don't need to regroup an already grouped filter chain, since braces gain
+		// a higher precedence than any logical operators.
+		if anyChain, ok := right.(*Chain); ok && anyChain.op == Any && !chain.grouped && !anyChain.grouped {
+			andChain.add(anyChain.top())
+			// Prepend the newly created All chain
+			anyChain.rules = slices.Insert[[]Filter, Filter](anyChain.rules, 0, andChain)
+			chain.add(anyChain)
+		} else {
+			andChain.add(right)
+			chain.add(andChain)
+		}
+
+		return left
 	}
 
-	// If the given operator is the same as the already existsing chains operator (*chain),
+	// If the given operator is the same as the already existing chains operator (*chain),
 	// we don't need to create another chain of the same operator type. Avoids something
 	// like &Chain{op: All, &Chain{op: All, ...}}
 	if chain == nil || chain.op != LogicalOp(op) {
-	    newChain, err := NewChain(LogicalOp(op), rule)
-	    if err != nil {
-		// Just panic, filter.Parse will try to recover from this.
-		panic(err)
-	    }
-
-	    chain = newChain
+		var err error
+		chain, err = NewChain(LogicalOp(op), left)
+		if err != nil {
+			// Just panic, filter.Parse will try to recover from this.
+			panic(err)
+		}
 	}
 
-	chain.add(rules...)
+	chain.add(right)
 
 	return chain
 }
@@ -93,9 +120,14 @@ filter_rule: filter_chain logical_op filter_chain
 		$$ = reduceFilter($1, $2, $3)
 		yylex.(*Lexer).rule = $$
 	}
-	| filter_chain
+	| filter_chain %prec PREFER_SHIFTING_LOGICAL_OP
 	{
 		yylex.(*Lexer).rule = $$
+	}
+	| filter_rule logical_op filter_chain
+	{
+	    $$ = reduceFilter($1, $2, $3)
+        yylex.(*Lexer).rule = $$
 	}
 	;
 
@@ -128,6 +160,9 @@ maybe_negated_condition_expr: optional_negation condition_expr
 condition_expr: "(" filter_rule ")"
 	{
 		$$ = $2
+		if chain, ok := $$.(*Chain); ok {
+		    chain.grouped = true
+		}
 	}
 	| identifier comparison_op identifier
 	{

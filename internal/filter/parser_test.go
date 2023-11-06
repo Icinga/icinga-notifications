@@ -13,7 +13,7 @@ func TestParser(t *testing.T) {
 		t.Parallel()
 
 		_, err := Parse("(a=b|c=d)e=f")
-		assert.EqualError(t, err, "1:10 (9): syntax error: unexpected \"column or value\"")
+		assert.EqualError(t, err, "1:10 (9): syntax error: unexpected \"column or value\", expecting \"|\" or \"&\"")
 
 		_, err = Parse("(a=b|c=d|)e=f")
 		assert.EqualError(t, err, "1:10 (9): syntax error: unexpected \")\", expecting \"column or value\" or \"(\"")
@@ -22,10 +22,10 @@ func TestParser(t *testing.T) {
 		assert.EqualError(t, err, "1:5 (4): syntax error: unexpected \"(\", expecting \"column or value\"")
 
 		_, err = Parse("(((x=a)&y=b")
-		assert.EqualError(t, err, "1:12 (11): syntax error: unexpected $end, expecting \")\"")
+		assert.EqualError(t, err, "1:12 (11): syntax error: unexpected $end, expecting \"|\" or \"&\" or \")\"")
 
 		_, err = Parse("(x=a)&y=b)")
-		assert.EqualError(t, err, "1:10 (9): syntax error: unexpected \")\"")
+		assert.EqualError(t, err, "1:10 (9): syntax error: unexpected \")\", expecting \"|\" or \"&\"")
 
 		_, err = Parse("!(&")
 		assert.EqualError(t, err, "1:3 (2): syntax error: unexpected \"&\", expecting \"column or value\" or \"(\"")
@@ -34,10 +34,10 @@ func TestParser(t *testing.T) {
 		assert.EqualError(t, err, "1:9 (8): syntax error: unexpected \"(\", expecting \"column or value\"")
 
 		_, err = Parse("foo&bar=te(st)")
-		assert.EqualError(t, err, "1:11 (10): syntax error: unexpected \"(\"")
+		assert.EqualError(t, err, "1:11 (10): syntax error: unexpected \"(\", expecting \"|\" or \"&\"")
 
 		_, err = Parse("foo&bar=test)")
-		assert.EqualError(t, err, "1:13 (12): syntax error: unexpected \")\"")
+		assert.EqualError(t, err, "1:13 (12): syntax error: unexpected \")\", expecting \"|\" or \"&\"")
 
 		_, err = Parse("!()|&()&)")
 		assert.EqualError(t, err, "1:3 (2): syntax error: unexpected \")\", expecting \"column or value\" or \"(\"")
@@ -70,13 +70,13 @@ func TestParser(t *testing.T) {
 		assert.EqualError(t, err, "1:7 (6): syntax error: unexpected $end, expecting \"column or value\" or \"(\"")
 
 		_, err = Parse("foo&bar&col=val!=val")
-		assert.EqualError(t, err, "1:17 (16): syntax error: unexpected \"!=\"")
+		assert.EqualError(t, err, "1:17 (16): syntax error: unexpected \"!=\", expecting \"|\" or \"&\"")
 
 		_, err = Parse("col%7umn")
 		assert.EqualError(t, err, "invalid URL escape \"%7u\"")
 
 		_, err = Parse("((0&((((((((((((((((((((((0=0)")
-		assert.EqualError(t, err, "1:31 (30): syntax error: unexpected $end, expecting \")\"")
+		assert.EqualError(t, err, "1:31 (30): syntax error: unexpected $end, expecting \"|\" or \"&\" or \")\"")
 
 		// IPL web filter parser accepts such invalid strings, but our Lexer doesn't.
 		_, err = Parse("foo\x00")
@@ -193,7 +193,7 @@ func TestParser(t *testing.T) {
 
 		rule, err = Parse("(!foo=bar)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: None, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}}
+		expected = &Chain{op: None, grouped: true, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("!(foo=bar)")
@@ -204,7 +204,7 @@ func TestParser(t *testing.T) {
 		rule, err = Parse("!(!foo=bar)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 		expected = &Chain{op: None, rules: []Filter{
-			&Chain{op: None, rules: []Filter{
+			&Chain{op: None, grouped: true, rules: []Filter{
 				&Condition{op: Equal, column: "foo", value: "bar"},
 			}},
 		}}
@@ -213,7 +213,7 @@ func TestParser(t *testing.T) {
 		rule, err = Parse("!(foo=bar|bar=foo)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 		expected = &Chain{op: None, rules: []Filter{
-			&Chain{op: Any, rules: []Filter{
+			&Chain{op: Any, grouped: true, rules: []Filter{
 				&Condition{op: Equal, column: "foo", value: "bar"},
 				&Condition{op: Equal, column: "bar", value: "foo"},
 			}},
@@ -222,8 +222,8 @@ func TestParser(t *testing.T) {
 
 		rule, err = Parse("((!foo=bar)&bar!=foo)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Chain{op: All, rules: []Filter{
-			&Chain{op: None, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}},
+		expected = &Chain{op: All, grouped: true, rules: []Filter{
+			&Chain{op: None, grouped: true, rules: []Filter{&Condition{op: Equal, column: "foo", value: "bar"}}},
 			&Condition{op: UnEqual, column: "bar", value: "foo"},
 		}}
 		assert.Equal(t, expected, rule)
@@ -239,7 +239,7 @@ func TestParser(t *testing.T) {
 		rule, err = Parse("!(!foo|bar)")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 		expected = &Chain{op: None, rules: []Filter{
-			&Chain{op: Any, rules: []Filter{
+			&Chain{op: Any, grouped: true, rules: []Filter{
 				&Chain{op: None, rules: []Filter{&Exists{column: "foo"}}},
 				&Exists{column: "bar"},
 			}},
@@ -249,8 +249,8 @@ func TestParser(t *testing.T) {
 		rule, err = Parse("!(!(foo|bar))")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 		expected = &Chain{op: None, rules: []Filter{
-			&Chain{op: None, rules: []Filter{
-				&Chain{op: Any, rules: []Filter{
+			&Chain{op: None, grouped: true, rules: []Filter{
+				&Chain{op: Any, grouped: true, rules: []Filter{
 					&Exists{column: "foo"},
 					&Exists{column: "bar"}},
 				},
@@ -270,12 +270,12 @@ func TestParser(t *testing.T) {
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 		expected = &Chain{op: All, rules: []Filter{
 			&Chain{op: None, rules: []Filter{
-				&Chain{op: Any, rules: []Filter{
+				&Chain{op: Any, grouped: true, rules: []Filter{
 					&Condition{op: Equal, column: "foo", value: "bar"},
 					&Condition{op: Equal, column: "bar", value: "foo"},
 				}},
 			}},
-			&Chain{op: Any, rules: []Filter{
+			&Chain{op: Any, grouped: true, rules: []Filter{
 				&Condition{op: UnEqual, column: "foo", value: "bar"},
 				&Condition{op: UnEqual, column: "bar", value: "foo"},
 			}},
@@ -301,6 +301,36 @@ func TestParser(t *testing.T) {
 		}}
 		assert.Equal(t, expected, rule)
 
+		rule, err = Parse("foo!~bar&bar~foo|col=val&val!~col|col~val&yes!=no|yes~no&no~yes|foo&!test")
+		assert.Nil(t, err, "There should be no errors but got: %s", err)
+		expected = &Chain{op: Any, rules: []Filter{
+			&Chain{op: All, rules: []Filter{
+				&Condition{op: UnLike, column: "foo", value: "bar"},
+				&Condition{op: Like, column: "bar", value: "foo"},
+			}},
+			&Chain{op: Any, rules: []Filter{
+				&Chain{op: All, rules: []Filter{
+					&Condition{op: Equal, column: "col", value: "val"},
+					&Condition{op: UnLike, column: "val", value: "col"},
+				}},
+				&Chain{op: All, rules: []Filter{
+					&Condition{op: Like, column: "col", value: "val"},
+					&Condition{op: UnEqual, column: "yes", value: "no"},
+				}},
+			}},
+			&Chain{op: Any, rules: []Filter{
+				&Chain{op: All, rules: []Filter{
+					&Condition{op: Like, column: "yes", value: "no"},
+					&Condition{op: Like, column: "no", value: "yes"},
+				}},
+				&Chain{op: All, rules: []Filter{
+					NewExists("foo"),
+					&Chain{op: None, rules: []Filter{NewExists("test")}},
+				}},
+			}},
+		}}
+		assert.Equal(t, expected, rule)
+
 		rule, err = Parse("foo=bar&bar!=foo&(john>doe|doe<john&column!=value)|column=value")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 
@@ -308,7 +338,7 @@ func TestParser(t *testing.T) {
 			&Chain{op: All, rules: []Filter{
 				&Condition{op: Equal, column: "foo", value: "bar"},
 				&Condition{op: UnEqual, column: "bar", value: "foo"},
-				&Chain{op: Any, rules: []Filter{
+				&Chain{op: Any, grouped: true, rules: []Filter{
 					&Condition{op: GreaterThan, column: "john", value: "doe"},
 					&Chain{op: All, rules: []Filter{
 						&Condition{op: LessThan, column: "doe", value: "john"},
@@ -330,7 +360,7 @@ func TestParser(t *testing.T) {
 				&Condition{op: UnEqual, column: "bar", value: "foo"},
 			}},
 			&Chain{op: All, rules: []Filter{
-				&Chain{op: Any, rules: []Filter{ // Represents the filter conditions within the parentheses
+				&Chain{op: Any, grouped: true, rules: []Filter{ // Represents the filter conditions within the parentheses
 					&Condition{op: GreaterThan, column: "john", value: "doe"},
 					&Chain{op: All, rules: []Filter{
 						&Condition{op: LessThan, column: "doe", value: "john"},
@@ -353,11 +383,11 @@ func TestParser(t *testing.T) {
 				&Condition{op: UnEqual, column: "bar", value: "foo"},
 			}},
 			&Chain{op: All, rules: []Filter{
-				&Chain{op: Any, rules: []Filter{ // Represents the filter conditions within the parentheses
+				&Chain{op: Any, grouped: true, rules: []Filter{ // Represents the filter conditions within the parentheses
 					&Condition{op: GreaterThan, column: "john", value: "doe"},
 					&Chain{op: All, rules: []Filter{
 						&Condition{op: LessThan, column: "doe", value: "john"},
-						&Chain{op: Any, rules: []Filter{ // Represents the filter conditions within the nested parentheses
+						&Chain{op: Any, grouped: true, rules: []Filter{ // Represents the filter conditions within the nested parentheses
 							&Condition{op: UnEqual, column: "column", value: "value"},
 							&Condition{op: UnLike, column: "value", value: "column"},
 						}},
