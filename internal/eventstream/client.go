@@ -140,7 +140,7 @@ func NewClientsFromConfig(
 //   - Username
 //   - Message
 //   - ID
-func (client *Client) buildCommonEvent(host, service string) (*event.Event, error) {
+func (client *Client) buildCommonEvent(ctx context.Context, host, service string) (*event.Event, error) {
 	var (
 		eventName      string
 		eventUrl       *url.URL
@@ -164,7 +164,7 @@ func (client *Client) buildCommonEvent(host, service string) (*event.Event, erro
 			"service": service,
 		}
 
-		serviceGroups, err := client.fetchServiceGroups(host, service)
+		serviceGroups, err := client.fetchHostServiceGroups(ctx, host, service)
 		if err != nil {
 			return nil, err
 		}
@@ -182,7 +182,7 @@ func (client *Client) buildCommonEvent(host, service string) (*event.Event, erro
 		}
 	}
 
-	hostGroups, err := client.fetchHostGroups(host)
+	hostGroups, err := client.fetchHostServiceGroups(ctx, host, "")
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func (client *Client) buildCommonEvent(host, service string) (*event.Event, erro
 
 // buildHostServiceEvent constructs an event.Event based on a CheckResult, a Host or Service state, a Host name and an
 // optional Service name if the Event should represent a Service object.
-func (client *Client) buildHostServiceEvent(result CheckResult, state int, host, service string) (*event.Event, error) {
+func (client *Client) buildHostServiceEvent(ctx context.Context, result CheckResult, state int, host, service string) (*event.Event, error) {
 	var eventSeverity event.Severity
 
 	if service != "" {
@@ -227,7 +227,7 @@ func (client *Client) buildHostServiceEvent(result CheckResult, state int, host,
 		}
 	}
 
-	ev, err := client.buildCommonEvent(host, service)
+	ev, err := client.buildCommonEvent(ctx, host, service)
 	if err != nil {
 		return nil, err
 	}
@@ -240,8 +240,8 @@ func (client *Client) buildHostServiceEvent(result CheckResult, state int, host,
 }
 
 // buildAcknowledgementEvent from the given fields.
-func (client *Client) buildAcknowledgementEvent(host, service, author, comment string) (*event.Event, error) {
-	ev, err := client.buildCommonEvent(host, service)
+func (client *Client) buildAcknowledgementEvent(ctx context.Context, host, service, author, comment string) (*event.Event, error) {
+	ev, err := client.buildCommonEvent(ctx, host, service)
 	if err != nil {
 		return nil, err
 	}
@@ -331,17 +331,18 @@ func (client *Client) enterReplayPhase() {
 		return
 	}
 
-	queryFns := []func(context.Context, string) error{client.checkMissedAcknowledgements, client.checkMissedStateChanges}
-	objTypes := []string{"host", "service"}
-
 	group, groupCtx := errgroup.WithContext(client.Ctx)
-	for _, fn := range queryFns {
-		for _, objType := range objTypes {
-			fn, objType := fn, objType // https://go.dev/doc/faq#closures_and_goroutines
-			group.Go(func() error {
-				return fn(groupCtx, objType)
-			})
-		}
+	objTypes := []string{"host", "service"}
+	for _, objType := range objTypes {
+		objType := objType // https://go.dev/doc/faq#closures_and_goroutines
+		group.Go(func() error {
+			err := client.checkMissedChanges(groupCtx, objType)
+			if err != nil {
+				client.Logger.Errorw("Replaying API events resulted in errors",
+					zap.String("object type", objType), zap.Error(err))
+			}
+			return err
+		})
 	}
 
 	go func() {
