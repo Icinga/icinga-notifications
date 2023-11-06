@@ -16,40 +16,65 @@ import "net/url"
 // Otherwise, it will pop the last pushed rule of that chain (second argument) and append it to the new *And chain.
 //
 // Example: `foo=bar|bar~foo&col!~val`
-// The second argument `rule` is supposed to be a filter.Any *Chain contains the first two conditions.
+// The second argument `left` is supposed to be a filter.Any Chain contains the first two conditions.
 // We then call this function when the parser is processing the logical `&` op and the Unlike condition,
 // and what this function will do is logically re-group the conditions into `foo=bar|(bar~foo&col!~val)`.
-func reduceFilter(op string, rule Filter, rules ...Filter) Filter {
-	chain, ok := rule.(*Chain)
+func reduceFilter(op string, left Filter, right Filter) Filter {
+	chain, ok := left.(*Chain)
 	if ok && chain.op == Any && LogicalOp(op) == All {
-		// Retrieve the last pushed condition and append it to the new "And" chain instead
-		andChain, _ := NewChain(All, chain.pop())
-		andChain.add(rules...)
+		// Retrieve the last pushed filter Condition and append it to the new "And" chain instead
+		back := chain.pop()
+		// Chain#pop can return a filter Chain, and since we are only allowed to regroup two filter conditions,
+		// we must traverse the last element of every single popped Chain till we reach a filter condition.
+		for back != nil {
+			if backChain, ok := back.(*Chain); !ok || backChain.grouped {
+				// If the popped element is not of type filter Chain or the filter chain is parenthesized,
+				// we don't need to continue here, so break out of the loop.
+				break
+			}
 
-		chain.add(andChain)
+			// Re-add the just popped item before stepping into it and popping its last item.
+			chain.add(back)
 
-		return chain
+			chain = back.(*Chain)
+			back = chain.pop()
+		}
+
+		andChain, _ := NewChain(All, back)
+		// We don't need to regroup an already grouped filter chain, since braces gain
+		// a higher precedence than any logical operators.
+		if anyChain, ok := right.(*Chain); ok && anyChain.op == Any && !chain.grouped && !anyChain.grouped {
+			andChain.add(anyChain.top())
+			// Prepend the newly created All chain
+			anyChain.rules = append([]Filter{andChain}, anyChain.rules...)
+
+			chain.add(anyChain)
+		} else {
+			andChain.add(right)
+			chain.add(andChain)
+		}
+
+		return left
 	}
 
-	// If the given operator is the same as the already existsing chains operator (*chain),
+	// If the given operator is the same as the already existing chains operator (*chain),
 	// we don't need to create another chain of the same operator type. Avoids something
 	// like &Chain{op: All, &Chain{op: All, ...}}
 	if chain == nil || chain.op != LogicalOp(op) {
-		newChain, err := NewChain(LogicalOp(op), rule)
+		var err error
+		chain, err = NewChain(LogicalOp(op), left)
 		if err != nil {
 			// Just panic, filter.Parse will try to recover from this.
 			panic(err)
 		}
-
-		chain = newChain
 	}
 
-	chain.add(rules...)
+	chain.add(right)
 
 	return chain
 }
 
-//line parser.y:47
+//line parser.y:72
 type yySymType struct {
 	yys  int
 	expr Filter
@@ -94,7 +119,7 @@ const yyEofCode = 1
 const yyErrCode = 2
 const yyInitialStackSize = 16
 
-//line parser.y:181
+//line parser.y:214
 
 //line yacctab:1
 var yyExca = [...]int8{
@@ -105,51 +130,51 @@ var yyExca = [...]int8{
 
 const yyPrivate = 57344
 
-const yyLast = 32
+const yyLast = 37
 
 var yyAct = [...]int8{
-	14, 30, 22, 23, 24, 25, 26, 28, 27, 29,
-	6, 16, 1, 9, 8, 16, 13, 4, 5, 2,
-	7, 21, 31, 15, 10, 11, 20, 17, 18, 19,
-	12, 3,
+	15, 9, 8, 17, 6, 1, 32, 24, 25, 26,
+	27, 28, 30, 29, 31, 4, 17, 5, 9, 8,
+	22, 14, 2, 23, 33, 16, 13, 20, 21, 3,
+	18, 7, 0, 19, 10, 11, 12,
 }
 
 var yyPact = [...]int16{
-	-5, -1000, 0, 0, 0, -1, -1000, -5, -1000, -1000,
-	-5, -5, -1000, -5, -2, -1000, -1000, -1000, -1000, -1000,
-	-17, 3, -1000, -1000, -1000, -1000, -1000, -1000, -1000, -1000,
-	-1000, -1000,
+	-11, 5, 5, 5, 5, 4, -1000, -11, -1000, -1000,
+	-11, -11, -11, -1000, -11, 3, -1000, -1000, -1000, -1000,
+	-1000, -1000, -12, -9, -1000, -1000, -1000, -1000, -1000, -1000,
+	-1000, -1000, -1000, -1000,
 }
 
 var yyPgo = [...]int8{
-	0, 12, 19, 31, 17, 30, 23, 21, 18, 0,
-	20,
+	0, 5, 22, 29, 15, 26, 25, 23, 17, 0,
+	31,
 }
 
 var yyR1 = [...]int8{
-	0, 1, 1, 2, 2, 3, 3, 4, 5, 5,
-	5, 6, 9, 8, 8, 10, 10, 7, 7, 7,
-	7, 7, 7, 7, 7,
+	0, 1, 1, 1, 2, 2, 3, 3, 4, 5,
+	5, 5, 6, 9, 8, 8, 10, 10, 7, 7,
+	7, 7, 7, 7, 7, 7,
 }
 
 var yyR2 = [...]int8{
-	0, 3, 1, 3, 1, 3, 1, 2, 3, 3,
-	1, 1, 1, 0, 1, 1, 1, 1, 1, 1,
-	1, 1, 1, 1, 1,
+	0, 3, 1, 3, 3, 1, 3, 1, 2, 3,
+	3, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1, 1,
 }
 
 var yyChk = [...]int16{
 	-1000, -1, -2, -3, -4, -8, 15, -10, 14, 13,
-	-10, -10, -5, 17, -9, -6, 12, -2, -4, -4,
-	-1, -7, 4, 5, 6, 7, 8, 10, 9, 11,
-	18, -9,
+	-10, -10, -10, -5, 17, -9, -6, 12, -2, -2,
+	-4, -4, -1, -7, 4, 5, 6, 7, 8, 10,
+	9, 11, 18, -9,
 }
 
 var yyDef = [...]int8{
-	13, -2, 2, 4, 6, 0, 14, 13, 15, 16,
-	13, 13, 7, 13, 11, 10, 12, 1, 3, 5,
-	0, 0, 17, 18, 19, 20, 21, 22, 23, 24,
-	8, 9,
+	14, -2, 2, 5, 7, 0, 15, 14, 16, 17,
+	14, 14, 14, 8, 14, 12, 11, 13, 3, 1,
+	4, 6, 0, 0, 18, 19, 20, 21, 22, 23,
+	24, 25, 9, 10,
 }
 
 var yyTok1 = [...]int8{
@@ -515,32 +540,39 @@ yydefault:
 
 	case 1:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:92
+//line parser.y:117
 		{
 			yyVAL.expr = reduceFilter(yyDollar[2].text, yyDollar[1].expr, yyDollar[3].expr)
 			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 2:
 		yyDollar = yyS[yypt-1 : yypt+1]
-//line parser.y:97
+//line parser.y:122
 		{
 			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 3:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:103
+//line parser.y:126
 		{
 			yyVAL.expr = reduceFilter(yyDollar[2].text, yyDollar[1].expr, yyDollar[3].expr)
+			yylex.(*Lexer).rule = yyVAL.expr
 		}
-	case 5:
+	case 4:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:110
+//line parser.y:133
 		{
 			yyVAL.expr = reduceFilter(yyDollar[2].text, yyDollar[1].expr, yyDollar[3].expr)
 		}
-	case 7:
+	case 6:
+		yyDollar = yyS[yypt-3 : yypt+1]
+//line parser.y:140
+		{
+			yyVAL.expr = reduceFilter(yyDollar[2].text, yyDollar[1].expr, yyDollar[3].expr)
+		}
+	case 8:
 		yyDollar = yyS[yypt-2 : yypt+1]
-//line parser.y:117
+//line parser.y:147
 		{
 			if yyDollar[1].text != "" {
 				// we explicitly provide the None operator, we don't expect an error to be returned.
@@ -549,15 +581,18 @@ yydefault:
 				yyVAL.expr = yyDollar[2].expr
 			}
 		}
-	case 8:
-		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:129
-		{
-			yyVAL.expr = yyDollar[2].expr
-		}
 	case 9:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:133
+//line parser.y:159
+		{
+			yyVAL.expr = yyDollar[2].expr
+			if chain, ok := yyVAL.expr.(*Chain); ok {
+				chain.grouped = true
+			}
+		}
+	case 10:
+		yyDollar = yyS[yypt-3 : yypt+1]
+//line parser.y:166
 		{
 			cond, err := NewCondition(yyDollar[1].text, CompOperator(yyDollar[2].text), yyDollar[3].text)
 			if err != nil {
@@ -567,15 +602,15 @@ yydefault:
 
 			yyVAL.expr = cond
 		}
-	case 11:
+	case 12:
 		yyDollar = yyS[yypt-1 : yypt+1]
-//line parser.y:146
+//line parser.y:179
 		{
 			yyVAL.expr = NewExists(yyDollar[1].text)
 		}
-	case 12:
+	case 13:
 		yyDollar = yyS[yypt-1 : yypt+1]
-//line parser.y:152
+//line parser.y:185
 		{
 			column, err := url.QueryUnescape(yyDollar[1].text)
 			if err != nil {
@@ -585,9 +620,9 @@ yydefault:
 
 			yyVAL.text = column
 		}
-	case 13:
+	case 14:
 		yyDollar = yyS[yypt-0 : yypt+1]
-//line parser.y:163
+//line parser.y:196
 		{
 			yyVAL.text = ""
 		}
