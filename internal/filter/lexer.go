@@ -73,10 +73,6 @@ func (l *Lexer) Lex(yyval *yySymType) int {
 		return T_IDENTIFIER
 	}
 
-	if token == scanner.String {
-		return T_STRING
-	}
-
 	switch lit {
 	case "&":
 		return '&'
