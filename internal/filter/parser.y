@@ -125,7 +125,7 @@ maybe_negated_condition_expr: optional_negation condition_expr
 	}
 	;
 
-condition_expr: "(" filter_chain ")"
+condition_expr: "(" filter_rule ")"
 	{
 		$$ = $2
 	}
