@@ -22,6 +22,10 @@ const (
 type Chain struct {
 	op    LogicalOp // The filter chain operator to be used to evaluate the rules
 	rules []Filter
+
+	// grouped indicates whether a given filter chain is wrapped within parentheses `(foo&bar)`.
+	// You don't and won't ever need to access this property, it's purely meant to be used by the parser.
+	grouped bool
 }
 
 func NewChain(op LogicalOp, rules ...Filter) (*Chain, error) {
