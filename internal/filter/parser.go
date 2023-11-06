@@ -6,6 +6,10 @@ package filter
 
 import __yyfmt__ "fmt"
 
+//line parser.y:3
+
+import "net/url"
+
 // reduceFilter reduces the given filter rules into a single filter chain (initiated with the provided operator).
 // When the operator type of the second argument (Filter) is not of type filter.Any or the given operator is not
 // of type filter.All, this will just create a new chain with the new op and append all the filter rules to it.
@@ -15,8 +19,6 @@ import __yyfmt__ "fmt"
 // The second argument `rule` is supposed to be a filter.Any *Chain contains the first two conditions.
 // We then call this function when the parser is processing the logical `&` op and the Unlike condition,
 // and what this function will do is logically re-group the conditions into `foo=bar|(bar~foo&col!~val)`.
-//
-//line parser.y:3
 func reduceFilter(op string, rule Filter, rules ...Filter) Filter {
 	chain, ok := rule.(*Chain)
 	if ok && chain.op == Any && LogicalOp(op) == All {
@@ -47,7 +49,7 @@ func reduceFilter(op string, rule Filter, rules ...Filter) Filter {
 	return chain
 }
 
-//line parser.y:45
+//line parser.y:47
 type yySymType struct {
 	yys  int
 	expr Filter
@@ -70,21 +72,17 @@ var yyToknames = [...]string{
 	"error",
 	"$unk",
 	"T_EQUAL",
-	"\"=\"",
 	"T_UNEQUAL",
-	"\"!\"",
 	"T_LIKE",
-	"\"~\"",
 	"T_UNLIKE",
 	"T_LESS_THAN",
-	"\"<\"",
 	"T_GREATER_THAN",
-	"\">\"",
 	"T_LESS_THAN_OR_EQUAL",
 	"T_GREATER_THAN_OR_EQUAL",
 	"T_IDENTIFIER",
 	"\"|\"",
 	"\"&\"",
+	"\"!\"",
 	"PREFER_SHIFTING_LOGICAL_OP",
 	"\"(\"",
 	"\")\"",
@@ -96,7 +94,7 @@ const yyEofCode = 1
 const yyErrCode = 2
 const yyInitialStackSize = 16
 
-//line parser.y:183
+//line parser.y:181
 
 //line yacctab:1
 var yyExca = [...]int8{
@@ -110,22 +108,22 @@ const yyPrivate = 57344
 const yyLast = 32
 
 var yyAct = [...]int8{
-	22, 30, 23, 14, 24, 16, 25, 26, 4, 28,
-	16, 27, 29, 2, 13, 9, 8, 6, 7, 18,
-	19, 17, 10, 11, 5, 31, 21, 20, 15, 12,
+	14, 30, 22, 23, 24, 25, 26, 28, 27, 29,
+	6, 16, 2, 9, 8, 16, 13, 4, 5, 7,
+	17, 21, 31, 10, 11, 15, 20, 12, 18, 19,
 	3, 1,
 }
 
 var yyPact = [...]int16{
-	10, -1000, -3, -3, -3, -7, -1000, 10, -1000, -1000,
-	10, 10, -1000, 10, -4, -1000, -1000, -1000, -1000, -1000,
-	-21, -12, -1000, -1000, -1000, -1000, -1000, -1000, -1000, -1000,
+	-5, -1000, 0, 0, 0, -1, -1000, -5, -1000, -1000,
+	-5, -5, -1000, -5, -2, -1000, -1000, -1000, -1000, -1000,
+	-17, 3, -1000, -1000, -1000, -1000, -1000, -1000, -1000, -1000,
 	-1000, -1000,
 }
 
 var yyPgo = [...]int8{
-	0, 31, 13, 30, 8, 29, 28, 26, 24, 3,
-	18,
+	0, 31, 12, 30, 17, 27, 25, 21, 18, 0,
+	19,
 }
 
 var yyR1 = [...]int8{
@@ -141,10 +139,10 @@ var yyR2 = [...]int8{
 }
 
 var yyChk = [...]int16{
-	-1000, -1, -2, -3, -4, -8, 7, -10, 19, 18,
-	-10, -10, -5, 21, -9, -6, 17, -2, -4, -4,
-	-2, -7, 4, 6, 8, 10, 11, 15, 13, 16,
-	22, -9,
+	-1000, -1, -2, -3, -4, -8, 15, -10, 14, 13,
+	-10, -10, -5, 17, -9, -6, 12, -2, -4, -4,
+	-2, -7, 4, 5, 6, 7, 8, 10, 9, 11,
+	18, -9,
 }
 
 var yyDef = [...]int8{
@@ -158,21 +156,21 @@ var yyTok1 = [...]int8{
 	1, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-	3, 3, 3, 7, 3, 3, 3, 3, 19, 3,
-	21, 22, 3, 3, 3, 3, 3, 3, 3, 3,
-	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-	12, 5, 14, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 15, 3, 3, 3, 3, 14, 3,
+	17, 18, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-	3, 3, 3, 3, 18, 3, 9,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+	3, 3, 3, 3, 13,
 }
 
 var yyTok2 = [...]int8{
-	2, 3, 4, 6, 8, 10, 11, 13, 15, 16,
-	17, 20,
+	2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+	12, 16,
 }
 
 var yyTok3 = [...]int8{
@@ -517,32 +515,32 @@ yydefault:
 
 	case 1:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:97
+//line parser.y:92
 		{
 			yyVAL.expr = reduceFilter(yyDollar[2].text, yyDollar[1].expr, yyDollar[3].expr)
 			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 2:
 		yyDollar = yyS[yypt-1 : yypt+1]
-//line parser.y:102
+//line parser.y:97
 		{
 			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 3:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:108
+//line parser.y:103
 		{
 			yyVAL.expr = reduceFilter(yyDollar[2].text, yyDollar[1].expr, yyDollar[3].expr)
 		}
 	case 5:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:115
+//line parser.y:110
 		{
 			yyVAL.expr = reduceFilter(yyDollar[2].text, yyDollar[1].expr, yyDollar[3].expr)
 		}
 	case 7:
 		yyDollar = yyS[yypt-2 : yypt+1]
-//line parser.y:122
+//line parser.y:117
 		{
 			if yyDollar[1].text != "" {
 				// we explicitly provide the None operator, we don't expect an error to be returned.
@@ -553,13 +551,13 @@ yydefault:
 		}
 	case 8:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:134
+//line parser.y:129
 		{
 			yyVAL.expr = yyDollar[2].expr
 		}
 	case 9:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:138
+//line parser.y:133
 		{
 			cond, err := NewCondition(yyDollar[1].text, CompOperator(yyDollar[2].text), yyDollar[3].text)
 			if err != nil {
@@ -571,13 +569,25 @@ yydefault:
 		}
 	case 11:
 		yyDollar = yyS[yypt-1 : yypt+1]
-//line parser.y:151
+//line parser.y:146
 		{
 			yyVAL.expr = NewExists(yyDollar[1].text)
 		}
+	case 12:
+		yyDollar = yyS[yypt-1 : yypt+1]
+//line parser.y:152
+		{
+			column, err := url.QueryUnescape(yyDollar[1].text)
+			if err != nil {
+				// Something went wrong, so just panic and filter.Parse will try to recover from this.
+				panic(err)
+			}
+
+			yyVAL.text = column
+		}
 	case 13:
 		yyDollar = yyS[yypt-0 : yypt+1]
-//line parser.y:165
+//line parser.y:163
 		{
 			yyVAL.text = ""
 		}
