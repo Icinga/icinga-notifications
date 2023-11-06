@@ -62,9 +62,8 @@ const T_LESS_THAN = 57350
 const T_GREATER_THAN = 57351
 const T_LESS_THAN_OR_EQUAL = 57352
 const T_GREATER_THAN_OR_EQUAL = 57353
-const T_STRING = 57354
-const T_IDENTIFIER = 57355
-const PREFER_SHIFTING_LOGICAL_OP = 57356
+const T_IDENTIFIER = 57354
+const PREFER_SHIFTING_LOGICAL_OP = 57355
 
 var yyToknames = [...]string{
 	"$end",
@@ -83,10 +82,9 @@ var yyToknames = [...]string{
 	"\">\"",
 	"T_LESS_THAN_OR_EQUAL",
 	"T_GREATER_THAN_OR_EQUAL",
-	"T_STRING",
 	"T_IDENTIFIER",
-	"\"&\"",
 	"\"|\"",
+	"\"&\"",
 	"PREFER_SHIFTING_LOGICAL_OP",
 	"\"(\"",
 	"\")\"",
@@ -98,6 +96,8 @@ const yyEofCode = 1
 const yyErrCode = 2
 const yyInitialStackSize = 16
 
+//line parser.y:177
+
 //line yacctab:1
 var yyExca = [...]int8{
 	-1, 1,
@@ -107,51 +107,51 @@ var yyExca = [...]int8{
 
 const yyPrivate = 57344
 
-const yyLast = 34
+const yyLast = 32
 
 var yyAct = [...]int8{
-	17, 16, 31, 14, 23, 13, 24, 5, 25, 22,
-	26, 27, 4, 29, 2, 28, 30, 8, 9, 17,
-	16, 6, 18, 19, 20, 7, 32, 15, 21, 10,
-	11, 12, 3, 1,
+	22, 30, 23, 14, 24, 16, 25, 26, 4, 28,
+	16, 27, 29, 2, 13, 9, 8, 6, 7, 18,
+	19, 17, 10, 11, 5, 31, 21, 20, 15, 12,
+	3, 1,
 }
 
 var yyPact = [...]int16{
-	14, -1000, -2, -2, -2, -17, -1000, 14, -1000, -1000,
-	14, 14, -1000, 14, 0, -1000, -1000, -1000, -1000, -1000,
-	-1000, -21, 2, -1000, -1000, -1000, -1000, -1000, -1000, -1000,
-	-1000, -1000, -1000,
+	10, -1000, -3, -3, -3, -7, -1000, 10, -1000, -1000,
+	10, 10, -1000, 10, -4, -1000, -1000, -1000, -1000, -1000,
+	-21, -12, -1000, -1000, -1000, -1000, -1000, -1000, -1000, -1000,
+	-1000, -1000,
 }
 
 var yyPgo = [...]int8{
-	0, 33, 14, 32, 12, 31, 27, 9, 7, 3,
-	25,
+	0, 31, 13, 30, 8, 29, 28, 26, 24, 3,
+	18,
 }
 
 var yyR1 = [...]int8{
 	0, 1, 1, 2, 2, 3, 3, 4, 5, 5,
-	5, 6, 9, 9, 8, 8, 10, 10, 7, 7,
-	7, 7, 7, 7, 7, 7,
+	5, 6, 9, 8, 8, 10, 10, 7, 7, 7,
+	7, 7, 7, 7, 7,
 }
 
 var yyR2 = [...]int8{
 	0, 3, 1, 3, 1, 3, 1, 2, 3, 3,
-	1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
-	1, 1, 1, 1, 1, 1,
+	1, 1, 1, 0, 1, 1, 1, 1, 1, 1,
+	1, 1, 1, 1, 1,
 }
 
 var yyChk = [...]int16{
-	-1000, -1, -2, -3, -4, -8, 7, -10, 19, 20,
-	-10, -10, -5, 22, -9, -6, 18, 17, -2, -4,
-	-4, -2, -7, 4, 6, 8, 10, 11, 15, 13,
-	16, 23, -9,
+	-1000, -1, -2, -3, -4, -8, 7, -10, 19, 18,
+	-10, -10, -5, 21, -9, -6, 17, -2, -4, -4,
+	-2, -7, 4, 6, 8, 10, 11, 15, 13, 16,
+	22, -9,
 }
 
 var yyDef = [...]int8{
-	14, -2, 2, 4, 6, 0, 15, 14, 16, 17,
-	14, 14, 7, 14, 11, 10, 12, 13, 1, 3,
-	5, 0, 0, 18, 19, 20, 21, 22, 23, 24,
-	25, 8, 9,
+	13, -2, 2, 4, 6, 0, 14, 13, 15, 16,
+	13, 13, 7, 13, 11, 10, 12, 1, 3, 5,
+	0, 0, 17, 18, 19, 20, 21, 22, 23, 24,
+	8, 9,
 }
 
 var yyTok1 = [...]int8{
@@ -159,7 +159,7 @@ var yyTok1 = [...]int8{
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 7, 3, 3, 3, 3, 19, 3,
-	22, 23, 3, 3, 3, 3, 3, 3, 3, 3,
+	21, 22, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	12, 5, 14, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
@@ -167,12 +167,12 @@ var yyTok1 = [...]int8{
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
 	3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-	3, 3, 3, 3, 20, 3, 9,
+	3, 3, 3, 3, 18, 3, 9,
 }
 
 var yyTok2 = [...]int8{
 	2, 3, 4, 6, 8, 10, 11, 13, 15, 16,
-	17, 18, 21,
+	17, 20,
 }
 
 var yyTok3 = [...]int8{
@@ -518,32 +518,32 @@ yydefault:
 
 	case 1:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:98
+//line parser.y:97
 		{
 			yyVAL.expr = reduceFilter(yyDollar[1].expr, yyDollar[2].text, yyDollar[3].expr)
 			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 2:
 		yyDollar = yyS[yypt-1 : yypt+1]
-//line parser.y:103
+//line parser.y:102
 		{
 			yylex.(*Lexer).rule = yyVAL.expr
 		}
 	case 3:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:109
+//line parser.y:108
 		{
 			yyVAL.expr = reduceFilter(yyDollar[1].expr, yyDollar[2].text, yyDollar[3].expr)
 		}
 	case 5:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:116
+//line parser.y:115
 		{
 			yyVAL.expr = reduceFilter(yyDollar[1].expr, yyDollar[2].text, yyDollar[3].expr)
 		}
 	case 7:
 		yyDollar = yyS[yypt-2 : yypt+1]
-//line parser.y:123
+//line parser.y:122
 		{
 			if yyDollar[1].text != "" {
 				// NewChain is only going to return an error if an invalid operator is specified, and since
@@ -555,13 +555,13 @@ yydefault:
 		}
 	case 8:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:135
+//line parser.y:134
 		{
 			yyVAL.expr = yyDollar[2].expr
 		}
 	case 9:
 		yyDollar = yyS[yypt-3 : yypt+1]
-//line parser.y:139
+//line parser.y:138
 		{
 			cond, err := NewCondition(yyDollar[1].text, CompOperator(yyDollar[2].text), yyDollar[3].text)
 			if err != nil {
@@ -573,13 +573,13 @@ yydefault:
 		}
 	case 11:
 		yyDollar = yyS[yypt-1 : yypt+1]
-//line parser.y:152
+//line parser.y:151
 		{
 			yyVAL.expr = NewExists(yyDollar[1].text)
 		}
-	case 14:
+	case 13:
 		yyDollar = yyS[yypt-0 : yypt+1]
-//line parser.y:161
+//line parser.y:159
 		{
 			yyVAL.text = ""
 		}

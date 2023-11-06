@@ -16,10 +16,10 @@ func TestParser(t *testing.T) {
 		assert.EqualError(t, err, "1:10 (9): syntax error: unexpected T_IDENTIFIER")
 
 		_, err = Parse("(a=b|c=d|)e=f")
-		assert.EqualError(t, err, "1:10 (9): syntax error: unexpected \")\", expecting T_STRING or T_IDENTIFIER or \"(\"")
+		assert.EqualError(t, err, "1:10 (9): syntax error: unexpected \")\", expecting T_IDENTIFIER or \"(\"")
 
 		_, err = Parse("col=(")
-		assert.EqualError(t, err, "1:5 (4): syntax error: unexpected \"(\", expecting T_STRING or T_IDENTIFIER")
+		assert.EqualError(t, err, "1:5 (4): syntax error: unexpected \"(\", expecting T_IDENTIFIER")
 
 		_, err = Parse("(((x=a)&y=b")
 		assert.EqualError(t, err, "1:12 (11): syntax error: unexpected $end, expecting \")\"")
@@ -28,10 +28,10 @@ func TestParser(t *testing.T) {
 		assert.EqualError(t, err, "1:10 (9): syntax error: unexpected \")\"")
 
 		_, err = Parse("!(&")
-		assert.EqualError(t, err, "1:3 (2): syntax error: unexpected \"&\", expecting T_STRING or T_IDENTIFIER or \"(\"")
+		assert.EqualError(t, err, "1:3 (2): syntax error: unexpected \"&\", expecting T_IDENTIFIER or \"(\"")
 
 		_, err = Parse("foo&bar=(te(st)")
-		assert.EqualError(t, err, "1:9 (8): syntax error: unexpected \"(\", expecting T_STRING or T_IDENTIFIER")
+		assert.EqualError(t, err, "1:9 (8): syntax error: unexpected \"(\", expecting T_IDENTIFIER")
 
 		_, err = Parse("foo&bar=te(st)")
 		assert.EqualError(t, err, "1:11 (10): syntax error: unexpected \"(\"")
@@ -40,34 +40,34 @@ func TestParser(t *testing.T) {
 		assert.EqualError(t, err, "1:13 (12): syntax error: unexpected \")\"")
 
 		_, err = Parse("!()|&()&)")
-		assert.EqualError(t, err, "1:3 (2): syntax error: unexpected \")\", expecting T_STRING or T_IDENTIFIER or \"(\"")
+		assert.EqualError(t, err, "1:3 (2): syntax error: unexpected \")\", expecting T_IDENTIFIER or \"(\"")
 
 		_, err = Parse("=foo")
-		assert.EqualError(t, err, "1:1 (0): syntax error: unexpected T_EQUAL, expecting T_STRING or T_IDENTIFIER or \"(\"")
+		assert.EqualError(t, err, "1:1 (0): syntax error: unexpected T_EQUAL, expecting T_IDENTIFIER or \"(\"")
 
 		_, err = Parse("foo>")
-		assert.EqualError(t, err, "1:5 (4): syntax error: unexpected $end, expecting T_STRING or T_IDENTIFIER")
+		assert.EqualError(t, err, "1:5 (4): syntax error: unexpected $end, expecting T_IDENTIFIER")
 
 		_, err = Parse("foo==")
-		assert.EqualError(t, err, "1:5 (4): syntax error: unexpected T_EQUAL, expecting T_STRING or T_IDENTIFIER")
+		assert.EqualError(t, err, "1:5 (4): syntax error: unexpected T_EQUAL, expecting T_IDENTIFIER")
 
 		_, err = Parse("=>foo")
-		assert.EqualError(t, err, "1:1 (0): syntax error: unexpected T_EQUAL, expecting T_STRING or T_IDENTIFIER or \"(\"")
+		assert.EqualError(t, err, "1:1 (0): syntax error: unexpected T_EQUAL, expecting T_IDENTIFIER or \"(\"")
 
 		_, err = Parse("&foo")
-		assert.EqualError(t, err, "1:1 (0): syntax error: unexpected \"&\", expecting T_STRING or T_IDENTIFIER or \"(\"")
+		assert.EqualError(t, err, "1:1 (0): syntax error: unexpected \"&\", expecting T_IDENTIFIER or \"(\"")
 
 		_, err = Parse("&&foo")
-		assert.EqualError(t, err, "1:1 (0): syntax error: unexpected \"&\", expecting T_STRING or T_IDENTIFIER or \"(\"")
+		assert.EqualError(t, err, "1:1 (0): syntax error: unexpected \"&\", expecting T_IDENTIFIER or \"(\"")
 
 		_, err = Parse("(&foo=bar)")
-		assert.EqualError(t, err, "1:2 (1): syntax error: unexpected \"&\", expecting T_STRING or T_IDENTIFIER or \"(\"")
+		assert.EqualError(t, err, "1:2 (1): syntax error: unexpected \"&\", expecting T_IDENTIFIER or \"(\"")
 
 		_, err = Parse("(foo=bar|)")
-		assert.EqualError(t, err, "1:10 (9): syntax error: unexpected \")\", expecting T_STRING or T_IDENTIFIER or \"(\"")
+		assert.EqualError(t, err, "1:10 (9): syntax error: unexpected \")\", expecting T_IDENTIFIER or \"(\"")
 
 		_, err = Parse("((((((")
-		assert.EqualError(t, err, "1:7 (6): syntax error: unexpected $end, expecting T_STRING or T_IDENTIFIER or \"(\"")
+		assert.EqualError(t, err, "1:7 (6): syntax error: unexpected $end, expecting T_IDENTIFIER or \"(\"")
 
 		_, err = Parse("foo&bar&col=val!=val")
 		assert.EqualError(t, err, "1:17 (16): syntax error: unexpected T_UNEQUAL")
