@@ -30,6 +30,7 @@ type Plugin struct {
 
 // NewPlugin starts and returns a new plugin instance. If the start of the plugin fails, an error is returned
 func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
+	logger.Debug("Creating new plugin instance")
 	file := filepath.Join(daemon.Config().ChannelPluginDir, pluginType)
 	cmd := exec.Command(file)
 
@@ -60,7 +61,7 @@ func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 	}
 
 	go forwardLogs(errPipe, l)
-	l.Info("Successfully started channel plugin")
+	l.Debug("Successfully created new plugin instance")
 
 	return p, nil
 }
@@ -69,19 +70,20 @@ func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 func (p *Plugin) Stop() {
 	p.stopOnce.Do(func() {
 		go func() {
-			p.logger.Debug("Stopping the channel plugin")
-
+			p.logger.Debug("Stopping the plugin")
 			_ = p.rpc.Close()
 			timer := time.AfterFunc(5*time.Second, func() {
-				p.logger.Debug("killing the channel plugin")
 				_ = p.cmd.Process.Kill()
 			})
 
 			<-p.rpc.Done()
 			timer.Stop()
-			p.logger.Warn("Stopped channel plugin")
 		}()
 	})
+}
+
+func (p *Plugin) Pid() int {
+	return p.cmd.Process.Pid
 }
 
 // GetInfo sends the PluginInfo request and returns the response or an error if an error occurred
@@ -132,7 +134,7 @@ func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
 
 // UpsertPlugins upsert the available_channel_type table with working plugins
 func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *icingadb.DB) {
-	logger.Infof("Upserting working plugins")
+	logger.Debug("Updating available channel types")
 	files, err := os.ReadDir(channelPluginDir)
 	if err != nil {
 		logger.Errorw("Failed to read the channel plugin directory", zap.Error(err))
@@ -175,10 +177,10 @@ func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *icingadb
 	stmt, _ := db.BuildUpsertStmt(&plugin.Info{})
 	_, err = db.NamedExec(stmt, pluginInfos)
 	if err != nil {
-		logger.Errorw("Failed to upsert channel plugins", zap.Error(err))
+		logger.Errorw("Failed to update available channel types", zap.Error(err))
 	} else {
 		logger.Infof(
-			"Successfully upserted %d plugins: %s",
+			"Successfully updated %d available channel types: %s",
 			len(pluginInfos),
 			strings.Join(pluginTypes, ", "))
 	}
