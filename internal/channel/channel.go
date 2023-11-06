@@ -59,6 +59,8 @@ func (c *Channel) initPlugin(cType string, config string) *Plugin {
 		return nil
 	}
 
+	p.logger.Info("Successfully started channel plugin")
+
 	return p
 }
 
@@ -67,11 +69,15 @@ func (c *Channel) runPlugin(initType string, initConfig string) {
 	var currentlyRunningPlugin *Plugin
 	cType, config := initType, initConfig
 	// Helper function for the following loop to stop a running plugin. Does nothing if no plugin is running.
-	stopIfRunning := func() {
+	stopIfRunning := func() (int, bool) {
 		if currentlyRunningPlugin != nil {
+			pid := currentlyRunningPlugin.Pid()
 			currentlyRunningPlugin.Stop()
 			currentlyRunningPlugin = nil
+			return pid, true
 		}
+
+		return 0, false
 	}
 
 	// Helper function for the following loop to receive from rpc.Done
@@ -90,19 +96,20 @@ func (c *Channel) runPlugin(initType string, initConfig string) {
 
 		select {
 		case <-rpcDone():
-			c.Logger.Debug("Receive plugin error signal")
-			stopIfRunning()
+			if pid, stopped := stopIfRunning(); stopped {
+				c.Logger.Warnw("Channel plugin crashed", zap.Int("pid", pid))
+			}
 
 			continue
 		case reload := <-c.restartCh:
-			c.Logger.Debug("Received new plugin config")
 			cType, config = reload.ctype, reload.config
 			stopIfRunning()
 
 			continue
 		case <-c.pluginCtx.Done():
-			c.Logger.Debug("Receive plugin stop signal")
-			stopIfRunning()
+			if pid, stopped := stopIfRunning(); stopped {
+				c.Logger.Infow("Successfully stopped channel plugin", zap.Int("pid", pid))
+			}
 
 			return
 		case c.pluginCh <- currentlyRunningPlugin:
@@ -126,13 +133,12 @@ func (c *Channel) getPlugin() *Plugin {
 // Stop ends the lifecycle of its plugin.
 // This should only be called when the channel is not more required.
 func (c *Channel) Stop() {
-	c.Logger.Info("Stopping channel plugin")
 	c.pluginCtxCancel()
 }
 
 // Restart signals to restart the channel plugin with the updated channel config
 func (c *Channel) Restart() {
-	c.Logger.Info("Restarting the channel plugin with the updated channel config")
+	c.Logger.Info("Restarting the channel plugin due to a config change")
 	c.restartCh <- newConfig{c.Type, c.Config}
 }
 
@@ -140,7 +146,6 @@ func (c *Channel) Restart() {
 func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *event.Event, icingaweb2Url string) error {
 	p := c.getPlugin()
 	if p == nil {
-		c.Logger.Debug("Cannot send notification, plugin could not be started")
 		return errors.New("plugin could not be started")
 	}
 

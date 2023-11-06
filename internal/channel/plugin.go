@@ -31,6 +31,9 @@ type Plugin struct {
 // NewPlugin starts and returns a new plugin instance. If the start of the plugin fails, an error is returned
 func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 	file := filepath.Join(daemon.Config().ChannelPluginDir, pluginType)
+
+	logger.Debugw("Starting new channel plugin process", zap.String("path", file))
+
 	cmd := exec.Command(file)
 
 	writer, err := cmd.StdinPipe()
@@ -60,7 +63,7 @@ func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 	}
 
 	go forwardLogs(errPipe, l)
-	l.Info("Successfully started channel plugin")
+	l.Debug("Successfully started channel plugin process")
 
 	return p, nil
 }
@@ -69,19 +72,26 @@ func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 func (p *Plugin) Stop() {
 	p.stopOnce.Do(func() {
 		go func() {
-			p.logger.Debug("Stopping the channel plugin")
-
+			p.logger.Debug("Requesting channel plugin stop")
 			_ = p.rpc.Close()
-			timer := time.AfterFunc(5*time.Second, func() {
-				p.logger.Debug("killing the channel plugin")
+			const timeout = 5 * time.Second
+			timer := time.AfterFunc(timeout, func() {
+				p.logger.Warnw("Channel plugin did not terminate after timeout, killing it", zap.Duration("timeout", timeout))
 				_ = p.cmd.Process.Kill()
 			})
 
+			// TODO: currently, this doesn't reliably check that the plugin process terminated.
+			// Any JSON encode/decode error (including EOF) also closes this channel.
 			<-p.rpc.Done()
 			timer.Stop()
-			p.logger.Warn("Stopped channel plugin")
+
+			p.logger.Debug("Channel plugin terminated")
 		}()
 	})
+}
+
+func (p *Plugin) Pid() int {
+	return p.cmd.Process.Pid
 }
 
 // GetInfo sends the PluginInfo request and returns the response or an error if an error occurred
@@ -132,7 +142,7 @@ func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
 
 // UpsertPlugins upsert the available_channel_type table with working plugins
 func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *icingadb.DB) {
-	logger.Infof("Upserting working plugins")
+	logger.Debug("Updating available channel types")
 	files, err := os.ReadDir(channelPluginDir)
 	if err != nil {
 		logger.Errorw("Failed to read the channel plugin directory", zap.Error(err))
@@ -175,10 +185,10 @@ func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *icingadb
 	stmt, _ := db.BuildUpsertStmt(&plugin.Info{})
 	_, err = db.NamedExec(stmt, pluginInfos)
 	if err != nil {
-		logger.Errorw("Failed to upsert channel plugins", zap.Error(err))
+		logger.Errorw("Failed to update available channel types", zap.Error(err))
 	} else {
 		logger.Infof(
-			"Successfully upserted %d plugins: %s",
+			"Successfully updated %d available channel types: %s",
 			len(pluginInfos),
 			strings.Join(pluginTypes, ", "))
 	}
