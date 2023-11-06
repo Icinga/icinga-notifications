@@ -171,11 +171,11 @@ func (client *Client) fetchAcknowledgementComment(ctx context.Context, host, ser
 	return &objQueriesResults[0].Attrs, nil
 }
 
-// checkMissedChanges queries for Service or Host objects to handle missed elements.
+// checkMissedChanges queries objType (host, service) from the Icinga 2 API for replaying events.
 //
 // If the object's acknowledgement field is non-zero, an Acknowledgement Event will be constructed following the Host or
-// Service object.
-func (client *Client) checkMissedChanges(ctx context.Context, objType string) error {
+// Service object. Each event will be delivered to the channel.
+func (client *Client) checkMissedChanges(ctx context.Context, objType string, eventCh chan *eventMsg) error {
 	jsonRaw, err := client.queryObjectsApiDirect(ctx, objType, "")
 	if err != nil {
 		return err
@@ -212,7 +212,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string) er
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case client.eventDispatcherReplay <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time}:
+		case eventCh <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time}:
 			stateChangeEvents++
 		}
 
@@ -239,7 +239,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string) er
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case client.eventDispatcherReplay <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time}:
+		case eventCh <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time}:
 			acknowledgementEvents++
 		}
 	}
@@ -355,7 +355,12 @@ func (client *Client) listenEventStream() error {
 	defer cancel()
 	defer func() { _ = response.Body.Close() }()
 
-	client.enterReplayPhase()
+	select {
+	case <-client.Ctx.Done():
+		client.Logger.Warnw("Cannot request starting replay phase as context is finished", zap.Error(client.Ctx.Err()))
+		return client.Ctx.Err()
+	case client.replayPhaseRequest <- struct{}{}:
+	}
 
 	client.Logger.Info("Start listening on Icinga 2 Event Stream..")
 

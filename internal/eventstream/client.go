@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sync/atomic"
 	"time"
 )
 
@@ -29,7 +28,15 @@ type eventMsg struct {
 }
 
 // Client for the Icinga 2 Event Stream API with extended support for other Icinga 2 APIs to gather additional
-// information and allow a replay in case of a connection loss.
+// information and a replay either when starting up to catch up the Icinga's state or in case of a connection loss.
+//
+// Within the icinga-notifications scope, one or multiple Client instances can be generated from the configuration by
+// calling NewClientsFromConfig.
+//
+// A Client must be started by calling its Process method, which blocks until Ctx is marked as done. Reconnections and
+// the necessary state replaying from the Icinga 2 API will be taken care off. Internally, the Client executes a worker
+// within its own goroutine, which dispatches event.Event to the CallbackFn and enforces event.Event order during
+// replaying after (re-)connections.
 type Client struct {
 	// ApiHost et al. configure where and how the Icinga 2 API can be reached.
 	ApiHost          string
@@ -51,13 +58,8 @@ type Client struct {
 
 	// eventDispatcherEventStream communicates Events to be processed from the Event Stream API.
 	eventDispatcherEventStream chan *eventMsg
-	// eventDispatcherReplay communicates Events to be processed from the Icinga 2 API replay during replay phase.
-	eventDispatcherReplay chan *eventMsg
-
-	// replayTrigger signals the eventDispatcher method that the replay phase is finished.
-	replayTrigger chan struct{}
-	// replayPhase indicates that Events will be cached as the Event Stream Client is in the replay phase.
-	replayPhase atomic.Bool
+	// replayPhaseRequest requests the main worker to switch to the replay phase and re-request the Icinga 2 API.
+	replayPhaseRequest chan struct{}
 }
 
 // NewClientsFromConfig returns all Clients defined in the conf.ConfigFile.
@@ -253,12 +255,62 @@ func (client *Client) buildAcknowledgementEvent(ctx context.Context, host, servi
 	return ev, nil
 }
 
-// eventDispatcher receives generated event.Events to be either buffered or directly delivered to the CallbackFn.
+// startReplayWorker launches goroutines for replaying the Icinga 2 API state.
 //
-// When the Client is in the replay phase, events from the Event Stream API will be cached until the replay phase has
-// finished, while replayed events will be delivered directly.
-func (client *Client) eventDispatcher() {
+// Each event will be sent to the returned channel. When all launched workers have finished - either because all are
+// done or one has failed and the others were interrupted -, the channel will be closed. Those workers honor a context
+// derived from the Client.Ctx and would either stop when the main context is done or when the returned
+// context.CancelFunc is called.
+func (client *Client) startReplayWorker() (chan *eventMsg, context.CancelFunc) {
+	startTime := time.Now()
+	eventMsgCh := make(chan *eventMsg)
+
+	// Unfortunately, the errgroup context is hidden, that's why another context is necessary.
+	ctx, cancel := context.WithCancel(client.Ctx)
+	group, groupCtx := errgroup.WithContext(ctx)
+
+	objTypes := []string{"host", "service"}
+	for _, objType := range objTypes {
+		objType := objType // https://go.dev/doc/faq#closures_and_goroutines
+		group.Go(func() error {
+			err := client.checkMissedChanges(groupCtx, objType, eventMsgCh)
+			if err != nil {
+				client.Logger.Errorw("Replaying API events failed", zap.String("object type", objType), zap.Error(err))
+			}
+			return err
+		})
+	}
+
+	go func() {
+		err := group.Wait()
+		if err != nil {
+			client.Logger.Errorw("Replaying the API failed", zap.Error(err), zap.Duration("duration", time.Since(startTime)))
+		} else {
+			client.Logger.Infow("Replaying the API has finished", zap.Duration("duration", time.Since(startTime)))
+		}
+
+		cancel()
+		close(eventMsgCh)
+	}()
+
+	return eventMsgCh, cancel
+}
+
+// worker is the Client's main background worker, taking care of event.Event dispatching and mode switching.
+//
+// When the Client is in the replay phase, requested by replayPhaseRequest, events from the Event Stream API will
+// be cached until the replay phase has finished, while replayed events will be delivered directly.
+//
+// Communication takes place over the eventDispatcherEventStream and replayPhaseRequest channels.
+func (client *Client) worker() {
 	var (
+		// replayEventCh emits events generated during the replay phase from the replay worker. It will be closed when
+		// replaying is finished, which indicates the select below to switch phases. When this variable is nil, the
+		// Client is in the normal operating phase.
+		replayEventCh chan *eventMsg
+		// replayCancel cancels, if not nil, the currently running replay worker, e.g., when restarting the replay.
+		replayCancel context.CancelFunc
+
 		// replayBuffer holds Event Stream events to be replayed after the replay phase has finished.
 		replayBuffer = make([]*event.Event, 0)
 		// replayCache maps event.Events.Name to API time to skip replaying outdated events.
@@ -276,10 +328,33 @@ func (client *Client) eventDispatcher() {
 	for {
 		select {
 		case <-client.Ctx.Done():
-			client.Logger.Warnw("Closing event dispatcher as its context is done", zap.Error(client.Ctx.Err()))
+			client.Logger.Warnw("Closing down main worker as context is finished", zap.Error(client.Ctx.Err()))
 			return
 
-		case <-client.replayTrigger:
+		case <-client.replayPhaseRequest:
+			if replayEventCh != nil {
+				client.Logger.Warn("Replaying was requested while already being in the replay phase; restart replay")
+
+				// Drain the old replay phase producer's channel until it is closed as its context was canceled.
+				go func(replayEventCh chan *eventMsg) {
+					for _, ok := <-replayEventCh; ok; {
+					}
+				}(replayEventCh)
+				replayCancel()
+			}
+
+			client.Logger.Debug("Worker enters replay phase, starting caching Event Stream events")
+			replayEventCh, replayCancel = client.startReplayWorker()
+
+		case ev, ok := <-replayEventCh:
+			// Process an incoming event
+			if ok {
+				client.CallbackFn(ev.event)
+				replayCacheUpdate(ev)
+				break
+			}
+
+			// The channel was closed - replay and switch modes
 			skipCounter := 0
 			for _, ev := range replayBuffer {
 				ts, ok := replayCache[ev.Name]
@@ -292,71 +367,24 @@ func (client *Client) eventDispatcher() {
 
 				client.CallbackFn(ev)
 			}
-			client.Logger.Infow("Finished replay phase, returning to normal operation",
+			client.Logger.Infow("Worker leaves replay phase, returning to normal operation",
 				zap.Int("cached events", len(replayBuffer)), zap.Int("skipped events", skipCounter))
 
+			replayEventCh, replayCancel = nil, nil
 			replayBuffer = make([]*event.Event, 0)
 			replayCache = make(map[string]time.Time)
-			client.replayPhase.Store(false)
 
 		case ev := <-client.eventDispatcherEventStream:
-			if !client.replayPhase.Load() {
-				client.CallbackFn(ev.event)
-				continue
-			}
-
-			replayBuffer = append(replayBuffer, ev.event)
-			replayCacheUpdate(ev)
-
-		case ev := <-client.eventDispatcherReplay:
-			if !client.replayPhase.Load() {
-				client.Logger.Errorw("Dispatcher received replay event during normal operation", zap.Stringer("event", ev.event))
-				continue
+			// During replay phase, buffer Event Stream events
+			if replayEventCh != nil {
+				replayBuffer = append(replayBuffer, ev.event)
+				replayCacheUpdate(ev)
+				break
 			}
 
 			client.CallbackFn(ev.event)
-			replayCacheUpdate(ev)
 		}
 	}
-}
-
-// enterReplayPhase enters the replay phase for the initial sync and after reconnections.
-//
-// This method starts multiple goroutines. First, some workers to query the Icinga 2 Objects API will be launched. When
-// all of those have finished, the replayTrigger will be used to indicate that the buffered Events should be replayed.
-func (client *Client) enterReplayPhase() {
-	client.Logger.Info("Entering replay phase to replay stored events first")
-	if !client.replayPhase.CompareAndSwap(false, true) {
-		client.Logger.Error("The Event Stream Client is already in the replay phase")
-		return
-	}
-
-	group, groupCtx := errgroup.WithContext(client.Ctx)
-	objTypes := []string{"host", "service"}
-	for _, objType := range objTypes {
-		objType := objType // https://go.dev/doc/faq#closures_and_goroutines
-		group.Go(func() error {
-			err := client.checkMissedChanges(groupCtx, objType)
-			if err != nil {
-				client.Logger.Errorw("Replaying API events resulted in errors",
-					zap.String("object type", objType), zap.Error(err))
-			}
-			return err
-		})
-	}
-
-	go func() {
-		startTime := time.Now()
-
-		err := group.Wait()
-		if err != nil {
-			client.Logger.Errorw("Replaying the API resulted in errors", zap.Error(err), zap.Duration("duration", time.Since(startTime)))
-		} else {
-			client.Logger.Debugw("All replay phase workers have finished", zap.Duration("duration", time.Since(startTime)))
-		}
-
-		client.replayTrigger <- struct{}{}
-	}()
 }
 
 // Process incoming objects and reconnect to the Event Stream with replaying objects if necessary.
@@ -366,10 +394,9 @@ func (client *Client) enterReplayPhase() {
 // callback function.
 func (client *Client) Process() {
 	client.eventDispatcherEventStream = make(chan *eventMsg)
-	client.eventDispatcherReplay = make(chan *eventMsg)
-	client.replayTrigger = make(chan struct{})
+	client.replayPhaseRequest = make(chan struct{})
 
-	go client.eventDispatcher()
+	go client.worker()
 
 	for {
 		err := client.listenEventStream()
