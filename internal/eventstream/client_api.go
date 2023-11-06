@@ -40,12 +40,18 @@ func extractObjectQueriesResult[T Comment | Downtime | HostServiceRuntimeAttribu
 }
 
 // queryObjectsApi performs a configurable HTTP request against the Icinga 2 API and returns its raw response.
-func (client *Client) queryObjectsApi(urlPaths []string, method string, body io.Reader, headers map[string]string) (io.ReadCloser, error) {
+func (client *Client) queryObjectsApi(
+	ctx context.Context,
+	urlPaths []string,
+	method string,
+	body io.Reader,
+	headers map[string]string,
+) (io.ReadCloser, error) {
 	apiUrl, err := url.JoinPath(client.ApiHost, urlPaths...)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(client.Ctx, method, apiUrl, body)
+	req, err := http.NewRequestWithContext(ctx, method, apiUrl, body)
 	if err != nil {
 		return nil, err
 	}
@@ -73,8 +79,9 @@ func (client *Client) queryObjectsApi(urlPaths []string, method string, body io.
 }
 
 // queryObjectsApiDirect performs a direct resp. "fast" API query against an object, optionally identified by its name.
-func (client *Client) queryObjectsApiDirect(objType, objName string) (io.ReadCloser, error) {
+func (client *Client) queryObjectsApiDirect(ctx context.Context, objType, objName string) (io.ReadCloser, error) {
 	return client.queryObjectsApi(
+		ctx,
 		[]string{"/v1/objects/", objType + "s/", url.PathEscape(objName)},
 		http.MethodGet,
 		nil,
@@ -82,13 +89,14 @@ func (client *Client) queryObjectsApiDirect(objType, objName string) (io.ReadClo
 }
 
 // queryObjectsApiQuery sends a query to the Icinga 2 API /v1/objects to receive data of the given objType.
-func (client *Client) queryObjectsApiQuery(objType string, query map[string]any) (io.ReadCloser, error) {
+func (client *Client) queryObjectsApiQuery(ctx context.Context, objType string, query map[string]any) (io.ReadCloser, error) {
 	reqBody, err := json.Marshal(query)
 	if err != nil {
 		return nil, err
 	}
 
 	return client.queryObjectsApi(
+		ctx,
 		[]string{"/v1/objects/", objType + "s"},
 		http.MethodPost,
 		bytes.NewReader(reqBody),
@@ -99,9 +107,15 @@ func (client *Client) queryObjectsApiQuery(objType string, query map[string]any)
 		})
 }
 
-// fetchHostGroups fetches all Host Groups for this host.
-func (client *Client) fetchHostGroups(host string) ([]string, error) {
-	jsonRaw, err := client.queryObjectsApiDirect("host", host)
+// fetchHostServiceGroups fetches all Host or, if service is not empty, Service groups.
+func (client *Client) fetchHostServiceGroups(ctx context.Context, host, service string) ([]string, error) {
+	objType, objName := "host", host
+	if service != "" {
+		objType = "service"
+		objName += "!" + service
+	}
+
+	jsonRaw, err := client.queryObjectsApiDirect(ctx, objType, objName)
 	if err != nil {
 		return nil, err
 	}
@@ -111,25 +125,8 @@ func (client *Client) fetchHostGroups(host string) ([]string, error) {
 	}
 
 	if len(objQueriesResults) != 1 {
-		return nil, fmt.Errorf("expected exactly one result for host %q instead of %d", host, len(objQueriesResults))
-	}
-
-	return objQueriesResults[0].Attrs.Groups, nil
-}
-
-// fetchServiceGroups fetches all Service Groups for this service on this host.
-func (client *Client) fetchServiceGroups(host, service string) ([]string, error) {
-	jsonRaw, err := client.queryObjectsApiDirect("service", host+"!"+service)
-	if err != nil {
-		return nil, err
-	}
-	objQueriesResults, err := extractObjectQueriesResult[HostServiceRuntimeAttributes](jsonRaw)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(objQueriesResults) != 1 {
-		return nil, fmt.Errorf("expected exactly one result for service %q instead of %d", host+"!"+service, len(objQueriesResults))
+		return nil, fmt.Errorf("expected exactly one result for object type %q and %q instead of %d",
+			objType, objName, len(objQueriesResults))
 	}
 
 	return objQueriesResults[0].Attrs.Groups, nil
@@ -141,7 +138,7 @@ func (client *Client) fetchServiceGroups(host, service string) ([]string, error)
 // closest we can do, is query for Comments with the Acknowledgement Service Type and the host/service name. In addition,
 // the Host's resp. Service's AcknowledgementLastChange field has NOT the same timestamp as the Comment; there is a
 // difference of some milliseconds. As there might be even multiple ACK comments, we have to find the closest one.
-func (client *Client) fetchAcknowledgementComment(host, service string, ackTime time.Time) (*Comment, error) {
+func (client *Client) fetchAcknowledgementComment(ctx context.Context, host, service string, ackTime time.Time) (*Comment, error) {
 	filterExpr := "comment.entry_type == 4 && comment.host_name == comment_host_name"
 	filterVars := map[string]string{"comment_host_name": host}
 	if service != "" {
@@ -149,7 +146,7 @@ func (client *Client) fetchAcknowledgementComment(host, service string, ackTime 
 		filterVars["comment_service_name"] = service
 	}
 
-	jsonRaw, err := client.queryObjectsApiQuery("comment", map[string]any{"filter": filterExpr, "filter_vars": filterVars})
+	jsonRaw, err := client.queryObjectsApiQuery(ctx, "comment", map[string]any{"filter": filterExpr, "filter_vars": filterVars})
 	if err != nil {
 		return nil, err
 	}
@@ -176,39 +173,20 @@ func (client *Client) fetchAcknowledgementComment(host, service string, ackTime 
 
 // checkMissedChanges queries for Service or Host objects to handle missed elements.
 //
-// If a filterExpr is given (non-empty string), it will be used for the query. Otherwise, all objects will be requested.
-//
-// The callback function will be called f.e. object of the objType (i.e. "host" or "service") being retrieved from the
-// Icinga 2 Objects API sequentially. The callback function or a later caller decides if this object should be replayed.
-func (client *Client) checkMissedChanges(
-	objType, filterExpr string,
-	attrsCallbackFn func(attrs HostServiceRuntimeAttributes, host, service string) error,
-) (err error) {
-	logger := client.Logger.With(zap.String("object type", objType), zap.String("filter expr", filterExpr))
-
-	defer func() {
-		if err != nil {
-			logger.Errorw("Querying API for replay failed", zap.Error(err))
-		}
-	}()
-
-	var jsonRaw io.ReadCloser
-	if filterExpr == "" {
-		jsonRaw, err = client.queryObjectsApiDirect(objType, "")
-	} else {
-		jsonRaw, err = client.queryObjectsApiQuery(objType, map[string]any{"filter": filterExpr})
-	}
+// If the object's acknowledgement field is non-zero, an Acknowledgement Event will be constructed following the Host or
+// Service object.
+func (client *Client) checkMissedChanges(ctx context.Context, objType string) error {
+	jsonRaw, err := client.queryObjectsApiDirect(ctx, objType, "")
 	if err != nil {
-		return
+		return err
 	}
 
 	objQueriesResults, err := extractObjectQueriesResult[HostServiceRuntimeAttributes](jsonRaw)
 	if err != nil {
-		return
+		return err
 	}
 
-	logger.Debugw("Querying API resulted in state changes", zap.Int("changes", len(objQueriesResults)))
-
+	var stateChangeEvents, acknowledgementEvents int
 	for _, objQueriesResult := range objQueriesResults {
 		var hostName, serviceName string
 		switch objQueriesResult.Type {
@@ -220,58 +198,58 @@ func (client *Client) checkMissedChanges(
 			serviceName = objQueriesResult.Attrs.Name
 
 		default:
-			err = fmt.Errorf("querying API delivered a wrong object type %q", objQueriesResult.Type)
-			return
+			return fmt.Errorf("querying API delivered a wrong object type %q", objQueriesResult.Type)
 		}
 
-		err = attrsCallbackFn(objQueriesResult.Attrs, hostName, serviceName)
+		// State change event first
+		ev, err := client.buildHostServiceEvent(
+			ctx,
+			objQueriesResult.Attrs.LastCheckResult, objQueriesResult.Attrs.State,
+			hostName, serviceName)
 		if err != nil {
-			return
+			return fmt.Errorf("failed to construct Event from Host/Service response, %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case client.eventDispatcherReplay <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time}:
+			stateChangeEvents++
+		}
+
+		// Optional acknowledgement event second
+		if objQueriesResult.Attrs.Acknowledgement == 0 {
+			continue
+		}
+
+		ackComment, err := client.fetchAcknowledgementComment(
+			ctx,
+			hostName, serviceName,
+			objQueriesResult.Attrs.AcknowledgementLastChange.Time)
+		if err != nil {
+			return fmt.Errorf("fetching acknowledgement comment for %v failed, %w", ev, err)
+		}
+
+		ev, err = client.buildAcknowledgementEvent(
+			ctx,
+			hostName, serviceName,
+			ackComment.Author, ackComment.Text)
+		if err != nil {
+			return fmt.Errorf("failed to construct Event from Acknowledgement response, %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case client.eventDispatcherReplay <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time}:
+			acknowledgementEvents++
 		}
 	}
-	return
-}
 
-// checkMissedStateChanges fetches all objects of the requested type and feeds them into the handler.
-func (client *Client) checkMissedStateChanges(ctx context.Context, objType string) error {
-	return client.checkMissedChanges(objType, "", func(attrs HostServiceRuntimeAttributes, host, service string) error {
-		ev, err := client.buildHostServiceEvent(attrs.LastCheckResult, attrs.State, host, service)
-		if err != nil {
-			return fmt.Errorf("failed to construct Event from API, %w", err)
-		}
+	client.Logger.Infow("Replaying API emitted state changes",
+		zap.String("object type", objType),
+		zap.Int("state changes", stateChangeEvents),
+		zap.Int("acknowledgements", acknowledgementEvents))
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case client.eventDispatcherReplay <- &eventMsg{ev, attrs.LastStateChange.Time}:
-			return nil
-		}
-	})
-}
-
-// checkMissedAcknowledgements fetches all Host or Service Acknowledgements and feeds them into the handler.
-//
-// Currently only active acknowledgements are being processed.
-func (client *Client) checkMissedAcknowledgements(ctx context.Context, objType string) error {
-	filterExpr := fmt.Sprintf("%s.acknowledgement", objType)
-	return client.checkMissedChanges(objType, filterExpr, func(attrs HostServiceRuntimeAttributes, host, service string) error {
-		ackComment, err := client.fetchAcknowledgementComment(host, service, attrs.AcknowledgementLastChange.Time)
-		if err != nil {
-			return fmt.Errorf("cannot fetch ACK Comment for Acknowledgement, %w", err)
-		}
-
-		ev, err := client.buildAcknowledgementEvent(host, service, ackComment.Author, ackComment.Text)
-		if err != nil {
-			return fmt.Errorf("failed to construct Event from Acknowledgement API, %w", err)
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case client.eventDispatcherReplay <- &eventMsg{ev, attrs.AcknowledgementLastChange.Time}:
-			return nil
-		}
-	})
+	return nil
 }
 
 // connectEventStream connects to the EventStream within an infinite loop until a connection was established.
@@ -396,11 +374,11 @@ func (client *Client) listenEventStream() error {
 		)
 		switch respT := resp.(type) {
 		case *StateChange:
-			ev, err = client.buildHostServiceEvent(respT.CheckResult, respT.State, respT.Host, respT.Service)
+			ev, err = client.buildHostServiceEvent(client.Ctx, respT.CheckResult, respT.State, respT.Host, respT.Service)
 			evTime = respT.Timestamp.Time
 
 		case *AcknowledgementSet:
-			ev, err = client.buildAcknowledgementEvent(respT.Host, respT.Service, respT.Author, respT.Comment)
+			ev, err = client.buildAcknowledgementEvent(client.Ctx, respT.Host, respT.Service, respT.Author, respT.Comment)
 			evTime = respT.Timestamp.Time
 
 		// case *AcknowledgementCleared:
