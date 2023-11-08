@@ -154,7 +154,10 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
 	}
 
-	icingaweb2Url, _ = url.JoinPath(icingaweb2Url, "/")
+	baseUrl, _ := url.Parse(icingaweb2Url)
+	incidentUrl := baseUrl.JoinPath("/notifications/incident")
+	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID())
+
 	req := &plugin.NotificationRequest{
 		Contact: contactStruct,
 		Object: &plugin.Object{
@@ -165,7 +168,7 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 		},
 		Incident: &plugin.Incident{
 			Id:  i.ID(),
-			Url: fmt.Sprintf("%snotifications/incident?id=%d", icingaweb2Url, i.ID()),
+			Url: incidentUrl.String(),
 		},
 		Event: &plugin.Event{
 			Time:     ev.Time,
