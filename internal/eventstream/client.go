@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -27,16 +26,16 @@ type eventMsg struct {
 	apiTime time.Time
 }
 
-// Client for the Icinga 2 Event Stream API with extended support for other Icinga 2 APIs to gather additional
-// information and a replay either when starting up to catch up the Icinga's state or in case of a connection loss.
+// Client for the Icinga 2 Event Stream API with support for other Icinga 2 APIs to gather additional information and
+// perform a catch-up of unknown events either when starting up to or in case of a connection loss.
 //
 // Within the icinga-notifications scope, one or multiple Client instances can be generated from the configuration by
 // calling NewClientsFromConfig.
 //
 // A Client must be started by calling its Process method, which blocks until Ctx is marked as done. Reconnections and
-// the necessary state replaying from the Icinga 2 API will be taken care off. Internally, the Client executes a worker
-// within its own goroutine, which dispatches event.Event to the CallbackFn and enforces event.Event order during
-// replaying after (re-)connections.
+// the necessary state replaying in an internal catch-up-phase from the Icinga 2 API will be taken care off. Internally,
+// the Client executes a worker within its own goroutine, which dispatches event.Event to the CallbackFn and enforces
+// order during catching up after (re-)connections.
 type Client struct {
 	// ApiHost et al. configure where and how the Icinga 2 API can be reached.
 	ApiHost          string
@@ -49,7 +48,7 @@ type Client struct {
 	// IcingaWebRoot points to the Icinga Web 2 endpoint for generated URLs.
 	IcingaWebRoot string
 
-	// CallbackFn receives generated event.Events.
+	// CallbackFn receives generated event.Event objects.
 	CallbackFn func(*event.Event)
 	// Ctx for all web requests as well as internal wait loops.
 	Ctx context.Context
@@ -58,13 +57,13 @@ type Client struct {
 
 	// eventDispatcherEventStream communicates Events to be processed from the Event Stream API.
 	eventDispatcherEventStream chan *eventMsg
-	// replayPhaseRequest requests the main worker to switch to the replay phase and re-request the Icinga 2 API.
-	replayPhaseRequest chan struct{}
+	// catchupPhaseRequest requests the main worker to switch to the catch-up-phase to query the API for missed events.
+	catchupPhaseRequest chan struct{}
 }
 
 // NewClientsFromConfig returns all Clients defined in the conf.ConfigFile.
 //
-// Those are prepared and just needed to be started by calling their Process method.
+// Those are prepared and just needed to be started by calling their Client.Process method.
 func NewClientsFromConfig(
 	ctx context.Context,
 	logs *logging.Logging,
@@ -76,6 +75,7 @@ func NewClientsFromConfig(
 
 	for _, icinga2Api := range conf.Icinga2Apis {
 		logger := logs.GetChildLogger(fmt.Sprintf("eventstream-%d", icinga2Api.NotificationsEventSourceId))
+		callbackLogger := logs.GetChildLogger(fmt.Sprintf("eventstream-callback-%d", icinga2Api.NotificationsEventSourceId))
 
 		client := &Client{
 			ApiHost:          icinga2Api.Host,
@@ -102,7 +102,7 @@ func NewClientsFromConfig(
 			IcingaNotificationsEventSourceId: icinga2Api.NotificationsEventSourceId,
 			IcingaWebRoot:                    conf.Icingaweb2URL,
 
-			CallbackFn: makeProcessEvent(ctx, db, logger, logs, runtimeConfig),
+			CallbackFn: makeProcessEvent(ctx, db, callbackLogger, logs, runtimeConfig),
 			Ctx:        ctx,
 			Logger:     logger,
 		}
@@ -255,13 +255,12 @@ func (client *Client) buildAcknowledgementEvent(ctx context.Context, host, servi
 	return ev, nil
 }
 
-// startReplayWorker launches goroutines for replaying the Icinga 2 API state.
+// startCatchupWorkers launches goroutines for catching up the Icinga 2 API state.
 //
 // Each event will be sent to the returned channel. When all launched workers have finished - either because all are
 // done or one has failed and the others were interrupted -, the channel will be closed. Those workers honor a context
-// derived from the Client.Ctx and would either stop when the main context is done or when the returned
-// context.CancelFunc is called.
-func (client *Client) startReplayWorker() (chan *eventMsg, context.CancelFunc) {
+// derived from the Client.Ctx and would either stop when this context is done or when the context.CancelFunc is called.
+func (client *Client) startCatchupWorkers() (chan *eventMsg, context.CancelFunc) {
 	startTime := time.Now()
 	eventMsgCh := make(chan *eventMsg)
 
@@ -275,7 +274,7 @@ func (client *Client) startReplayWorker() (chan *eventMsg, context.CancelFunc) {
 		group.Go(func() error {
 			err := client.checkMissedChanges(groupCtx, objType, eventMsgCh)
 			if err != nil {
-				client.Logger.Errorw("Replaying API events failed", zap.String("object type", objType), zap.Error(err))
+				client.Logger.Errorw("Catch-up-phase event worker failed", zap.String("object type", objType), zap.Error(err))
 			}
 			return err
 		})
@@ -284,9 +283,9 @@ func (client *Client) startReplayWorker() (chan *eventMsg, context.CancelFunc) {
 	go func() {
 		err := group.Wait()
 		if err != nil {
-			client.Logger.Errorw("Replaying the API failed", zap.Error(err), zap.Duration("duration", time.Since(startTime)))
+			client.Logger.Errorw("Catching up the API failed", zap.Error(err), zap.Duration("duration", time.Since(startTime)))
 		} else {
-			client.Logger.Infow("Replaying the API has finished", zap.Duration("duration", time.Since(startTime)))
+			client.Logger.Infow("Catching up the API has finished", zap.Duration("duration", time.Since(startTime)))
 		}
 
 		cancel()
@@ -298,26 +297,26 @@ func (client *Client) startReplayWorker() (chan *eventMsg, context.CancelFunc) {
 
 // worker is the Client's main background worker, taking care of event.Event dispatching and mode switching.
 //
-// When the Client is in the replay phase, requested by replayPhaseRequest, events from the Event Stream API will
-// be cached until the replay phase has finished, while replayed events will be delivered directly.
+// When the Client is in the catch-up-phase, requested by catchupPhaseRequest, events from the Event Stream API will
+// be cached until the catch-up-phase has finished, while replayed events will be delivered directly.
 //
-// Communication takes place over the eventDispatcherEventStream and replayPhaseRequest channels.
+// Communication takes place over the eventDispatcherEventStream and catchupPhaseRequest channels.
 func (client *Client) worker() {
 	var (
-		// replayEventCh emits events generated during the replay phase from the replay worker. It will be closed when
-		// replaying is finished, which indicates the select below to switch phases. When this variable is nil, the
+		// catchupEventCh emits events generated during the catch-up-phase from catch-up-workers. It will be closed when
+		// catching up is done, which indicates the select below to switch phases. When this variable is nil, this
 		// Client is in the normal operating phase.
-		replayEventCh chan *eventMsg
-		// replayCancel cancels, if not nil, the currently running replay worker, e.g., when restarting the replay.
-		replayCancel context.CancelFunc
+		catchupEventCh chan *eventMsg
+		// catchupCancel cancels, if not nil, all running catch-up-workers, e.g., when restarting catching-up.
+		catchupCancel context.CancelFunc
 
-		// replayBuffer holds Event Stream events to be replayed after the replay phase has finished.
-		replayBuffer = make([]*event.Event, 0)
-		// replayCache maps event.Events.Name to API time to skip replaying outdated events.
-		replayCache = make(map[string]time.Time)
+		// catchupBuffer holds Event Stream events to be replayed after the catch-up-phase has finished.
+		catchupBuffer = make([]*event.Event, 0)
+		// catchupCache maps event.Events.Name to API time to skip replaying outdated events.
+		catchupCache = make(map[string]time.Time)
 
 		// dispatchQueue is a FIFO-like queue for events to be dispatched to the callback function without having to
-		// wait for the callback to finish, which, as being database-bound, might take some time for bulk phases.
+		// wait for the callback to finish, which, as being database-bound, might take some time during bulk phases.
 		dispatchQueue = make(chan *event.Event, 1<<16)
 	)
 
@@ -335,8 +334,8 @@ func (client *Client) worker() {
 		}
 	}()
 
-	// dispatchEvent enqueues the event to the dispatchQueue while honoring the Client.Ctx. It returns true if
-	// enqueueing worked and false either if the buffered queue is full for a whole minute or, more likely, the
+	// dispatchEvent enqueues the event to the dispatchQueue while honoring the Client.Ctx. It returns true when
+	// enqueueing worked and false either if the buffered queue is stuck for a whole minute or, more likely, the
 	// context is done.
 	dispatchEvent := func(ev *event.Event) bool {
 		select {
@@ -352,11 +351,11 @@ func (client *Client) worker() {
 		}
 	}
 
-	// replayCacheUpdate updates the replayCache if this eventMsg seems to be the latest of its kind.
-	replayCacheUpdate := func(ev *eventMsg) {
-		ts, ok := replayCache[ev.event.Name]
+	// catchupCacheUpdate updates the catchupCache if this eventMsg seems to be the latest of its kind.
+	catchupCacheUpdate := func(ev *eventMsg) {
+		ts, ok := catchupCache[ev.event.Name]
 		if !ok || ev.apiTime.After(ts) {
-			replayCache[ev.event.Name] = ev.apiTime
+			catchupCache[ev.event.Name] = ev.apiTime
 		}
 	}
 
@@ -366,33 +365,34 @@ func (client *Client) worker() {
 			client.Logger.Warnw("Closing down main worker as context is finished", zap.Error(client.Ctx.Err()))
 			return
 
-		case <-client.replayPhaseRequest:
-			if replayEventCh != nil {
-				client.Logger.Warn("Replaying was requested while already being in the replay phase; restart replay")
+		case <-client.catchupPhaseRequest:
+			if catchupEventCh != nil {
+				client.Logger.Warn("Switching to catch-up-phase was requested while already catching up, restarting phase")
 
-				// Drain the old replay phase producer's channel until it is closed as its context was canceled.
-				go func(replayEventCh chan *eventMsg) {
-					for _, ok := <-replayEventCh; ok; {
+				// Drain the old catch-up-phase producer channel until it is closed as its context will be canceled.
+				go func(catchupEventCh chan *eventMsg) {
+					for _, ok := <-catchupEventCh; ok; {
 					}
-				}(replayEventCh)
-				replayCancel()
+				}(catchupEventCh)
+				catchupCancel()
 			}
 
-			client.Logger.Debug("Worker enters replay phase, starting caching Event Stream events")
-			replayEventCh, replayCancel = client.startReplayWorker()
+			client.Logger.Info("Worker enters catch-up-phase, start caching up on Event Stream events")
+			catchupEventCh, catchupCancel = client.startCatchupWorkers()
 
-		case ev, ok := <-replayEventCh:
+		case ev, ok := <-catchupEventCh:
 			// Process an incoming event
 			if ok {
 				_ = dispatchEvent(ev.event)
-				replayCacheUpdate(ev)
+				catchupCacheUpdate(ev)
 				break
 			}
 
-			// The channel was closed - replay and switch modes
+			// The channel was closed - replay cache and switch modes
 			skipCounter := 0
-			for _, ev := range replayBuffer {
-				ts, ok := replayCache[ev.Name]
+
+			for _, ev := range catchupBuffer {
+				ts, ok := catchupCache[ev.Name]
 				if ok && ev.Time.Before(ts) {
 					client.Logger.Debugw("Skip replaying outdated Event Stream event", zap.Stringer("event", ev),
 						zap.Time("event timestamp", ev.Time), zap.Time("cache timestamp", ts))
@@ -401,22 +401,22 @@ func (client *Client) worker() {
 				}
 
 				if !dispatchEvent(ev) {
-					client.Logger.Error("Aborting replay as an event could not be enqueued for dispatching")
+					client.Logger.Error("Aborting Event Stream replay as an event could not be enqueued for dispatching")
 					break
 				}
 			}
-			client.Logger.Infow("Worker leaves replay phase, returning to normal operation",
-				zap.Int("cached events", len(replayBuffer)), zap.Int("skipped events", skipCounter))
+			client.Logger.Infow("Worker leaves catch-up-phase, returning to normal operation",
+				zap.Int("cached events", len(catchupBuffer)), zap.Int("skipped cached events", skipCounter))
 
-			replayEventCh, replayCancel = nil, nil
-			replayBuffer = make([]*event.Event, 0)
-			replayCache = make(map[string]time.Time)
+			catchupEventCh, catchupCancel = nil, nil
+			catchupBuffer = make([]*event.Event, 0)
+			catchupCache = make(map[string]time.Time)
 
 		case ev := <-client.eventDispatcherEventStream:
-			// During replay phase, buffer Event Stream events
-			if replayEventCh != nil {
-				replayBuffer = append(replayBuffer, ev.event)
-				replayCacheUpdate(ev)
+			// During catch-up-phase, buffer Event Stream events
+			if catchupEventCh != nil {
+				catchupBuffer = append(catchupBuffer, ev.event)
+				catchupCacheUpdate(ev)
 				break
 			}
 
@@ -425,29 +425,23 @@ func (client *Client) worker() {
 	}
 }
 
-// Process incoming objects and reconnect to the Event Stream with replaying objects if necessary.
+// Process incoming events and reconnect to the Event Stream with catching up on missed objects if necessary.
 //
-// This method blocks as long as the Client runs, which, unless its context is cancelled, is forever. While its internal
-// loop takes care of reconnections, all those events will be logged while generated Events will be dispatched to the
-// callback function.
+// This method blocks as long as the Client runs, which, unless Ctx is cancelled, is forever. While its internal loop
+// takes care of reconnections, messages are being logged while generated event.Event will be dispatched to the
+// CallbackFn function.
 func (client *Client) Process() {
 	client.eventDispatcherEventStream = make(chan *eventMsg)
-	client.replayPhaseRequest = make(chan struct{})
+	client.catchupPhaseRequest = make(chan struct{})
 
 	go client.worker()
 
-	for {
+	for client.Ctx.Err() == nil {
 		err := client.listenEventStream()
-		switch {
-		case errors.Is(err, context.Canceled):
-			client.Logger.Warnw("Stopping Event Stream Client as its context is done", zap.Error(err))
-			return
-
-		case err != nil:
-			client.Logger.Errorw("Event Stream processing failed", zap.Error(err))
-
-		default:
-			client.Logger.Warn("Event Stream closed stream; maybe Icinga 2 is reloading")
+		if err != nil {
+			client.Logger.Errorw("Event Stream processing was interrupted", zap.Error(err))
+		} else {
+			client.Logger.Errorw("Event Stream processing was closed")
 		}
 	}
 }
