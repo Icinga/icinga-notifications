@@ -315,7 +315,42 @@ func (client *Client) worker() {
 		replayBuffer = make([]*event.Event, 0)
 		// replayCache maps event.Events.Name to API time to skip replaying outdated events.
 		replayCache = make(map[string]time.Time)
+
+		// dispatchQueue is a FIFO-like queue for events to be dispatched to the callback function without having to
+		// wait for the callback to finish, which, as being database-bound, might take some time for bulk phases.
+		dispatchQueue = make(chan *event.Event, 1<<16)
 	)
+
+	// While the worker's main loop fills the dispatchQueue for outgoing events, this small goroutine drains the
+	// buffered channel and forwards each request to the callback function.
+	go func() {
+		for {
+			select {
+			case <-client.Ctx.Done():
+				return
+
+			case ev := <-dispatchQueue:
+				client.CallbackFn(ev)
+			}
+		}
+	}()
+
+	// dispatchEvent enqueues the event to the dispatchQueue while honoring the Client.Ctx. It returns true if
+	// enqueueing worked and false either if the buffered queue is full for a whole minute or, more likely, the
+	// context is done.
+	dispatchEvent := func(ev *event.Event) bool {
+		select {
+		case <-client.Ctx.Done():
+			return false
+
+		case <-time.After(time.Minute):
+			client.Logger.Errorw("Abort event enqueueing for dispatching due to a timeout", zap.Stringer("event", ev))
+			return false
+
+		case dispatchQueue <- ev:
+			return true
+		}
+	}
 
 	// replayCacheUpdate updates the replayCache if this eventMsg seems to be the latest of its kind.
 	replayCacheUpdate := func(ev *eventMsg) {
@@ -349,7 +384,7 @@ func (client *Client) worker() {
 		case ev, ok := <-replayEventCh:
 			// Process an incoming event
 			if ok {
-				client.CallbackFn(ev.event)
+				_ = dispatchEvent(ev.event)
 				replayCacheUpdate(ev)
 				break
 			}
@@ -365,7 +400,10 @@ func (client *Client) worker() {
 					continue
 				}
 
-				client.CallbackFn(ev)
+				if !dispatchEvent(ev) {
+					client.Logger.Error("Aborting replay as an event could not be enqueued for dispatching")
+					break
+				}
 			}
 			client.Logger.Infow("Worker leaves replay phase, returning to normal operation",
 				zap.Int("cached events", len(replayBuffer)), zap.Int("skipped events", skipCounter))
@@ -382,7 +420,7 @@ func (client *Client) worker() {
 				break
 			}
 
-			client.CallbackFn(ev.event)
+			_ = dispatchEvent(ev.event)
 		}
 	}
 }
