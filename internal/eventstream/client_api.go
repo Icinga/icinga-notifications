@@ -21,12 +21,15 @@ import (
 
 // extractObjectQueriesResult parses a typed ObjectQueriesResult array out of a JSON io.ReaderCloser.
 //
+// The generic type T is currently limited to all later needed types, even when the API might also return other known or
+// unknown types. When another type becomes necessary, T can be exceeded.
+//
 // As Go 1.21 does not allow type parameters in methods[0], the logic was extracted into a function transforming the
 // JSON response - passed as an io.ReaderCloser which will be closed within this function - into the typed response to
 // be used within the methods below.
 //
-// [0] https://github.com/golang/go/issues/49085
-func extractObjectQueriesResult[T Comment | Downtime | HostServiceRuntimeAttributes](jsonResp io.ReadCloser) ([]ObjectQueriesResult[T], error) {
+//	[0] https://github.com/golang/go/issues/49085
+func extractObjectQueriesResult[T Comment | HostServiceRuntimeAttributes](jsonResp io.ReadCloser) ([]ObjectQueriesResult[T], error) {
 	defer func() {
 		_, _ = io.Copy(io.Discard, jsonResp)
 		_ = jsonResp.Close()
@@ -132,8 +135,8 @@ func (client *Client) fetchHostServiceGroups(ctx context.Context, host, service 
 	}
 
 	if len(objQueriesResults) != 1 {
-		return nil, fmt.Errorf("expected exactly one result for object type %q and %q instead of %d",
-			objType, objName, len(objQueriesResults))
+		return nil, fmt.Errorf("expected exactly one result for %q as object type %q instead of %d",
+			objName, objType, len(objQueriesResults))
 	}
 
 	return objQueriesResults[0].Attrs.Groups, nil
@@ -146,6 +149,7 @@ func (client *Client) fetchHostServiceGroups(ctx context.Context, host, service 
 // the Host's resp. Service's AcknowledgementLastChange field has NOT the same timestamp as the Comment; there is a
 // difference of some milliseconds. As there might be even multiple ACK comments, we have to find the closest one.
 func (client *Client) fetchAcknowledgementComment(ctx context.Context, host, service string, ackTime time.Time) (*Comment, error) {
+	// comment.entry_type = 4 is an Acknowledgement comment; Comment.EntryType
 	filterExpr := "comment.entry_type == 4 && comment.host_name == comment_host_name"
 	filterVars := map[string]string{"comment_host_name": host}
 	if service != "" {
@@ -178,7 +182,7 @@ func (client *Client) fetchAcknowledgementComment(ctx context.Context, host, ser
 	return &objQueriesResults[0].Attrs, nil
 }
 
-// checkMissedChanges queries objType (host, service) from the Icinga 2 API for replaying events.
+// checkMissedChanges queries objType (host, service) from the Icinga 2 API to catch up on missed events.
 //
 // If the object's acknowledgement field is non-zero, an Acknowledgement Event will be constructed following the Host or
 // Service object. Each event will be delivered to the channel.
@@ -193,6 +197,13 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 	}
 
 	var stateChangeEvents, acknowledgementEvents int
+	defer func() {
+		client.Logger.Debugw("Querying API emitted events",
+			zap.String("object type", objType),
+			zap.Int("state changes", stateChangeEvents),
+			zap.Int("acknowledgements", acknowledgementEvents))
+	}()
+
 	for _, objQueriesResult := range objQueriesResults {
 		var hostName, serviceName string
 		switch objQueriesResult.Type {
@@ -249,12 +260,6 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 			acknowledgementEvents++
 		}
 	}
-
-	client.Logger.Infow("Replaying API emitted state changes",
-		zap.String("object type", objType),
-		zap.Int("state changes", stateChangeEvents),
-		zap.Int("acknowledgements", acknowledgementEvents))
-
 	return nil
 }
 
@@ -301,22 +306,21 @@ func (client *Client) connectEventStream(esTypes []string) (*http.Response, cont
 		go func() {
 			defer close(resCh)
 
-			client.Logger.Info("Try to establish an Event Stream API connection")
+			client.Logger.Debug("Try to establish an Event Stream API connection")
 			httpClient := &http.Client{Transport: &client.ApiHttpTransport}
 			res, err := httpClient.Do(req)
 			if err != nil {
-				client.Logger.Warnw("Establishing an Event Stream API connection failed; will be retried", zap.Error(err))
+				client.Logger.Warnw("Establishing an Event Stream API connection failed, will be retried", zap.Error(err))
 				return
 			}
 
 			select {
-			case resCh <- res:
-
 			case <-reqCtx.Done():
 				// This case might happen when this httpClient.Do and the time.After in the select below finish at round
 				// about the exact same time, but httpClient.Do was slightly faster than reqCancel().
 				_, _ = io.Copy(io.Discard, res.Body)
 				_ = res.Body.Close()
+			case resCh <- res:
 			}
 		}()
 
@@ -345,6 +349,7 @@ func (client *Client) connectEventStream(esTypes []string) (*http.Response, cont
 // In case of a parsing or handling error, this error will be returned. If the server closes the connection, nil will
 // be returned.
 func (client *Client) listenEventStream() error {
+	// Ensure to implement a handler case in the type switch below for each requested type.
 	response, cancel, err := client.connectEventStream([]string{
 		typeStateChange,
 		typeAcknowledgementSet,
@@ -367,12 +372,12 @@ func (client *Client) listenEventStream() error {
 
 	select {
 	case <-client.Ctx.Done():
-		client.Logger.Warnw("Cannot request starting replay phase as context is finished", zap.Error(client.Ctx.Err()))
+		client.Logger.Warnw("Cannot request catch-up-phase as context is finished", zap.Error(client.Ctx.Err()))
 		return client.Ctx.Err()
-	case client.replayPhaseRequest <- struct{}{}:
+	case client.catchupPhaseRequest <- struct{}{}:
 	}
 
-	client.Logger.Info("Start listening on Icinga 2 Event Stream..")
+	client.Logger.Info("Start listening on Icinga 2 Event Stream")
 
 	lineScanner := bufio.NewScanner(response.Body)
 	for lineScanner.Scan() {
