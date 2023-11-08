@@ -30,8 +30,10 @@ type Plugin struct {
 
 // NewPlugin starts and returns a new plugin instance. If the start of the plugin fails, an error is returned
 func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
-	logger.Debug("Creating new plugin instance")
 	file := filepath.Join(daemon.Config().ChannelPluginDir, pluginType)
+
+	logger.Debugw("Starting new channel plugin process", zap.String("path", file))
+
 	cmd := exec.Command(file)
 
 	writer, err := cmd.StdinPipe()
@@ -61,7 +63,7 @@ func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 	}
 
 	go forwardLogs(errPipe, l)
-	l.Debug("Successfully created new plugin instance")
+	l.Debug("Successfully started channel plugin process")
 
 	return p, nil
 }
@@ -70,14 +72,21 @@ func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 func (p *Plugin) Stop() {
 	p.stopOnce.Do(func() {
 		go func() {
-			p.logger.Debug("Stopping the plugin")
+			p.logger.Debug("Requesting channel plugin stop")
 			_ = p.rpc.Close()
-			timer := time.AfterFunc(5*time.Second, func() {
+
+			const timeout = 5 * time.Second
+			timer := time.AfterFunc(timeout, func() {
+				p.logger.Warnw("Channel plugin did not terminate after timeout, killing it", zap.Duration("timeout", timeout))
 				_ = p.cmd.Process.Kill()
 			})
 
+			// TODO: currently, this doesn't reliably check that the plugin process terminated.
+			// Any JSON encode/decode error (including EOF) also closes this channel.
 			<-p.rpc.Done()
 			timer.Stop()
+
+			p.logger.Debug("Channel plugin terminated")
 		}()
 	})
 }
