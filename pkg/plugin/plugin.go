@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -138,6 +139,12 @@ func RunPlugin(plugin Plugin) {
 		err := decoder.Decode(&req)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				// TODO: Don't try this at home, just for testing, remove this.
+				if strings.Contains(fmt.Sprintf("%T", plugin), "Email") {
+					fmt.Fprintln(os.Stderr, "deliberately delaying termination by 10 seconds")
+					time.Sleep(10 * time.Second)
+				}
+
 				// plugin shutdown requested
 				return
 			}
