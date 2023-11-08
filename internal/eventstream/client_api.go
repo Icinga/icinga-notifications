@@ -27,7 +27,10 @@ import (
 //
 // [0] https://github.com/golang/go/issues/49085
 func extractObjectQueriesResult[T Comment | Downtime | HostServiceRuntimeAttributes](jsonResp io.ReadCloser) ([]ObjectQueriesResult[T], error) {
-	defer func() { _ = jsonResp.Close() }()
+	defer func() {
+		_, _ = io.Copy(io.Discard, jsonResp)
+		_ = jsonResp.Close()
+	}()
 
 	var objQueriesResults []ObjectQueriesResult[T]
 	err := json.NewDecoder(jsonResp).Decode(&struct {
@@ -40,6 +43,8 @@ func extractObjectQueriesResult[T Comment | Downtime | HostServiceRuntimeAttribu
 }
 
 // queryObjectsApi performs a configurable HTTP request against the Icinga 2 API and returns its raw response.
+//
+// The returned io.ReaderCloser MUST be both read to completion and closed to reuse connections.
 func (client *Client) queryObjectsApi(
 	ctx context.Context,
 	urlPaths []string,
@@ -61,6 +66,7 @@ func (client *Client) queryObjectsApi(
 		req.Header.Set(k, v)
 	}
 
+	// The underlying network connection is reused by using client.ApiHttpTransport.
 	httpClient := &http.Client{
 		Transport: &client.ApiHttpTransport,
 		Timeout:   3 * time.Second,
@@ -71,6 +77,7 @@ func (client *Client) queryObjectsApi(
 	}
 
 	if res.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, res.Body)
 		_ = res.Body.Close()
 		return nil, fmt.Errorf("unexpected HTTP status code %d", res.StatusCode)
 	}
@@ -180,7 +187,6 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 	if err != nil {
 		return err
 	}
-
 	objQueriesResults, err := extractObjectQueriesResult[HostServiceRuntimeAttributes](jsonRaw)
 	if err != nil {
 		return err
@@ -309,6 +315,7 @@ func (client *Client) connectEventStream(esTypes []string) (*http.Response, cont
 			case <-reqCtx.Done():
 				// This case might happen when this httpClient.Do and the time.After in the select below finish at round
 				// about the exact same time, but httpClient.Do was slightly faster than reqCancel().
+				_, _ = io.Copy(io.Discard, res.Body)
 				_ = res.Body.Close()
 			}
 		}()
@@ -352,8 +359,11 @@ func (client *Client) listenEventStream() error {
 	if err != nil {
 		return err
 	}
-	defer cancel()
-	defer func() { _ = response.Body.Close() }()
+	defer func() {
+		cancel()
+
+		_ = response.Body.Close()
+	}()
 
 	select {
 	case <-client.Ctx.Done():
