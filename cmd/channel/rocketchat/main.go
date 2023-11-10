@@ -118,7 +118,6 @@ func (ch *RocketChat) GetInfo() *plugin.Info {
 	}
 
 	return &plugin.Info{
-		Type:             "rocketchat",
 		Name:             "Rocket.Chat",
 		Version:          internal.Version.Version,
 		Author:           "Icinga GmbH",

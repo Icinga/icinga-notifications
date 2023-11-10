@@ -119,7 +119,6 @@ func (ch *Email) GetInfo() *plugin.Info {
 	}
 
 	return &plugin.Info{
-		Type:             "email",
 		Name:             "Email",
 		Version:          internal.Version.Version,
 		Author:           "Icinga GmbH",

@@ -172,6 +172,7 @@ func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *icingadb
 			continue
 		}
 		p.Stop()
+		info.Type = pluginType
 
 		pluginTypes = append(pluginTypes, pluginType)
 		pluginInfos = append(pluginInfos, info)

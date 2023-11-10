@@ -66,7 +66,7 @@ type ConfigOption struct {
 
 // Info contains plugin information.
 type Info struct {
-	Type             string          `db:"type" json:"type"`
+	Type             string          `db:"type" json:"-"`
 	Name             string          `db:"name" json:"name"`
 	Version          string          `db:"version" json:"version"`
 	Author           string          `db:"author" json:"author"`
@@ -74,18 +74,8 @@ type Info struct {
 }
 
 // TableName implements the contracts.TableNamer interface.
-func (c *Info) TableName() string {
+func (i *Info) TableName() string {
 	return "available_channel_type"
-}
-
-// Upsert implements the contracts.Upserter interface.
-func (c *Info) Upsert() interface{} {
-	return struct {
-		Name             string          `db:"name"`
-		Version          string          `db:"version"`
-		Author           string          `db:"author"`
-		ConfigAttributes json.RawMessage `db:"config_attrs"`
-	}{}
 }
 
 type Contact struct {
