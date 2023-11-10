@@ -74,10 +74,6 @@ func (c *Chain) Eval(filterable Filterable) (bool, error) {
 func (c *Chain) ExtractConditions() []*Condition {
 	var conditions []*Condition
 	for _, rule := range c.rules {
-		if _, ok := rule.(*Exists); ok {
-			continue
-		}
-
 		conditions = append(conditions, rule.ExtractConditions()...)
 	}
 
@@ -197,7 +193,7 @@ type Exists struct {
 }
 
 func (e *Exists) ExtractConditions() []*Condition {
-	panic("filter exists doesn't support extract conditions")
+	return nil
 }
 
 func NewExists(column string) *Exists {
