@@ -45,10 +45,9 @@ type RPC struct {
 	lastRequestId   uint64
 	requestsMu      sync.Mutex
 
-	errChannel        chan struct{} // never transports a value, only closed through setErr() to signal an occurred error
-	err               *Error        // only initialized via setErr(), if a rpc (Fatal/non-recoverable) error has occurred
-	errOnce           sync.Once
-	requestedShutdown bool
+	errChannel chan struct{} // never transports a value, only closed through setErr() to signal an occurred error
+	err        *Error        // only initialized via setErr(), if a rpc (Fatal/non-recoverable) error has occurred
+	errOnce    sync.Once
 }
 
 // NewRPC creates and returns an RPC instance
