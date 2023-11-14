@@ -29,5 +29,4 @@ jobs:
         version: latest
         # Enable the gosec linter w/o having to create a .golangci.yml config
         args: -E gosec
-        only-new-issues: true
         skip-cache: true
