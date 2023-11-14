@@ -132,19 +132,23 @@ func RunPlugin(plugin Plugin) {
 	decoder := json.NewDecoder(os.Stdin)
 	var encoderMu sync.Mutex
 
+	wg := sync.WaitGroup{}
+
 	for {
 		var req rpc.Request
 		err := decoder.Decode(&req)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				// plugin shutdown requested
-				return
+				break
 			}
 
 			log.Fatal("failed to read request:", err)
 		}
 
+		wg.Add(1)
 		go func(request rpc.Request) {
+			defer wg.Done()
 			var response = rpc.Response{Id: request.Id}
 			switch request.Method {
 			case MethodGetInfo:
@@ -180,6 +184,8 @@ func RunPlugin(plugin Plugin) {
 			}
 		}(req)
 	}
+
+	wg.Wait()
 }
 
 // FormatMessage formats a notification message and adds to the given io.Writer
