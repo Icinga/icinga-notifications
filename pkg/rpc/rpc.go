@@ -86,14 +86,19 @@ func (r *RPC) Call(method string, params json.RawMessage) (json.RawMessage, erro
 	r.requestsMu.Unlock()
 
 	r.encoderMu.Lock()
-	err := r.encoder.Encode(Request{Method: method, Params: params, Id: newId})
-	r.encoderMu.Unlock()
-	if err != nil {
-		err = fmt.Errorf("failed to write request: %w", err)
-		r.setErr(err)
-
-		return nil, r.Err()
+	if r.encoder == nil {
+		r.encoderMu.Unlock()
+		return nil, errors.New("cannot process any further requests, writer already closed")
 	}
+
+	err := r.encoder.Encode(Request{Method: method, Params: params, Id: newId})
+	if err != nil {
+		r.encoder = nil
+		r.encoderMu.Unlock()
+		_ = r.writer.Close()
+		return nil, fmt.Errorf("failed to write request: %w", err)
+	}
+	r.encoderMu.Unlock()
 
 	select {
 	case response := <-promise:
@@ -119,21 +124,24 @@ func (r *RPC) Err() error {
 }
 
 // Done sends when the errChannel has been closed.
-// errChannel is closed when encoder/decoder fails to write/read
+// errChannel is closed when decoder fails to read
 func (r *RPC) Done() <-chan struct{} {
 	return r.errChannel
 }
 
 // Close closes the RPC.writer.
-// Further requests leads encoder/decoder to fail
+// All further calls to Call lead to an error.
+// The Process will be terminated as soon as all pending requests have been processed.
 func (r *RPC) Close() error {
 	r.encoderMu.Lock()
 	defer r.encoderMu.Unlock()
 
+	r.encoder = nil
+
 	return r.writer.Close()
 }
 
-// setErr sets the err encoder/decoder fails and closes errChannel
+// setErr sets err and closes errChannel
 func (r *RPC) setErr(err error) {
 	r.errOnce.Do(func() {
 		if reqCount := len(r.pendingRequests); reqCount > 0 {
