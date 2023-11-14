@@ -36,33 +36,58 @@ func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 
 	cmd := exec.Command(file)
 
-	writer, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
+	started := false
+	var childIOPipes []io.Closer
+	var parentIOPipes []io.Closer
+	defer func() {
+		for _, pipe := range childIOPipes {
+			_ = pipe.Close()
+		}
 
-	reader, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
+		if !started {
+			for _, pipe := range parentIOPipes {
+				_ = pipe.Close()
+			}
+		}
+	}()
 
-	errPipe, err := cmd.StderrPipe()
+	reqRead, reqWrite, err := os.Pipe()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+		return nil, fmt.Errorf("failed to create reqRead/reqWrite pipe: %w", err)
 	}
+	cmd.Stdin = reqRead
+	childIOPipes = append(childIOPipes, reqRead)
+	parentIOPipes = append(parentIOPipes, reqWrite)
 
-	if err = cmd.Start(); err != nil {
+	resRead, resWrite, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create resRead/resWrite pipe: %w", err)
+	}
+	cmd.Stdout = resWrite
+	childIOPipes = append(childIOPipes, resWrite)
+	parentIOPipes = append(parentIOPipes, resRead)
+
+	logRead, logWrite, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create logRead/logWrite pipe: %w", err)
+	}
+	cmd.Stderr = logWrite
+	childIOPipes = append(childIOPipes, logWrite)
+	parentIOPipes = append(parentIOPipes, logRead)
+
+	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start cmd: %w", err)
 	}
+	started = true
 
 	l := logger.With(zap.Int("pid", cmd.Process.Pid))
 	p := &Plugin{
 		cmd:    cmd,
-		rpc:    rpc.NewRPC(writer, reader, l),
+		rpc:    rpc.NewRPC(reqWrite, resRead, l),
 		logger: l,
 	}
 
-	go forwardLogs(errPipe, l)
+	go forwardLogs(logRead, l)
 	l.Debug("Successfully started channel plugin process")
 
 	return p, nil
@@ -80,9 +105,9 @@ func (p *Plugin) Stop() {
 				_ = p.cmd.Process.Kill()
 			})
 
-			// TODO: currently, this doesn't reliably check that the plugin process terminated.
-			// Any JSON encode/decode error (including EOF) also closes this channel.
-			<-p.rpc.Done()
+			if err := p.cmd.Wait(); err != nil {
+				p.logger.Errorw("Channel plugin stopped with an error", zap.Error(err))
+			}
 			timer.Stop()
 
 			p.logger.Debug("Channel plugin terminated")
