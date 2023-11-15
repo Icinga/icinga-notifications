@@ -45,9 +45,8 @@ type RPC struct {
 	lastRequestId   uint64
 	requestsMu      sync.Mutex
 
-	errChannel chan struct{} // never transports a value, only closed through setErr() to signal an occurred error
-	err        *Error        // only initialized via setErr(), if a rpc (Fatal/non-recoverable) error has occurred
-	errOnce    sync.Once
+	errChannel chan struct{} // never transports a value, only closed through processResponses() to signal an occurred error
+	err        *Error        // only initialized via processResponses() when decoder fails (Fatal/non-recoverable)
 }
 
 // NewRPC creates and returns an RPC instance
@@ -141,24 +140,15 @@ func (r *RPC) Close() error {
 	return r.writer.Close()
 }
 
-// setErr sets err and closes errChannel
-func (r *RPC) setErr(err error) {
-	r.errOnce.Do(func() {
-		r.err = &Error{cause: err}
-		r.Close()
-		close(r.errChannel)
-	})
-}
-
 // processResponses sends responses to its channel (identified by response.id)
 // In case of any error, all pending requests are dropped
 func (r *RPC) processResponses() {
 	for r.Err() == nil {
 		var response Response
-		err := r.decoder.Decode(&response)
-
-		if err != nil {
-			r.setErr(fmt.Errorf("failed to read json response: %w", err))
+		if err := r.decoder.Decode(&response); err != nil {
+			r.err = &Error{cause: fmt.Errorf("failed to read json response: %w", err)}
+			close(r.errChannel)
+			_ = r.Close()
 
 			return
 		}
