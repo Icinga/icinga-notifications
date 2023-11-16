@@ -314,42 +314,7 @@ func (client *Client) worker() {
 		catchupBuffer = make([]*event.Event, 0)
 		// catchupCache maps event.Events.Name to API time to skip replaying outdated events.
 		catchupCache = make(map[string]time.Time)
-
-		// dispatchQueue is a FIFO-like queue for events to be dispatched to the callback function without having to
-		// wait for the callback to finish, which, as being database-bound, might take some time during bulk phases.
-		dispatchQueue = make(chan *event.Event, 1<<16)
 	)
-
-	// While the worker's main loop fills the dispatchQueue for outgoing events, this small goroutine drains the
-	// buffered channel and forwards each request to the callback function.
-	go func() {
-		for {
-			select {
-			case <-client.Ctx.Done():
-				return
-
-			case ev := <-dispatchQueue:
-				client.CallbackFn(ev)
-			}
-		}
-	}()
-
-	// dispatchEvent enqueues the event to the dispatchQueue while honoring the Client.Ctx. It returns true when
-	// enqueueing worked and false either if the buffered queue is stuck for a whole minute or, more likely, the
-	// context is done.
-	dispatchEvent := func(ev *event.Event) bool {
-		select {
-		case <-client.Ctx.Done():
-			return false
-
-		case <-time.After(time.Minute):
-			client.Logger.Errorw("Abort event enqueueing for dispatching due to a timeout", zap.Stringer("event", ev))
-			return false
-
-		case dispatchQueue <- ev:
-			return true
-		}
-	}
 
 	// catchupCacheUpdate updates the catchupCache if this eventMsg seems to be the latest of its kind.
 	catchupCacheUpdate := func(ev *eventMsg) {
@@ -383,30 +348,31 @@ func (client *Client) worker() {
 		case ev, ok := <-catchupEventCh:
 			// Process an incoming event
 			if ok {
-				_ = dispatchEvent(ev.event)
+				client.CallbackFn(ev.event)
 				catchupCacheUpdate(ev)
 				break
 			}
 
-			// The channel was closed - replay cache and switch modes
-			skipCounter := 0
+			// The channel is closed, replay cache and eventually switch modes
+			if len(catchupBuffer) > 0 {
+				// To not block the select and all channels too long, only one event will be processed per iteration.
+				ev := catchupBuffer[0]
+				catchupBuffer = catchupBuffer[1:]
 
-			for _, ev := range catchupBuffer {
 				ts, ok := catchupCache[ev.Name]
-				if ok && ev.Time.Before(ts) {
+				if !ok {
+					client.Logger.Debugw("Event to be replayed is not in cache", zap.Stringer("event", ev))
+				} else if ev.Time.Before(ts) {
 					client.Logger.Debugw("Skip replaying outdated Event Stream event", zap.Stringer("event", ev),
 						zap.Time("event timestamp", ev.Time), zap.Time("cache timestamp", ts))
-					skipCounter++
-					continue
-				}
-
-				if !dispatchEvent(ev) {
-					client.Logger.Error("Aborting Event Stream replay as an event could not be enqueued for dispatching")
 					break
 				}
+
+				client.CallbackFn(ev)
+				break
 			}
-			client.Logger.Infow("Worker leaves catch-up-phase, returning to normal operation",
-				zap.Int("cached events", len(catchupBuffer)), zap.Int("skipped cached events", skipCounter))
+
+			client.Logger.Info("Worker leaves catch-up-phase, returning to normal operation")
 
 			catchupEventCh, catchupCancel = nil, nil
 			catchupBuffer = make([]*event.Event, 0)
@@ -420,7 +386,7 @@ func (client *Client) worker() {
 				break
 			}
 
-			_ = dispatchEvent(ev.event)
+			client.CallbackFn(ev.event)
 		}
 	}
 }
