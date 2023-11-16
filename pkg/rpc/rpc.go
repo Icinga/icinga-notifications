@@ -45,19 +45,19 @@ type RPC struct {
 	lastRequestId   uint64
 	requestsMu      sync.Mutex
 
-	errChannel chan struct{} // never transports a value, only closed through processResponses() to signal an occurred error
-	err        *Error        // only initialized via processResponses() when decoder fails (Fatal/non-recoverable)
+	processResponsesErrCh chan struct{} // never transports a value, only closed through processResponses() to signal an occurred error
+	processResponsesErr   *Error        // only initialized via processResponses() when decoder fails (Fatal/non-recoverable)
 }
 
 // NewRPC creates and returns an RPC instance
 func NewRPC(writer io.WriteCloser, reader io.Reader, logger *zap.SugaredLogger) *RPC {
 	rpc := &RPC{
-		writer:          writer,
-		encoder:         json.NewEncoder(writer),
-		decoder:         json.NewDecoder(reader),
-		pendingRequests: map[uint64]chan Response{},
-		logger:          logger,
-		errChannel:      make(chan struct{}),
+		writer:                writer,
+		encoder:               json.NewEncoder(writer),
+		decoder:               json.NewDecoder(reader),
+		pendingRequests:       map[uint64]chan Response{},
+		logger:                logger,
+		processResponsesErrCh: make(chan struct{}),
 	}
 
 	go rpc.processResponses()
@@ -116,16 +116,16 @@ func (r *RPC) Call(method string, params json.RawMessage) (json.RawMessage, erro
 func (r *RPC) Err() error {
 	select {
 	case <-r.Done():
-		return r.err
+		return r.processResponsesErr
 	default:
 		return nil
 	}
 }
 
-// Done sends when the errChannel has been closed.
-// errChannel is closed when decoder fails to read
+// Done sends when the processResponsesErrCh has been closed.
+// processResponsesErrCh is closed when decoder fails to read
 func (r *RPC) Done() <-chan struct{} {
-	return r.errChannel
+	return r.processResponsesErrCh
 }
 
 // Close closes the RPC.writer.
@@ -146,8 +146,8 @@ func (r *RPC) processResponses() {
 	for r.Err() == nil {
 		var response Response
 		if err := r.decoder.Decode(&response); err != nil {
-			r.err = &Error{cause: fmt.Errorf("failed to read json response: %w", err)}
-			close(r.errChannel)
+			r.processResponsesErr = &Error{cause: fmt.Errorf("failed to read json response: %w", err)}
+			close(r.processResponsesErrCh)
 			_ = r.Close()
 
 			return
