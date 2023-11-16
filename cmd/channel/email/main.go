@@ -15,10 +15,19 @@ import (
 	"strings"
 )
 
+const (
+	EncryptionNone     = "none"
+	EncryptionStartTLS = "starttls"
+	EncryptionTLS      = "tls"
+)
+
 type Email struct {
-	Host string `json:"host"`
-	Port string `json:"port"`
-	From string `json:"from"`
+	Host       string `json:"host"`
+	Port       string `json:"port"`
+	From       string `json:"from"`
+	User       string `json:"user"`
+	Password   string `json:"password"`
+	Encryption string `json:"encryption"`
 }
 
 func main() {
@@ -79,6 +88,10 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 		ch.From = usr.Username + "@" + hostname
 	}
 
+	if ch.User == "" {
+		ch.User = ch.From
+	}
+
 	return nil
 }
 
@@ -110,6 +123,37 @@ func (ch *Email) GetInfo() *plugin.Info {
 				"de_DE": "Von",
 			},
 			Default: "icinga@example.com",
+		},
+		{
+			Name: "user",
+			Type: "string",
+			Label: map[string]string{
+				"en_US": "User",
+				"de_DE": "Benutzer",
+			},
+			Default: "user@example.com",
+		},
+		{
+			Name: "password",
+			Type: "secret",
+			Label: map[string]string{
+				"en_US": "Password",
+				"de_DE": "Passwort",
+			},
+		},
+		{
+			Name:     "encryption",
+			Type:     "option",
+			Required: true,
+			Label: map[string]string{
+				"en_US": "TLS / SSL",
+				"de_DE": "TLS / SSL",
+			},
+			Options: map[string]string{
+				EncryptionNone:     "None",
+				EncryptionStartTLS: "STARTTLS",
+				EncryptionTLS:      "TLS",
+			},
 		},
 	}
 
