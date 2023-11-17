@@ -75,7 +75,14 @@ func LoadFromDB(ctx context.Context, db *icingadb.DB, id types.Binary) (*Object,
 		extraTags[extraTag.Tag] = extraTag.Value
 	}
 
-	obj := &Object{db: db, ID: id, Tags: tags, ExtraTags: extraTags}
+	obj := &Object{
+		db:        db,
+		ID:        id,
+		Name:      objectRow.Name,
+		URL:       objectRow.URL.String,
+		Tags:      tags,
+		ExtraTags: extraTags,
+	}
 	cache[id.String()] = obj
 
 	return obj, nil
