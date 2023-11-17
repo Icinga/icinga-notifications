@@ -46,9 +46,10 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 		}
 
 		incident.RetriggerEscalations(&event.Event{
-			Time:    time.Now(),
-			Type:    event.TypeInternal,
-			Message: "Incident reevaluation at daemon startup",
+			Time:     time.Now(),
+			Type:     event.TypeInternal,
+			Severity: incident.Severity,
+			Message:  "Incident reevaluation at daemon startup",
 		})
 	}
 
