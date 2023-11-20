@@ -84,20 +84,26 @@ func (r *RPC) Call(method string, params json.RawMessage) (json.RawMessage, erro
 	r.pendingRequests[newId] = promise
 	r.requestsMu.Unlock()
 
-	r.encoderMu.Lock()
-	if r.encoder == nil {
-		r.encoderMu.Unlock()
-		return nil, errors.New("cannot process any further requests, writer already closed")
+	encodeReq := func() error {
+		r.encoderMu.Lock()
+		defer r.encoderMu.Unlock()
+		if r.encoder == nil {
+			return errors.New("cannot process any further requests, writer already closed")
+		}
+
+		err := r.encoder.Encode(Request{Method: method, Params: params, Id: newId})
+		if err != nil {
+			r.encoder = nil
+			_ = r.writer.Close()
+			return fmt.Errorf("failed to write request: %w", err)
+		}
+
+		return nil
 	}
 
-	err := r.encoder.Encode(Request{Method: method, Params: params, Id: newId})
-	if err != nil {
-		r.encoder = nil
-		r.encoderMu.Unlock()
-		_ = r.writer.Close()
-		return nil, fmt.Errorf("failed to write request: %w", err)
+	if err := encodeReq(); err != nil {
+		return nil, err
 	}
-	r.encoderMu.Unlock()
 
 	select {
 	case response := <-promise:
