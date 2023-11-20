@@ -112,7 +112,7 @@ func (ch *Email) GetInfo() *plugin.Info {
 				"en_US": "SMTP Port",
 				"de_DE": "SMTP Port",
 			},
-			Min: types.Int{NullInt64: sql.NullInt64{Int64: 0, Valid: true}},
+			Min: types.Int{NullInt64: sql.NullInt64{Int64: 1, Valid: true}},
 			Max: types.Int{NullInt64: sql.NullInt64{Int64: 65535, Valid: true}},
 		},
 		{
