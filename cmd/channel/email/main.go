@@ -5,14 +5,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/emersion/go-sasl"
+	"github.com/emersion/go-smtp"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"github.com/icinga/icingadb/pkg/types"
+	"github.com/jhillyerd/enmime"
 	"net"
-	"net/smtp"
+	"net/mail"
 	"os"
 	"os/user"
-	"strings"
 )
 
 const (
@@ -35,10 +37,10 @@ func main() {
 }
 
 func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
-	var to []string
+	var to []mail.Address
 	for _, address := range req.Contact.Addresses {
 		if address.Type == "email" {
-			to = append(to, address.Address)
+			to = append(to, mail.Address{Name: req.Contact.FullName, Address: address.Address})
 		}
 	}
 
@@ -47,17 +49,53 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 	}
 
 	var msg bytes.Buffer
-	_, _ = fmt.Fprintf(&msg, "To: %s\n", strings.Join(to, ","))
-	_, _ = fmt.Fprintf(&msg, "Subject: [#%d] %s %s is %s\n\n", req.Incident.Id, req.Event.Type, req.Object.Name, req.Incident.Severity)
-
 	plugin.FormatMessage(&msg, req)
 
-	err := smtp.SendMail(ch.GetServer(), nil, ch.From, to, bytes.ReplaceAll(msg.Bytes(), []byte("\n"), []byte("\r\n")))
+	return enmime.Builder().
+		ToAddrs(to).
+		From("", ch.From).
+		Subject(fmt.Sprintf("[#%d] %s %s is %s", req.Incident.Id, req.Event.Type, req.Object.Name, req.Incident.Severity)).
+		Text(msg.Bytes()).
+		Send(ch)
+}
+
+func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error {
+	var (
+		client *smtp.Client
+		err    error
+	)
+
+	if ch.Encryption == EncryptionTLS {
+		client, err = smtp.DialTLS(ch.GetServer(), nil)
+	} else {
+		client, err = smtp.Dial(ch.GetServer())
+	}
 	if err != nil {
 		return err
 	}
+	defer func() { _ = client.Close() }()
 
-	return nil
+	if err = client.Hello("localhost"); err != nil {
+		return err
+	}
+
+	if ch.Encryption == EncryptionStartTLS {
+		if err = client.StartTLS(nil); err != nil {
+			return err
+		}
+	}
+
+	if ch.Password != "" {
+		if err = client.Auth(sasl.NewPlainClient("", ch.User, ch.Password)); err != nil {
+			return err
+		}
+	}
+
+	if err := client.SendMail(reversePath, recipients, bytes.NewReader(msg)); err != nil {
+		return err
+	}
+
+	return client.Quit()
 }
 
 func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
