@@ -26,7 +26,8 @@ const (
 type Email struct {
 	Host       string `json:"host"`
 	Port       string `json:"port"`
-	From       string `json:"from"`
+	SenderName string `json:"sender_name"`
+	SenderMail string `json:"sender_mail"`
 	User       string `json:"user"`
 	Password   string `json:"password"`
 	Encryption string `json:"encryption"`
@@ -53,7 +54,7 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 
 	return enmime.Builder().
 		ToAddrs(to).
-		From("", ch.From).
+		From(ch.SenderName, ch.SenderMail).
 		Subject(fmt.Sprintf("[#%d] %s %s is %s", req.Incident.Id, req.Event.Type, req.Object.Name, req.Incident.Severity)).
 		Text(msg.Bytes()).
 		Send(ch)
@@ -74,10 +75,6 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 		return err
 	}
 	defer func() { _ = client.Close() }()
-
-	if err = client.Hello("localhost"); err != nil {
-		return err
-	}
 
 	if ch.Encryption == EncryptionStartTLS {
 		if err = client.StartTLS(nil); err != nil {
@@ -112,22 +109,22 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 		ch.Port = "25"
 	}
 
-	if ch.From == "" {
+	if ch.SenderMail == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
-			return fmt.Errorf("failed to get the os's hostname: %w", err)
+			return fmt.Errorf("failed to get the OS hostname: %w", err)
 		}
 
 		usr, err := user.Current()
 		if err != nil {
-			return fmt.Errorf("failed to get the os's current user: %w", err)
+			return fmt.Errorf("failed to get the OS current user: %w", err)
 		}
 
-		ch.From = usr.Username + "@" + hostname
+		ch.SenderMail = usr.Username + "@" + hostname
 	}
 
 	if ch.User == "" {
-		ch.User = ch.From
+		ch.User = ch.SenderMail
 	}
 
 	return nil
@@ -135,6 +132,23 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 
 func (ch *Email) GetInfo() *plugin.Info {
 	elements := []*plugin.ConfigOption{
+		{
+			Name: "sender_name",
+			Type: "string",
+			Label: map[string]string{
+				"en_US": "Sender Name",
+				"de_DE": "Absendername",
+			},
+		},
+		{
+			Name: "sender_mail",
+			Type: "string",
+			Label: map[string]string{
+				"en_US": "Sender Address",
+				"de_DE": "Absenderadresse",
+			},
+			Default: "icinga@example.com",
+		},
 		{
 			Name: "host",
 			Type: "string",
@@ -154,20 +168,11 @@ func (ch *Email) GetInfo() *plugin.Info {
 			Max: types.Int{NullInt64: sql.NullInt64{Int64: 65535, Valid: true}},
 		},
 		{
-			Name: "from",
-			Type: "string",
-			Label: map[string]string{
-				"en_US": "From",
-				"de_DE": "Von",
-			},
-			Default: "icinga@example.com",
-		},
-		{
 			Name: "user",
 			Type: "string",
 			Label: map[string]string{
-				"en_US": "User",
-				"de_DE": "Benutzer",
+				"en_US": "SMTP User",
+				"de_DE": "SMTP Benutzer",
 			},
 			Default: "user@example.com",
 		},
@@ -175,8 +180,8 @@ func (ch *Email) GetInfo() *plugin.Info {
 			Name: "password",
 			Type: "secret",
 			Label: map[string]string{
-				"en_US": "Password",
-				"de_DE": "Passwort",
+				"en_US": "SMTP Password",
+				"de_DE": "SMTP Passwort",
 			},
 		},
 		{
@@ -184,8 +189,8 @@ func (ch *Email) GetInfo() *plugin.Info {
 			Type:     "option",
 			Required: true,
 			Label: map[string]string{
-				"en_US": "TLS / SSL",
-				"de_DE": "TLS / SSL",
+				"en_US": "SMTP Transport Encryption",
+				"de_DE": "SMTP Transportverschlüsselung",
 			},
 			Options: map[string]string{
 				EncryptionNone:     "None",
