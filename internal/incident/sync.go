@@ -3,6 +3,7 @@ package incident
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
@@ -13,30 +14,44 @@ import (
 	"time"
 )
 
+// TableName implements the contracts.TableNamer interface.
+func (i *Incident) TableName() string {
+	return "incident"
+}
+
+// Upsert implements the contracts.Upserter interface.
+func (i *Incident) Upsert() interface{} {
+	return &struct {
+		Severity    event.Severity  `db:"severity"`
+		RecoveredAt types.UnixMilli `db:"recovered_at"`
+	}{Severity: i.Severity, RecoveredAt: i.RecoveredAt}
+}
+
 // Sync initiates an *incident.IncidentRow from the current incident state and syncs it with the database.
 // Before syncing any incident related database entries, this method should be called at least once.
 // Returns an error on db failure.
 func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
-	incidentRow := &IncidentRow{
-		ID:          i.incidentRowID,
-		ObjectID:    i.Object.ID,
-		StartedAt:   types.UnixMilli(i.StartedAt),
-		RecoveredAt: types.UnixMilli(i.RecoveredAt),
-		Severity:    i.Severity,
-	}
+	if i.ID() != 0 {
+		stmt, _ := i.db.BuildUpsertStmt(i)
+		_, err := tx.NamedExecContext(ctx, stmt, i)
+		if err != nil {
+			return fmt.Errorf("failed to upsert incident: %s", err)
+		}
+	} else {
+		stmt := utils.BuildInsertStmtWithout(i.db, i, "id")
+		incidentId, err := utils.InsertAndFetchId(ctx, tx, stmt, i)
+		if err != nil {
+			return err
+		}
 
-	err := incidentRow.Sync(ctx, tx, i.db, i.incidentRowID != 0)
-	if err != nil {
-		return err
+		i.Id = incidentId
 	}
-
-	i.incidentRowID = incidentRow.ID
 
 	return nil
 }
 
 func (i *Incident) AddHistory(ctx context.Context, tx *sqlx.Tx, historyRow *HistoryRow, fetchId bool) (types.Int, error) {
-	historyRow.IncidentID = i.incidentRowID
+	historyRow.IncidentID = i.ID()
 
 	stmt := utils.BuildInsertStmtWithout(i.db, historyRow, "id")
 	if fetchId {
@@ -57,7 +72,7 @@ func (i *Incident) AddHistory(ctx context.Context, tx *sqlx.Tx, historyRow *Hist
 }
 
 func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, state *EscalationState) error {
-	state.IncidentID = i.incidentRowID
+	state.IncidentID = i.ID()
 
 	stmt, _ := i.db.BuildUpsertStmt(state)
 	_, err := tx.NamedExecContext(ctx, stmt, state)
@@ -67,7 +82,7 @@ func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, stat
 
 // AddEvent Inserts incident history record to the database and returns an error on db failure.
 func (i *Incident) AddEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	ie := &EventRow{IncidentID: i.incidentRowID, EventID: ev.ID}
+	ie := &EventRow{IncidentID: i.ID(), EventID: ev.ID}
 	stmt, _ := i.db.BuildInsertStmt(ie)
 	_, err := tx.NamedExecContext(ctx, stmt, ie)
 
@@ -84,7 +99,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 
 	for _, escalationRecipient := range escalation.Recipients {
 		r := escalationRecipient.Recipient
-		cr := &ContactRow{IncidentID: i.incidentRowID, Role: newRole}
+		cr := &ContactRow{IncidentID: i.ID(), Role: newRole}
 
 		recipientKey := recipient.ToKey(r)
 		cr.Key = recipientKey
@@ -100,7 +115,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 				i.logger.Infof("Contact %q role changed from %s to %s", r, state.Role.String(), newRole.String())
 
 				hr := &HistoryRow{
-					IncidentID:       i.incidentRowID,
+					IncidentID:       i.ID(),
 					EventID:          utils.ToDBInt(eventId),
 					Key:              cr.Key,
 					Time:             types.UnixMilli(time.Now()),
@@ -140,7 +155,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 // AddRuleMatched syncs the given *rule.Rule to the database.
 // Returns an error on database failure.
 func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule) error {
-	rr := &RuleRow{IncidentID: i.incidentRowID, RuleID: r.ID}
+	rr := &RuleRow{IncidentID: i.ID(), RuleID: r.ID}
 	stmt, _ := i.db.BuildUpsertStmt(rr)
 	_, err := tx.NamedExecContext(ctx, stmt, rr)
 
