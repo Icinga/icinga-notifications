@@ -24,16 +24,17 @@ type ruleID = int64
 type escalationID = int64
 
 type Incident struct {
-	Object      *object.Object
-	StartedAt   time.Time
-	RecoveredAt time.Time
-	Severity    event.Severity
+	Id          int64           `db:"id"`
+	ObjectID    types.Binary    `db:"object_id"`
+	StartedAt   types.UnixMilli `db:"started_at"`
+	RecoveredAt types.UnixMilli `db:"recovered_at"`
+	Severity    event.Severity  `db:"severity"`
+
+	Object *object.Object `db:"-"`
 
 	EscalationState map[escalationID]*EscalationState
 	Rules           map[ruleID]struct{}
 	Recipients      map[recipient.Key]*RecipientState
-
-	incidentRowID int64
 
 	// timer calls RetriggerEscalations the next time any escalation could be reached on the incident.
 	//
@@ -53,7 +54,7 @@ type Incident struct {
 func NewIncident(
 	db *icingadb.DB, obj *object.Object, runtimeConfig *config.RuntimeConfig, logger *zap.SugaredLogger,
 ) *Incident {
-	return &Incident{
+	i := &Incident{
 		db:              db,
 		Object:          obj,
 		logger:          logger,
@@ -62,6 +63,12 @@ func NewIncident(
 		Rules:           map[ruleID]struct{}{},
 		Recipients:      map[recipient.Key]*RecipientState{},
 	}
+
+	if obj != nil {
+		i.ObjectID = obj.ID
+	}
+
+	return i
 }
 
 func (i *Incident) IncidentObject() *object.Object {
@@ -73,11 +80,11 @@ func (i *Incident) SeverityString() string {
 }
 
 func (i *Incident) String() string {
-	return fmt.Sprintf("#%d", i.incidentRowID)
+	return fmt.Sprintf("#%d", i.Id)
 }
 
 func (i *Incident) ID() int64 {
-	return i.incidentRowID
+	return i.Id
 }
 
 func (i *Incident) HasManager() bool {
@@ -200,7 +207,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 	i.runtimeConfig.RLock()
 	defer i.runtimeConfig.RUnlock()
 
-	if !i.RecoveredAt.IsZero() {
+	if !i.RecoveredAt.Time().IsZero() {
 		// Incident is recovered in the meantime.
 		return
 	}
@@ -288,14 +295,14 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 	causedByHistoryId = historyId
 
 	if newSeverity == event.SeverityOK {
-		i.RecoveredAt = time.Now()
+		i.RecoveredAt = types.UnixMilli(time.Now())
 		i.logger.Info("All sources recovered, closing incident")
 
 		RemoveCurrent(i.Object)
 
 		history := &HistoryRow{
 			EventID: utils.ToDBInt(ev.ID),
-			Time:    types.UnixMilli(i.RecoveredAt),
+			Time:    i.RecoveredAt,
 			Type:    Closed,
 		}
 
@@ -322,7 +329,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 }
 
 func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	i.StartedAt = ev.Time
+	i.StartedAt = types.UnixMilli(ev.Time)
 	i.Severity = ev.Severity
 	if err := i.Sync(ctx, tx); err != nil {
 		i.logger.Errorw("Can't insert incident to the database", zap.Error(err))
@@ -422,7 +429,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 		i.timer = nil
 	}
 
-	filterContext := &rule.EscalationFilter{IncidentAge: eventTime.Sub(i.StartedAt), IncidentSeverity: i.Severity}
+	filterContext := &rule.EscalationFilter{IncidentAge: eventTime.Sub(i.StartedAt.Time()), IncidentSeverity: i.Severity}
 
 	var escalations []*rule.Escalation
 	retryAfter := rule.RetryNever
@@ -478,7 +485,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 			i.RetriggerEscalations(&event.Event{
 				Type:    event.TypeInternal,
 				Time:    nextEvalAt,
-				Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt)),
+				Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt.Time())),
 			})
 		})
 	}
@@ -646,17 +653,6 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 	return nil
 }
 
-// RestoreEscalationStateRules restores this incident's rules based on the given escalation states.
-func (i *Incident) RestoreEscalationStateRules(states []*EscalationState) {
-	i.runtimeConfig.RLock()
-	defer i.runtimeConfig.RUnlock()
-
-	for _, state := range states {
-		escalation := i.runtimeConfig.GetRuleEscalation(state.RuleEscalationID)
-		i.Rules[escalation.RuleID] = struct{}{}
-	}
-}
-
 // getRecipientsChannel returns all the configured channels of the current incident and escalation recipients.
 func (i *Incident) getRecipientsChannel(t time.Time) contactChannels {
 	contactChs := make(contactChannels)
@@ -697,7 +693,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) contactChannels {
 func (i *Incident) restoreRecipients(ctx context.Context) error {
 	contact := &ContactRow{}
 	var contacts []*ContactRow
-	err := i.db.SelectContext(ctx, &contacts, i.db.Rebind(i.db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), i.ID())
+	err := i.db.SelectContext(ctx, &contacts, i.db.Rebind(i.db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), i.Id)
 	if err != nil {
 		i.logger.Errorw(
 			"Failed to restore incident recipients from the database", zap.String("object", i.IncidentObject().DisplayName()),
@@ -713,27 +709,6 @@ func (i *Incident) restoreRecipients(ctx context.Context) error {
 	}
 
 	i.Recipients = recipients
-
-	return nil
-}
-
-// restoreEscalationsState restores all escalation states matching the current incident id from the database.
-// Returns error on database failure.
-func (i *Incident) restoreEscalationsState(ctx context.Context) error {
-	state := &EscalationState{}
-	var states []*EscalationState
-	err := i.db.SelectContext(ctx, &states, i.db.Rebind(i.db.BuildSelectStmt(state, state)+` WHERE "incident_id" = ?`), i.ID())
-	if err != nil {
-		i.logger.Errorw("Failed to restore incident rule escalation states", zap.Error(err))
-
-		return errors.New("failed to restore incident rule escalation states")
-	}
-
-	for _, state := range states {
-		i.EscalationState[state.RuleEscalationID] = state
-	}
-
-	i.RestoreEscalationStateRules(states)
 
 	return nil
 }
