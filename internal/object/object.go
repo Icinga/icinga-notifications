@@ -24,26 +24,41 @@ var (
 )
 
 type Object struct {
-	ID       types.Binary
-	SourceId int64
-	Name     string
-	Tags     map[string]string
-	URL      string
+	ID       types.Binary `db:"id"`
+	SourceID int64        `db:"source_id"`
+	Name     string       `db:"name"`
+	URL      types.String `db:"url"`
 
+	Tags      map[string]string
 	ExtraTags map[string]string
 
 	db *icingadb.DB
 }
 
-func NewObject(db *icingadb.DB, ev *event.Event) *Object {
+// New creates a new object from the given event.
+func New(db *icingadb.DB, ev *event.Event) *Object {
 	return &Object{
-		SourceId:  ev.SourceId,
+		SourceID:  ev.SourceId,
 		Name:      ev.Name,
 		db:        db,
-		URL:       ev.URL,
+		URL:       utils.ToDBString(ev.URL),
 		Tags:      ev.Tags,
 		ExtraTags: ev.ExtraTags,
 	}
+}
+
+// Cache adds the given object to the global object cache store.
+// This is only used when loading the incident objects at daemon startup before the listener becomes ready.
+// Panics when the given object is already in the cache store.
+func Cache(obj *Object) {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+
+	if obj, ok := cache[obj.ID.String()]; ok {
+		panic(fmt.Sprintf("Object %q is already in cache", obj.DisplayName()))
+	}
+
+	cache[obj.ID.String()] = obj
 }
 
 // FromEvent creates an object from the provided event tags if it's not in the cache
@@ -57,7 +72,7 @@ func FromEvent(ctx context.Context, db *icingadb.DB, ev *event.Event) (*Object, 
 
 	object, ok := cache[id.String()]
 	if !ok {
-		object = NewObject(db, ev)
+		object = New(db, ev)
 		object.ID = id
 		cache[id.String()] = object
 	}
@@ -68,15 +83,8 @@ func FromEvent(ctx context.Context, db *icingadb.DB, ev *event.Event) (*Object, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	dbObj := &ObjectRow{
-		ID:       object.ID,
-		SourceID: ev.SourceId,
-		Name:     ev.Name,
-		URL:      utils.ToDBString(ev.URL),
-	}
-
-	stmt, _ := object.db.BuildUpsertStmt(&ObjectRow{})
-	_, err = tx.NamedExecContext(ctx, stmt, dbObj)
+	stmt, _ := object.db.BuildUpsertStmt(&Object{})
+	_, err = tx.NamedExecContext(ctx, stmt, object)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert object: %w", err)
 	}
@@ -106,9 +114,8 @@ func FromEvent(ctx context.Context, db *icingadb.DB, ev *event.Event) (*Object, 
 	}
 
 	object.ExtraTags = ev.ExtraTags
-	object.Tags = ev.Tags
 	object.Name = ev.Name
-	object.URL = ev.URL
+	object.URL = utils.ToDBString(ev.URL)
 
 	return object, nil
 }
@@ -137,9 +144,9 @@ func (o *Object) String() string {
 		_, _ = fmt.Fprintf(&b, "\n")
 	}
 
-	_, _ = fmt.Fprintf(&b, "    Source %d:\n", o.SourceId)
+	_, _ = fmt.Fprintf(&b, "    Source %d:\n", o.SourceID)
 	_, _ = fmt.Fprintf(&b, "    Name: %q\n", o.Name)
-	_, _ = fmt.Fprintf(&b, "    URL: %q\n", o.URL)
+	_, _ = fmt.Fprintf(&b, "    URL: %q\n", o.URL.String)
 	_, _ = fmt.Fprintf(&b, "    Extra Tags:\n")
 
 	for tag, value := range o.ExtraTags {

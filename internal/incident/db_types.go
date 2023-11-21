@@ -1,58 +1,10 @@
 package incident
 
 import (
-	"context"
-	"fmt"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
-	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
-	"github.com/jmoiron/sqlx"
 )
-
-type IncidentRow struct {
-	ID          int64           `db:"id"`
-	ObjectID    types.Binary    `db:"object_id"`
-	StartedAt   types.UnixMilli `db:"started_at"`
-	RecoveredAt types.UnixMilli `db:"recovered_at"`
-	Severity    event.Severity  `db:"severity"`
-}
-
-// TableName implements the contracts.TableNamer interface.
-func (i *IncidentRow) TableName() string {
-	return "incident"
-}
-
-// Upsert implements the contracts.Upserter interface.
-func (i *IncidentRow) Upsert() interface{} {
-	return &struct {
-		Severity    event.Severity  `db:"severity"`
-		RecoveredAt types.UnixMilli `db:"recovered_at"`
-	}{Severity: i.Severity, RecoveredAt: i.RecoveredAt}
-}
-
-// Sync synchronizes incidents to the database.
-// Fetches the last inserted incident id and modifies this incident's id.
-// Returns an error on database failure.
-func (i *IncidentRow) Sync(ctx context.Context, tx *sqlx.Tx, db *icingadb.DB, upsert bool) error {
-	if upsert {
-		stmt, _ := db.BuildUpsertStmt(i)
-		_, err := tx.NamedExecContext(ctx, stmt, i)
-		if err != nil {
-			return fmt.Errorf("failed to upsert incident: %s", err)
-		}
-	} else {
-		incidentId, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, i, "id"), i)
-		if err != nil {
-			return err
-		}
-
-		i.ID = incidentId
-	}
-
-	return nil
-}
 
 // EventRow represents a single incident event database entry.
 type EventRow struct {
