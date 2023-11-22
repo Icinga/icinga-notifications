@@ -2,7 +2,6 @@ package timeperiod
 
 import (
 	"github.com/teambition/rrule-go"
-	"log"
 	"time"
 )
 
@@ -46,6 +45,8 @@ func (p *TimePeriod) NextTransition(base time.Time) time.Time {
 	return transition
 }
 
+// Entry represents a single TimePeriod segment and defines its own start and end time.
+// You should initialize it by calling its Init method before using any of its other methods.
 type Entry struct {
 	Start, End time.Time
 
@@ -57,6 +58,7 @@ type Entry struct {
 }
 
 // Init initializes the rrule instance from the configured rrule string
+// Returns error when it fails to initiate an RRule instance from the configured rrule string (if any).
 func (e *Entry) Init() error {
 	if e.rrule != nil || e.RecurrenceRule == "" {
 		return nil
@@ -82,11 +84,9 @@ func (e *Entry) Init() error {
 }
 
 // Contains returns whether a point in time t is covered by this entry.
+// It panics when it's used before initializing the rrule instance while a rrule string is configured.
 func (e *Entry) Contains(t time.Time) bool {
-	err := e.Init()
-	if err != nil {
-		log.Printf("Can't initialize entry: %s", err)
-	}
+	e.assertInitialized()
 
 	if t.Before(e.Start) {
 		return false
@@ -108,12 +108,9 @@ func (e *Entry) Contains(t time.Time) bool {
 
 // NextTransition returns the next recurrence start or end of this entry relative to the given time inclusively.
 // This function returns also time.Time's zero value if there is no transition that starts/ends at/after the
-// specified time.
+// specified time. It panics when it's used before initializing the rrule instance while a rrule string is configured.
 func (e *Entry) NextTransition(t time.Time) time.Time {
-	err := e.Init()
-	if err != nil {
-		log.Printf("Can't initialize entry: %s", err)
-	}
+	e.assertInitialized()
 
 	if t.Before(e.Start) {
 		// The passed time is before the configured event start time
@@ -136,4 +133,12 @@ func (e *Entry) NextTransition(t time.Time) time.Time {
 	}
 
 	return e.rrule.After(t, false)
+}
+
+// assertInitialized checks whether the current time period entry is properly initialized.
+// It panics if it's not, otherwise, it's a no-op.
+func (e *Entry) assertInitialized() {
+	if e.rrule == nil && e.RecurrenceRule != "" {
+		panic("time period entry not initialized")
+	}
 }
