@@ -141,7 +141,7 @@ func TestFilter(t *testing.T) {
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 
 		expected := &Condition{op: Equal, column: "foo", value: "bar"}
-		assert.Equal(t, expected, rule, "Parser doesn't parse single condition correctly")
+		assert.Equal(t, expected, rule, "Parser does not parse single condition correctly")
 	})
 
 	t.Run("UrlEncodedFilterExpression", func(t *testing.T) {

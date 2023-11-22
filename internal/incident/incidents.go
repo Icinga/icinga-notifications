@@ -29,8 +29,7 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 	err := db.SelectContext(ctx, &objectIDs, `SELECT object_id FROM incident WHERE "recovered_at" IS NULL`)
 	if err != nil {
 		logger.Errorw("Failed to load active incidents from database", zap.Error(err))
-
-		return errors.New("failed to fetch open incidents")
+		return err
 	}
 
 	for _, objectID := range objectIDs {
@@ -73,8 +72,7 @@ func GetCurrent(
 		err := db.QueryRowxContext(ctx, db.Rebind(db.BuildSelectStmt(ir, ir)+` WHERE "object_id" = ? AND "recovered_at" IS NULL`), obj.ID).StructScan(ir)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			logger.Errorw("Failed to load incident from database", zap.String("object", obj.DisplayName()), zap.Error(err))
-
-			return nil, false, errors.New("failed to load incident from database")
+			return nil, false, err
 		} else if err == nil {
 			incident.incidentRowID = ir.ID
 			incident.StartedAt = ir.StartedAt.Time()

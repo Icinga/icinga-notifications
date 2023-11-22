@@ -102,7 +102,7 @@ func FromEvent(ctx context.Context, db *icingadb.DB, ev *event.Event) (*Object, 
 	}
 
 	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("can't commit object database transaction: %w", err)
+		return nil, fmt.Errorf("cannot commit object database transaction: %w", err)
 	}
 
 	object.ExtraTags = ev.ExtraTags

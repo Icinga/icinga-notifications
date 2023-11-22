@@ -22,7 +22,7 @@ func (r *RuntimeConfig) fetchSchedules(ctx context.Context, tx *sqlx.Tx) error {
 	for _, g := range schedules {
 		schedulesById[g.ID] = g
 
-		r.logger.Debugw("loaded schedule config",
+		r.logger.Debugw("Successfully loaded schedule config",
 			zap.Int64("id", g.ID),
 			zap.String("name", g.Name))
 	}
@@ -41,11 +41,11 @@ func (r *RuntimeConfig) fetchSchedules(ctx context.Context, tx *sqlx.Tx) error {
 		memberLogger := makeScheduleMemberLogger(r.logger.SugaredLogger, member)
 
 		if s := schedulesById[member.ScheduleID]; s == nil {
-			memberLogger.Warnw("ignoring schedule member for unknown schedule_id")
+			memberLogger.Warnw("Ignoring schedule member for unknown schedule_id")
 		} else {
 			s.MemberRows = append(s.MemberRows, member)
 
-			memberLogger.Debugw("member")
+			memberLogger.Debugw("Found member")
 		}
 	}
 
@@ -77,7 +77,7 @@ func (r *RuntimeConfig) applyPendingSchedules() {
 
 				period := r.TimePeriods[memberRow.TimePeriodID]
 				if period == nil {
-					memberLogger.Warnw("ignoring schedule member for unknown timeperiod_id")
+					memberLogger.Warnw("Ignoring schedule member for unknown timeperiod_id")
 					continue
 				}
 
@@ -85,7 +85,7 @@ func (r *RuntimeConfig) applyPendingSchedules() {
 				if memberRow.ContactID.Valid {
 					contact = r.Contacts[memberRow.ContactID.Int64]
 					if contact == nil {
-						memberLogger.Warnw("ignoring schedule member for unknown contact_id")
+						memberLogger.Warnw("Ignoring schedule member for unknown contact_id")
 						continue
 					}
 				}
@@ -94,7 +94,7 @@ func (r *RuntimeConfig) applyPendingSchedules() {
 				if memberRow.GroupID.Valid {
 					group = r.Groups[memberRow.GroupID.Int64]
 					if group == nil {
-						memberLogger.Warnw("ignoring schedule member for unknown contactgroup_id")
+						memberLogger.Warnw("Ignoring schedule member for unknown contactgroup_id")
 						continue
 					}
 				}

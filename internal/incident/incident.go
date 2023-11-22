@@ -2,7 +2,6 @@ package incident
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/contracts"
@@ -112,16 +111,14 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 
 	tx, err := i.db.BeginTxx(ctx, nil)
 	if err != nil {
-		i.logger.Errorw("Can't start a db transaction", zap.Error(err))
-
-		return errors.New("can't start a db transaction")
+		i.logger.Errorw("Cannot start a db transaction", zap.Error(err))
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	if err = ev.Sync(ctx, tx, i.db, i.Object.ID); err != nil {
 		i.logger.Errorw("Failed to insert event and fetch its ID", zap.String("event", ev.String()), zap.Error(err))
-
-		return errors.New("can't insert event and fetch its ID")
+		return err
 	}
 
 	if created {
@@ -134,9 +131,8 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 	}
 
 	if err = i.AddEvent(ctx, tx, ev); err != nil {
-		i.logger.Errorw("Can't insert incident event to the database", zap.Error(err))
-
-		return errors.New("can't insert incident event to the database")
+		i.logger.Errorw("Cannot insert incident event to the database", zap.Error(err))
+		return err
 	}
 
 	if ev.Type == event.TypeAcknowledgement {
@@ -174,9 +170,8 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 	}
 
 	if err = tx.Commit(); err != nil {
-		i.logger.Errorw("Can't commit db transaction", zap.Error(err))
-
-		return errors.New("can't commit db transaction")
+		i.logger.Errorw("Cannot commit db transaction", zap.Error(err))
+		return err
 	}
 
 	return i.notifyContacts(ctx, ev, notifications)
@@ -229,7 +224,6 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		}
 
 		notifications, err = i.addPendingNotifications(ctx, tx, ev, channels, types.Int{})
-
 		return err
 	})
 	if err != nil {
@@ -249,10 +243,9 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 	oldSeverity := i.Severity
 	newSeverity := ev.Severity
 	if oldSeverity == newSeverity {
-		msg := fmt.Sprintf("Ignoring superfluous %q state event from source %d", ev.Severity.String(), ev.SourceId)
-		i.logger.Warnln(msg)
+		i.logger.Warnf("Ignoring superfluous %q state event from source %d", ev.Severity.String(), ev.SourceId)
 
-		return causedByHistoryId, errors.New(msg)
+		return causedByHistoryId, fmt.Errorf("ignoring superfluous %q state event from source %d", ev.Severity.String(), ev.SourceId)
 	}
 
 	i.logger.Infof("Incident severity changed from %s to %s", oldSeverity.String(), newSeverity.String())
@@ -269,8 +262,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 	historyId, err := i.AddHistory(ctx, tx, history, true)
 	if err != nil {
 		i.logger.Errorw("Failed to insert incident severity changed history", zap.Error(err))
-
-		return causedByHistoryId, errors.New("failed to insert incident severity changed history")
+		return causedByHistoryId, err
 	}
 
 	causedByHistoryId = historyId
@@ -289,9 +281,8 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 		_, err = i.AddHistory(ctx, tx, history, false)
 		if err != nil {
-			i.logger.Errorw("Can't insert incident closed history to the database", zap.Error(err))
-
-			return types.Int{}, errors.New("can't insert incident closed history to the database")
+			i.logger.Errorw("Cannot insert incident closed history to the database", zap.Error(err))
+			return types.Int{}, err
 		}
 
 		if i.timer != nil {
@@ -302,8 +293,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 	i.Severity = newSeverity
 	if err := i.Sync(ctx, tx); err != nil {
 		i.logger.Errorw("Failed to update incident severity", zap.Error(err))
-
-		return causedByHistoryId, errors.New("failed to update incident severity")
+		return causedByHistoryId, err
 	}
 
 	return causedByHistoryId, nil
@@ -313,9 +303,8 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 	i.StartedAt = ev.Time
 	i.Severity = ev.Severity
 	if err := i.Sync(ctx, tx); err != nil {
-		i.logger.Errorw("Can't insert incident to the database", zap.Error(err))
-
-		return errors.New("can't insert incident to the database")
+		i.logger.Errorw("Cannot insert incident to the database", zap.Error(err))
+		return err
 	}
 
 	i.logger.Infow(fmt.Sprintf("Source %d opened incident at severity %q", ev.SourceId, i.Severity.String()), zap.String("message", ev.Message))
@@ -329,9 +318,8 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 	}
 
 	if _, err := i.AddHistory(ctx, tx, historyRow, false); err != nil {
-		i.logger.Errorw("Can't insert incident opened history event", zap.Error(err))
-
-		return errors.New("can't insert incident opened history event")
+		i.logger.Errorw("Cannot insert incident opened history event", zap.Error(err))
+		return err
 	}
 
 	return nil
@@ -368,8 +356,7 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 			err := i.AddRuleMatched(ctx, tx, r)
 			if err != nil {
 				i.logger.Errorw("Failed to upsert incident rule", zap.String("rule", r.Name), zap.Error(err))
-
-				return types.Int{}, errors.New("failed to insert incident rule")
+				return types.Int{}, err
 			}
 
 			history := &HistoryRow{
@@ -382,8 +369,7 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 			insertedID, err := i.AddHistory(ctx, tx, history, true)
 			if err != nil {
 				i.logger.Errorw("Failed to insert rule matched incident history", zap.String("rule", r.Name), zap.Error(err))
-
-				return types.Int{}, errors.New("failed to insert rule matched incident history")
+				return types.Int{}, err
 			}
 
 			if insertedID.Valid && !causedBy.Valid {
@@ -489,8 +475,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 				"Failed to upsert escalation state", zap.String("rule", r.Name),
 				zap.String("escalation", escalation.DisplayName()), zap.Error(err),
 			)
-
-			return errors.New("failed to upsert escalation state")
+			return err
 		}
 
 		history := &HistoryRow{
@@ -507,8 +492,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 				"Failed to insert escalation triggered incident history", zap.String("rule", r.Name),
 				zap.String("escalation", escalation.DisplayName()), zap.Error(err),
 			)
-
-			return errors.New("failed to insert escalation triggered incident history")
+			return err
 		}
 
 		if err := i.AddRecipient(ctx, tx, escalation, ev.ID); err != nil {
@@ -612,11 +596,8 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 
 	_, err := i.AddHistory(ctx, tx, hr, false)
 	if err != nil {
-		i.logger.Errorw(
-			"Failed to add recipient role changed history", zap.String("recipient", contact.String()), zap.Error(err),
-		)
-
-		return errors.New("failed to add recipient role changed history")
+		i.logger.Errorw("Failed to add recipient role changed history", zap.String("recipient", contact.String()), zap.Error(err))
+		return err
 	}
 
 	cr := &ContactRow{IncidentID: hr.IncidentID, Key: recipientKey, Role: newRole}
@@ -624,11 +605,8 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 	stmt, _ := i.db.BuildUpsertStmt(cr)
 	_, err = tx.NamedExecContext(ctx, stmt, cr)
 	if err != nil {
-		i.logger.Errorw(
-			"Failed to upsert incident contact", zap.String("contact", contact.String()), zap.Error(err),
-		)
-
-		return errors.New("failed to upsert incident contact")
+		i.logger.Errorw("Failed to upsert incident contact", zap.String("contact", contact.String()), zap.Error(err))
+		return err
 	}
 
 	return nil
@@ -691,8 +669,7 @@ func (i *Incident) restoreRecipients(ctx context.Context) error {
 			"Failed to restore incident recipients from the database", zap.String("object", i.IncidentObject().DisplayName()),
 			zap.String("incident", i.String()), zap.Error(err),
 		)
-
-		return errors.New("failed to restore incident recipients")
+		return err
 	}
 
 	recipients := make(map[recipient.Key]*RecipientState)
@@ -713,8 +690,7 @@ func (i *Incident) restoreEscalationsState(ctx context.Context) error {
 	err := i.db.SelectContext(ctx, &states, i.db.Rebind(i.db.BuildSelectStmt(state, state)+` WHERE "incident_id" = ?`), i.ID())
 	if err != nil {
 		i.logger.Errorw("Failed to restore incident rule escalation states", zap.Error(err))
-
-		return errors.New("failed to restore incident rule escalation states")
+		return err
 	}
 
 	for _, state := range states {

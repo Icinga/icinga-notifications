@@ -34,11 +34,11 @@ func (r *RuntimeConfig) fetchSources(ctx context.Context, tx *sqlx.Tx) error {
 			zap.String("type", s.Type),
 		)
 		if sourcesById[s.ID] != nil {
-			sourceLogger.Warnw("ignoring duplicate config for source ID")
+			sourceLogger.Warnw("Ignoring duplicate config for source ID")
 		} else {
 			sourcesById[s.ID] = s
 
-			sourceLogger.Debugw("loaded source config")
+			sourceLogger.Debugw("Successfully loaded source config")
 		}
 	}
 

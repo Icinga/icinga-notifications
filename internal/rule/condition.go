@@ -84,7 +84,7 @@ func (e *EscalationFilter) EvalLess(key string, value string) (bool, error) {
 }
 
 func (e *EscalationFilter) EvalLike(key string, value string) (bool, error) {
-	return false, fmt.Errorf("escalation filter doesn't support wildcard matches")
+	return false, fmt.Errorf("escalation filter does not support wildcard matches")
 }
 
 func (e *EscalationFilter) EvalLessOrEqual(key string, value string) (bool, error) {

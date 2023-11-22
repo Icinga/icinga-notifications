@@ -2,7 +2,6 @@ package incident
 
 import (
 	"context"
-	"errors"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
@@ -115,8 +114,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 						"Failed to insert recipient role changed incident history", zap.String("escalation", escalation.DisplayName()),
 						zap.String("recipients", r.String()), zap.Error(err),
 					)
-
-					return errors.New("failed to insert recipient role changed incident history")
+					return err
 				}
 			}
 			cr.Role = state.Role
@@ -129,8 +127,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 				"Failed to upsert incident recipient", zap.String("escalation", escalation.DisplayName()),
 				zap.String("recipient", r.String()), zap.Error(err),
 			)
-
-			return errors.New("failed to upsert incident recipient")
+			return err
 		}
 	}
 
@@ -170,8 +167,7 @@ func (i *Incident) addPendingNotifications(
 					"Failed to insert contact pending notification incident history",
 					zap.String("contact", contact.String()), zap.Error(err),
 				)
-
-				return nil, errors.New("can't insert contact pending notification incident history")
+				return nil, err
 			}
 
 			hr.ID = id.Int64
