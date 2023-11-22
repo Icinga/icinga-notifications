@@ -26,13 +26,13 @@ func (r *RuntimeConfig) fetchChannels(ctx context.Context, tx *sqlx.Tx) error {
 			zap.String("type", c.Type),
 		)
 		if channelsById[c.ID] != nil {
-			channelLogger.Warnw("ignoring duplicate config for channel type")
+			channelLogger.Warnw("Ignoring duplicate config for channel type")
 		} else if err := channel.ValidateType(c.Type); err != nil {
 			channelLogger.Errorw("Cannot load channel config", zap.Error(err))
 		} else {
 			channelsById[c.ID] = c
 
-			channelLogger.Debugw("loaded channel config")
+			channelLogger.Debugw("Successfully loaded channel config")
 		}
 	}
 

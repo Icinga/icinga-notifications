@@ -155,7 +155,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintln(w, "event processed successfully")
+	_, _ = fmt.Fprintln(w, "Successfully processed event")
 	_, _ = fmt.Fprintln(w)
 }
 

@@ -22,7 +22,7 @@ func (r *RuntimeConfig) fetchContactAddresses(ctx context.Context, tx *sqlx.Tx) 
 	addressesById := make(map[int64]*recipient.Address)
 	for _, a := range addresses {
 		addressesById[a.ID] = a
-		r.logger.Debugw("loaded contact_address config",
+		r.logger.Debugw("Successfully loaded contact_address config",
 			zap.Int64("id", a.ID),
 			zap.Int64("contact_id", a.ContactID),
 			zap.String("type", a.Type),
@@ -70,7 +70,7 @@ func (r *RuntimeConfig) addContactAddress(addr *recipient.Address) {
 		if i := slices.Index(contact.Addresses, addr); i < 0 {
 			contact.Addresses = append(contact.Addresses, addr)
 
-			r.logger.Debugw("added new address to contact",
+			r.logger.Debugw("Successfully added new address to contact",
 				zap.Any("contact", contact),
 				zap.Any("address", addr))
 		}
