@@ -167,13 +167,13 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 			ExtraTags: ev.ExtraTags,
 		},
 		Incident: &plugin.Incident{
-			Id:  i.ID(),
-			Url: incidentUrl.String(),
+			Id:       i.ID(),
+			Url:      incidentUrl.String(),
+			Severity: i.SeverityString(),
 		},
 		Event: &plugin.Event{
 			Time:     ev.Time,
 			Type:     ev.Type,
-			Severity: ev.Severity.String(),
 			Username: ev.Username,
 			Message:  ev.Message,
 		},

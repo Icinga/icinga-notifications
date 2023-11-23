@@ -39,7 +39,7 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 
 	var msg bytes.Buffer
 	_, _ = fmt.Fprintf(&msg, "To: %s\n", strings.Join(to, ","))
-	_, _ = fmt.Fprintf(&msg, "Subject: [#%d] %s %s is %s\n\n", req.Incident.Id, req.Event.Type, req.Object.Name, req.Event.Severity)
+	_, _ = fmt.Fprintf(&msg, "Subject: [#%d] %s %s is %s\n\n", req.Incident.Id, req.Event.Type, req.Object.Name, req.Incident.Severity)
 
 	plugin.FormatMessage(&msg, req)
 

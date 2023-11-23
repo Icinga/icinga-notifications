@@ -96,14 +96,14 @@ type Object struct {
 }
 
 type Incident struct {
-	Id  int64  `json:"id"`
-	Url string `json:"url"`
+	Id       int64  `json:"id"`
+	Url      string `json:"url"`
+	Severity string `json:"severity"`
 }
 
 type Event struct {
 	Time     time.Time `json:"time"`
 	Type     string    `json:"type"`
-	Severity string    `json:"severity"`
 	Username string    `json:"username"`
 	Message  string    `json:"message"`
 }
