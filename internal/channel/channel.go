@@ -157,14 +157,15 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 	baseUrl, _ := url.Parse(icingaweb2Url)
 	incidentUrl := baseUrl.JoinPath("/notifications/incident")
 	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID())
+	object := i.IncidentObject()
 
 	req := &plugin.NotificationRequest{
 		Contact: contactStruct,
 		Object: &plugin.Object{
-			Name:      i.ObjectDisplayName(),
+			Name:      object.DisplayName(),
 			Url:       ev.URL,
-			Tags:      ev.Tags,
-			ExtraTags: ev.ExtraTags,
+			Tags:      object.Tags,
+			ExtraTags: object.ExtraTags,
 		},
 		Incident: &plugin.Incident{
 			Id:       i.ID(),
