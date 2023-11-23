@@ -159,7 +159,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 	}
 
 	// Re-evaluate escalations based on the newly evaluated rules.
-	escalations, err := i.evaluateEscalations(ev)
+	escalations, err := i.evaluateEscalations(ev.Time)
 	if err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		return
 	}
 
-	escalations, err := i.evaluateEscalations(ev)
+	escalations, err := i.evaluateEscalations(ev.Time)
 	if err != nil {
 		i.logger.Errorw("Reevaluating time-based escalations failed", zap.Error(err))
 		return
@@ -397,7 +397,7 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 
 // evaluateEscalations evaluates this incidents rule escalations to be triggered if they aren't already.
 // Returns the newly evaluated escalations to be triggered or an error on database failure.
-func (i *Incident) evaluateEscalations(e *event.Event) ([]*rule.Escalation, error) {
+func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation, error) {
 	if i.EscalationState == nil {
 		i.EscalationState = make(map[int64]*EscalationState)
 	}
@@ -410,7 +410,7 @@ func (i *Incident) evaluateEscalations(e *event.Event) ([]*rule.Escalation, erro
 		i.timer = nil
 	}
 
-	filterContext := &rule.EscalationFilter{IncidentAge: e.Time.Sub(i.StartedAt), IncidentSeverity: i.Severity}
+	filterContext := &rule.EscalationFilter{IncidentAge: eventTime.Sub(i.StartedAt), IncidentSeverity: i.Severity}
 
 	var escalations []*rule.Escalation
 	retryAfter := rule.RetryNever
@@ -457,17 +457,16 @@ func (i *Incident) evaluateEscalations(e *event.Event) ([]*rule.Escalation, erro
 		// i.e. if an incident is 15m old and an escalation rule evaluates incident_age>=1h the retryAfter would
 		// contain 45m (1h - incident age (15m)). Therefore, we have to use the event time instead of the incident
 		// start time here.
-		nextEvalAt := e.Time.Add(retryAfter)
+		nextEvalAt := eventTime.Add(retryAfter)
 
 		i.logger.Infow("Scheduling escalation reevaluation", zap.Duration("after", retryAfter), zap.Time("at", nextEvalAt))
 		i.timer = time.AfterFunc(retryAfter, func() {
 			i.logger.Info("Reevaluating escalations")
 
 			i.RetriggerEscalations(&event.Event{
-				Type:     event.TypeInternal,
-				Time:     nextEvalAt,
-				Severity: e.Severity,
-				Message:  fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt)),
+				Type:    event.TypeInternal,
+				Time:    nextEvalAt,
+				Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt)),
 			})
 		})
 	}
