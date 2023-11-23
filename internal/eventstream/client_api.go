@@ -263,19 +263,31 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 	return nil
 }
 
-// connectEventStream connects to the EventStream within an infinite loop until a connection was established.
+// connectEventStreamReadCloser wraps io.ReadCloser with a context.CancelFunc to be returned in connectEventStream.
+type connectEventStreamReadCloser struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+// Close the internal ReadCloser with canceling the internal http.Request's context first.
+func (e *connectEventStreamReadCloser) Close() error {
+	e.cancel()
+	return e.ReadCloser.Close()
+}
+
+// connectEventStream connects to the EventStream, retries until a connection was established.
 //
 // The esTypes is a string array of required Event Stream types.
 //
-// An error will be returned if reconnecting resp. retrying the (almost) same thing will not help fix it.
-func (client *Client) connectEventStream(esTypes []string) (*http.Response, context.CancelFunc, error) {
+// An error will only be returned if reconnecting - retrying the (almost) same thing - will not help.
+func (client *Client) connectEventStream(esTypes []string) (io.ReadCloser, error) {
 	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/events")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	for i := 0; ; i++ {
-		// Always ensure an unique queue name to ensure no conflicts might occur.
+		// Always ensure an unique queue name to mitigate possible naming conflicts.
 		queueNameRndBuff := make([]byte, 16)
 		_, _ = rand.Read(queueNameRndBuff)
 
@@ -284,17 +296,18 @@ func (client *Client) connectEventStream(esTypes []string) (*http.Response, cont
 			"types": esTypes,
 		})
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		// Sub-context which might get canceled early if connecting takes to long.
 		// The reqCancel function will be called after the select below or when leaving the function with an error.
+		// When leaving the function without an error, it is being called in connectEventStreamReadCloser.Close().
 		reqCtx, reqCancel := context.WithCancel(client.Ctx)
 
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, apiUrl, bytes.NewReader(reqBody))
 		if err != nil {
 			reqCancel()
-			return nil, nil, err
+			return nil, err
 		}
 
 		req.SetBasicAuth(client.ApiBasicAuthUser, client.ApiBasicAuthPass)
@@ -327,7 +340,11 @@ func (client *Client) connectEventStream(esTypes []string) (*http.Response, cont
 		select {
 		case res, ok := <-resCh:
 			if ok {
-				return res, reqCancel, nil
+				esReadCloser := &connectEventStreamReadCloser{
+					ReadCloser: res.Body,
+					cancel:     reqCancel,
+				}
+				return esReadCloser, nil
 			}
 
 		case <-time.After(3 * time.Second):
@@ -339,7 +356,7 @@ func (client *Client) connectEventStream(esTypes []string) (*http.Response, cont
 		select {
 		case <-time.After(min(3*time.Minute, time.Duration(math.Exp2(float64(i)))*time.Second)):
 		case <-client.Ctx.Done():
-			return nil, nil, client.Ctx.Err()
+			return nil, client.Ctx.Err()
 		}
 	}
 }
@@ -350,7 +367,7 @@ func (client *Client) connectEventStream(esTypes []string) (*http.Response, cont
 // be returned.
 func (client *Client) listenEventStream() error {
 	// Ensure to implement a handler case in the type switch below for each requested type.
-	response, cancel, err := client.connectEventStream([]string{
+	eventStream, err := client.connectEventStream([]string{
 		typeStateChange,
 		typeAcknowledgementSet,
 		// typeAcknowledgementCleared,
@@ -364,11 +381,7 @@ func (client *Client) listenEventStream() error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		cancel()
-
-		_ = response.Body.Close()
-	}()
+	defer func() { _ = eventStream.Close() }()
 
 	select {
 	case <-client.Ctx.Done():
@@ -379,7 +392,7 @@ func (client *Client) listenEventStream() error {
 
 	client.Logger.Info("Start listening on Icinga 2 Event Stream")
 
-	lineScanner := bufio.NewScanner(response.Body)
+	lineScanner := bufio.NewScanner(eventStream)
 	for lineScanner.Scan() {
 		rawJson := lineScanner.Bytes()
 
