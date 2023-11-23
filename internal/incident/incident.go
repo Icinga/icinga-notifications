@@ -68,6 +68,10 @@ func (i *Incident) ObjectDisplayName() string {
 	return i.Object.DisplayName()
 }
 
+func (i *Incident) SeverityString() string {
+	return i.Severity.String()
+}
+
 func (i *Incident) String() string {
 	return fmt.Sprintf("#%d", i.incidentRowID)
 }

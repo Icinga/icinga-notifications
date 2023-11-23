@@ -23,7 +23,7 @@ func main() {
 
 func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 	var output bytes.Buffer
-	_, _ = fmt.Fprintf(&output, "[#%d] %s %s is %s\n\n", req.Incident.Id, req.Event.Type, req.Object.Name, req.Event.Severity)
+	_, _ = fmt.Fprintf(&output, "[#%d] %s %s is %s\n\n", req.Incident.Id, req.Event.Type, req.Object.Name, req.Incident.Severity)
 
 	plugin.FormatMessage(&output, req)
 

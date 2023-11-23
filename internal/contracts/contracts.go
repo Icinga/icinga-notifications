@@ -7,4 +7,5 @@ type Incident interface {
 
 	ID() int64
 	ObjectDisplayName() string
+	SeverityString() string
 }
