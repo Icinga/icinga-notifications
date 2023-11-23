@@ -1,11 +1,14 @@
 package contracts
 
-import "fmt"
+import (
+	"fmt"
+	"github.com/icinga/icinga-notifications/internal/object"
+)
 
 type Incident interface {
 	fmt.Stringer
 
 	ID() int64
-	ObjectDisplayName() string
+	IncidentObject() *object.Object
 	SeverityString() string
 }

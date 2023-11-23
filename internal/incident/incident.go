@@ -64,8 +64,8 @@ func NewIncident(
 	}
 }
 
-func (i *Incident) ObjectDisplayName() string {
-	return i.Object.DisplayName()
+func (i *Incident) IncidentObject() *object.Object {
+	return i.Object
 }
 
 func (i *Incident) SeverityString() string {
@@ -688,7 +688,7 @@ func (i *Incident) restoreRecipients(ctx context.Context) error {
 	err := i.db.SelectContext(ctx, &contacts, i.db.Rebind(i.db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), i.ID())
 	if err != nil {
 		i.logger.Errorw(
-			"Failed to restore incident recipients from the database", zap.String("object", i.ObjectDisplayName()),
+			"Failed to restore incident recipients from the database", zap.String("object", i.IncidentObject().DisplayName()),
 			zap.String("incident", i.String()), zap.Error(err),
 		)
 
