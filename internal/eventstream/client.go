@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -76,8 +77,6 @@ func NewClientsFromConfig(
 
 	for _, icinga2Api := range conf.Icinga2Apis {
 		logger := logs.GetChildLogger(fmt.Sprintf("eventstream-%d", icinga2Api.NotificationsEventSourceId))
-		callbackLogger := logs.GetChildLogger(fmt.Sprintf("eventstream-callback-%d", icinga2Api.NotificationsEventSourceId))
-
 		client := &Client{
 			ApiHost:          icinga2Api.Host,
 			ApiBasicAuthUser: icinga2Api.AuthUser,
@@ -104,9 +103,16 @@ func NewClientsFromConfig(
 			IcingaWebRoot:                    conf.Icingaweb2URL,
 
 			CallbackFn: func(ev *event.Event) {
+				l := logger.With(zap.Stringer("event", ev))
+
 				err := incident.ProcessEvent(ctx, db, logs, runtimeConfig, ev)
-				if err != nil {
-					callbackLogger.Warnw("Cannot process event", zap.Error(err))
+				switch {
+				case errors.Is(err, incident.ErrSuperfluousStateChange):
+					l.Debugw("Stopped processing event with superfluous state change", zap.Error(err))
+				case err != nil:
+					l.Errorw("Cannot process event", zap.Error(err))
+				default:
+					l.Debug("Successfully processed event over callback")
 				}
 			},
 			Ctx:    ctx,
