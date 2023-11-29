@@ -11,9 +11,14 @@ import (
 	"time"
 )
 
+// Event received of a specified Type for internal processing.
+//
+// The JSON struct tags are being used to unmarshal a JSON representation received from the listener.Listener. Some
+// fields are being omitted as they are only allowed to be populated from within icinga-notifications. Currently, there
+// is no Event being marshalled into its JSON representation.
 type Event struct {
-	Time     time.Time
-	SourceId int64 `json:"source_id"`
+	Time     time.Time `json:"-"`
+	SourceId int64     `json:"-"`
 
 	Name      string            `json:"name"`
 	URL       string            `json:"url"`
@@ -25,7 +30,7 @@ type Event struct {
 	Username string   `json:"username"`
 	Message  string   `json:"message"`
 
-	ID int64
+	ID int64 `json:"-"`
 }
 
 const (

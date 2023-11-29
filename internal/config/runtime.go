@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
@@ -11,6 +12,9 @@ import (
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -44,6 +48,7 @@ type ConfigSet struct {
 	TimePeriods      map[int64]*timeperiod.TimePeriod
 	Schedules        map[int64]*recipient.Schedule
 	Rules            map[int64]*rule.Rule
+	Sources          map[int64]*Source
 }
 
 func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context) error {
@@ -137,6 +142,45 @@ func (r *RuntimeConfig) GetContact(username string) *recipient.Contact {
 	return nil
 }
 
+// GetSourceFromCredentials verifies a credential pair against known Sources.
+//
+// This method returns either a *Source or a nil pointer and logs the cause to the given logger. This is in almost all
+// cases a debug logging message, except when something server-side is wrong, e.g., the hash is invalid.
+func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logging.Logger) *Source {
+	r.RLock()
+	defer r.RUnlock()
+
+	sourceIdRaw, sourceIdOk := strings.CutPrefix(user, "source-")
+	if !sourceIdOk {
+		logger.Debugw("Cannot extract source ID from HTTP basic auth username", zap.String("user-input", user))
+		return nil
+	}
+	sourceId, err := strconv.ParseInt(sourceIdRaw, 10, 64)
+	if err != nil {
+		logger.Debugw("Cannot convert extracted source Id to int", zap.String("user-input", user), zap.Error(err))
+		return nil
+	}
+
+	source, ok := r.Sources[sourceId]
+	if !ok {
+		logger.Debugw("Cannot check credentials for unknown source ID", zap.Int64("id", sourceId))
+		return nil
+	}
+
+	// If either PHP's PASSWORD_DEFAULT changes or Icinga Web 2 starts using something else, e.g., Argon2id, this will
+	// return a descriptive error as the identifier does no longer match the bcrypt "$2y$".
+	err = bcrypt.CompareHashAndPassword([]byte(source.ListenerPasswordHash), []byte(pass))
+	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+		logger.Debugw("Invalid password for this source", zap.Int64("id", sourceId))
+		return nil
+	} else if err != nil {
+		logger.Errorw("Failed to verify password for this source", zap.Int64("id", sourceId), zap.Error(err))
+		return nil
+	}
+
+	return source
+}
+
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
 	r.logger.Debug("fetching configuration from database")
 	start := time.Now()
@@ -162,6 +206,7 @@ func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
 		r.fetchTimePeriods,
 		r.fetchSchedules,
 		r.fetchRules,
+		r.fetchSources,
 	}
 	for _, f := range updateFuncs {
 		if err := f(ctx, tx); err != nil {
@@ -188,6 +233,7 @@ func (r *RuntimeConfig) applyPending() {
 	r.applyPendingTimePeriods()
 	r.applyPendingSchedules()
 	r.applyPendingRules()
+	r.applyPendingSources()
 
 	r.logger.Debugw("applied pending configuration", zap.Duration("took", time.Since(start)))
 }

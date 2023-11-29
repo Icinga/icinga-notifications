@@ -25,8 +25,12 @@ It is required that you have created a new database and imported the [schema](sc
 
 Additionally, it also requires you to manually insert items into the **source** table before starting the daemon.
 ```sql
-INSERT INTO source (id, type, name) VALUES (1, 'icinga2', 'Icinga 2')
+INSERT INTO source (id, type, name, listener_password_hash)
+VALUES (1, 'icinga2', 'Icinga 2', '$2y$10$QU8bJ7cpW1SmoVQ/RndX5O2J5L1PJF7NZ2dlIW7Rv3zUEcbUFg3z2');
 ```
+The `listener_password_hash` is a [PHP `password_hash`](https://www.php.net/manual/en/function.password-hash.php) with the `PASSWORD_DEFAULT` algorithm, currently bcrypt.
+In the example above, this is "correct horse battery staple".
+This mimics Icinga Web 2's behavior, as stated in [its documentation](https://icinga.com/docs/icinga-web/latest/doc/20-Advanced-Topics/#manual-user-creation-for-database-authentication-backend).
 
 Then, you can launch the daemon with the following command.
 ```go

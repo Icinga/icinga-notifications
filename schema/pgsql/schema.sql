@@ -129,6 +129,17 @@ CREATE TABLE source (
     -- will likely need a distinguishing value for multiple sources of the same type in the future, like for example
     -- the Icinga DB environment ID for Icinga 2 sources
 
+    -- listener_password_hash is required to limit API access for incoming connections to the Listener. The username is
+    -- "source-${id}", allowing an early verification before having to parse the POSTed event.
+    --
+    -- This behavior might change in the future to become "type"-dependable.
+    listener_password_hash text NOT NULL,
+
+    -- The hash is a PHP password_hash with PASSWORD_DEFAULT algorithm, defaulting to bcrypt. This check roughly ensures
+    -- that listener_password_hash can only be populated with bcrypt hashes.
+    -- https://icinga.com/docs/icinga-web/latest/doc/20-Advanced-Topics/#manual-user-creation-for-database-authentication-backend
+    CHECK (listener_password_hash LIKE '$2y$%'),
+
     CONSTRAINT pk_source PRIMARY KEY (id)
 );
 

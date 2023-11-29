@@ -79,31 +79,54 @@ func (l *Listener) Run(ctx context.Context) error {
 }
 
 func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
+	// abort the current connection by sending the status code and an error both to the log and back to the client.
+	abort := func(statusCode int, ev *event.Event, format string, a ...any) {
+		msg := format
+		if len(a) > 0 {
+			msg = fmt.Sprintf(format, a...)
+		}
+
+		logger := l.logger.With(zap.Int("status-code", statusCode), zap.String("msg", msg))
+		if ev != nil {
+			logger = logger.With(zap.Stringer("event", ev))
+		}
+
+		http.Error(w, msg, statusCode)
+		logger.Debugw("Abort listener submitted event processing")
+	}
+
 	if req.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		_, _ = fmt.Fprintln(w, "POST required")
+		abort(http.StatusMethodNotAllowed, nil, "POST required")
+		return
+	}
+
+	var source *config.Source
+	if authUser, authPass, authOk := req.BasicAuth(); authOk {
+		source = l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
+	}
+	if source == nil {
+		w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications"`)
+		abort(http.StatusUnauthorized, nil, "HTTP authorization required")
 		return
 	}
 
 	var ev event.Event
 	err := json.NewDecoder(req.Body).Decode(&ev)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = fmt.Fprintf(w, "cannot parse JSON body: %v\n", err)
+		abort(http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
 		return
 	}
 
 	if len(ev.Tags) == 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = fmt.Fprintln(w, "ignoring invalid event: tags cannot be empty")
+		abort(http.StatusBadRequest, &ev, "ignoring invalid event: tags cannot be empty")
 		return
 	}
 
 	ev.Time = time.Now()
+	ev.SourceId = source.ID
 
 	if ev.Severity == event.SeverityNone && ev.Type == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = fmt.Fprintln(w, "ignoring invalid event: must set 'type' or 'severity'")
+		abort(http.StatusBadRequest, &ev, "ignoring invalid event: must set 'type' or 'severity'")
 		return
 	}
 
@@ -111,8 +134,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		if ev.Type == "" {
 			ev.Type = event.TypeState
 		} else if ev.Type != event.TypeState {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = fmt.Fprintf(w, "ignoring invalid event: if 'severity' is set, 'type' must not be set or set to %q\n", event.TypeState)
+			abort(http.StatusBadRequest, &ev,
+				"ignoring invalid event: if 'severity' is set, 'type' must not be set or set to %q", event.TypeState)
 			return
 		}
 	}
@@ -120,8 +143,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	if ev.Severity == event.SeverityNone {
 		if ev.Type != event.TypeAcknowledgement {
 			// It's neither a state nor an acknowledgement event.
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = fmt.Fprintf(w, "received not a state/acknowledgement event, ignoring\n")
+			abort(http.StatusBadRequest, &ev, "received not a state/acknowledgement event, ignoring")
 			return
 		}
 	}
@@ -130,17 +152,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	obj, err := object.FromEvent(ctx, l.db, &ev)
 	if err != nil {
 		l.logger.Errorw("Can't sync object", zap.Error(err))
-
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprintln(w, err.Error())
+		abort(http.StatusInternalServerError, &ev, err.Error())
 		return
 	}
 
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
 	currentIncident, created, err := incident.GetCurrent(ctx, l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, createIncident)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprintln(w, err)
+		abort(http.StatusInternalServerError, &ev, err.Error())
 		return
 	}
 
@@ -166,12 +185,11 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	l.logger.Infof("Processing event")
+	l.logger.Infow("Processing event", zap.String("event", ev.String()))
 
 	err = currentIncident.ProcessEvent(ctx, &ev, created)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprintln(w, err)
+		abort(http.StatusInternalServerError, &ev, err.Error())
 		return
 	}
 
