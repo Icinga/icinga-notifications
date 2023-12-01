@@ -55,7 +55,7 @@ type Client struct {
 	// Ctx for all web requests as well as internal wait loops.
 	Ctx context.Context
 	// Logger to log to.
-	Logger *logging.Logger
+	Logger *zap.SugaredLogger
 
 	// eventDispatcherEventStream communicates Events to be processed from the Event Stream API.
 	eventDispatcherEventStream chan *eventMsg
@@ -76,7 +76,7 @@ func NewClientsFromConfig(
 	clients := make([]*Client, 0, len(conf.Icinga2Apis))
 
 	for _, icinga2Api := range conf.Icinga2Apis {
-		logger := logs.GetChildLogger(fmt.Sprintf("eventstream-%d", icinga2Api.NotificationsEventSourceId))
+		logger := logs.GetChildLogger("eventstream").With(zap.Int64("source-id", icinga2Api.NotificationsEventSourceId))
 		client := &Client{
 			ApiHost:          icinga2Api.Host,
 			ApiBasicAuthUser: icinga2Api.AuthUser,
