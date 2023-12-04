@@ -8,6 +8,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
@@ -102,9 +103,14 @@ func NewClientsFromConfig(
 			IcingaNotificationsEventSourceId: icinga2Api.NotificationsEventSourceId,
 			IcingaWebRoot:                    conf.Icingaweb2URL,
 
-			CallbackFn: makeProcessEvent(ctx, db, callbackLogger, logs, runtimeConfig),
-			Ctx:        ctx,
-			Logger:     logger,
+			CallbackFn: func(ev *event.Event) {
+				err := incident.ProcessEvent(ctx, db, logs, runtimeConfig, ev)
+				if err != nil {
+					callbackLogger.Warnw("Cannot process event", zap.Error(err))
+				}
+			},
+			Ctx:    ctx,
+			Logger: logger,
 		}
 
 		if icinga2Api.IcingaCaFile != "" {
