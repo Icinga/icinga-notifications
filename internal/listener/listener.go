@@ -10,7 +10,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
-	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
@@ -148,46 +147,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	ctx := context.Background()
-	obj, err := object.FromEvent(ctx, l.db, &ev)
-	if err != nil {
-		l.logger.Errorw("Can't sync object", zap.Error(err))
-		abort(http.StatusInternalServerError, &ev, err.Error())
-		return
-	}
-
-	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
-	currentIncident, created, err := incident.GetCurrent(ctx, l.db, obj, l.logs.GetChildLogger("incident"), l.runtimeConfig, createIncident)
-	if err != nil {
-		abort(http.StatusInternalServerError, &ev, err.Error())
-		return
-	}
-
-	if currentIncident == nil {
-		w.WriteHeader(http.StatusNotAcceptable)
-
-		if ev.Type == event.TypeAcknowledgement {
-			msg := fmt.Sprintf("%q doesn't have active incident. Ignoring acknowledgement event from source %d", obj.DisplayName(), ev.SourceId)
-			_, _ = fmt.Fprintln(w, msg)
-
-			l.logger.Warnln(msg)
-			return
-		}
-
-		if ev.Severity != event.SeverityOK {
-			panic("non-OK state but no incident was created")
-		}
-
-		msg := fmt.Sprintf("Ignoring superfluous OK state event from source %d", ev.SourceId)
-		l.logger.Warnw(msg, zap.String("object", obj.DisplayName()))
-
-		_, _ = fmt.Fprintln(w, msg)
-		return
-	}
-
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
-
-	err = currentIncident.ProcessEvent(ctx, &ev, created)
+	err = incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
 	if err != nil {
 		abort(http.StatusInternalServerError, &ev, err.Error())
 		return
