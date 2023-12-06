@@ -25,6 +25,10 @@ type RuntimeConfig struct {
 	// Accessing it requires a lock that is obtained with RLock() and released with RUnlock().
 	ConfigSet
 
+	// EventStreamLaunchFunc is a callback to launch an Event Stream API Client.
+	// This became necessary due to circular imports, either with the incident or eventstream package.
+	EventStreamLaunchFunc func(source *Source)
+
 	// pending contains changes to config objects that are to be applied to the embedded live config.
 	pending ConfigSet
 
@@ -36,8 +40,18 @@ type RuntimeConfig struct {
 	mu sync.RWMutex
 }
 
-func NewRuntimeConfig(db *icingadb.DB, logs *logging.Logging) *RuntimeConfig {
-	return &RuntimeConfig{db: db, logs: logs, logger: logs.GetChildLogger("runtime-updates")}
+func NewRuntimeConfig(
+	esLaunch func(source *Source),
+	logs *logging.Logging,
+	db *icingadb.DB,
+) *RuntimeConfig {
+	return &RuntimeConfig{
+		EventStreamLaunchFunc: esLaunch,
+
+		logs:   logs,
+		logger: logs.GetChildLogger("runtime-updates"),
+		db:     db,
+	}
 }
 
 type ConfigSet struct {
@@ -167,9 +181,14 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 		return nil
 	}
 
+	if !source.ListenerPasswordHash.Valid {
+		logger.Debugw("Cannot check credentials for source without a listener_password_hash", zap.Int64("id", sourceId))
+		return nil
+	}
+
 	// If either PHP's PASSWORD_DEFAULT changes or Icinga Web 2 starts using something else, e.g., Argon2id, this will
 	// return a descriptive error as the identifier does no longer match the bcrypt "$2y$".
-	err = bcrypt.CompareHashAndPassword([]byte(source.ListenerPasswordHash), []byte(pass))
+	err = bcrypt.CompareHashAndPassword([]byte(source.ListenerPasswordHash.String), []byte(pass))
 	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
 		logger.Debugw("Invalid password for this source", zap.Int64("id", sourceId))
 		return nil

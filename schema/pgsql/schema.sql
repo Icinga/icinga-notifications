@@ -124,21 +124,29 @@ CREATE TABLE schedule_member (
 
 CREATE TABLE source (
     id bigserial,
+    -- The type "icinga2" is special and requires a populated source_icinga2 row.
     type text NOT NULL,
     name text NOT NULL,
     -- will likely need a distinguishing value for multiple sources of the same type in the future, like for example
     -- the Icinga DB environment ID for Icinga 2 sources
 
-    -- listener_password_hash is required to limit API access for incoming connections to the Listener. The username is
-    -- "source-${id}", allowing an early verification before having to parse the POSTed event.
-    --
-    -- This behavior might change in the future to become "type"-dependable.
-    listener_password_hash text NOT NULL,
+    -- The column listener_password_hash is type-dependent.
+    -- If type is not "icinga2", listener_password_hash is required to limit API access for incoming connections
+    -- to the Listener. The username will be "source-${id}", allowing early verification.
+    listener_password_hash text,
+
+    -- Following columns are for the "icinga" type.
+    icinga2_base_url text,
+    icinga2_auth_user text,
+    icinga2_auth_pass text,
+    icinga2_ca_pem text,
+    icinga2_insecure_tls boolenum NOT NULL DEFAULT 'n',
 
     -- The hash is a PHP password_hash with PASSWORD_DEFAULT algorithm, defaulting to bcrypt. This check roughly ensures
     -- that listener_password_hash can only be populated with bcrypt hashes.
     -- https://icinga.com/docs/icinga-web/latest/doc/20-Advanced-Topics/#manual-user-creation-for-database-authentication-backend
-    CHECK (listener_password_hash LIKE '$2y$%'),
+    CHECK (listener_password_hash IS NULL OR listener_password_hash LIKE '$2y$%'),
+    CHECK (type != 'icinga2' OR (icinga2_base_url IS NOT NULL AND icinga2_auth_user IS NOT NULL AND icinga2_auth_pass IS NOT NULL)),
 
     CONSTRAINT pk_source PRIMARY KEY (id)
 );
