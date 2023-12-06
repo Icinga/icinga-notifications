@@ -2,21 +2,11 @@ package eventstream
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"errors"
-	"fmt"
-	"github.com/icinga/icinga-notifications/internal/config"
-	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
-	"github.com/icinga/icinga-notifications/internal/incident"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"net/http"
 	"net/url"
-	"os"
 	"time"
 )
 
@@ -39,21 +29,23 @@ type eventMsg struct {
 // the Client executes a worker within its own goroutine, which dispatches event.Event to the CallbackFn and enforces
 // order during catching up after (re-)connections.
 type Client struct {
-	// ApiHost et al. configure where and how the Icinga 2 API can be reached.
-	ApiHost          string
+	// ApiBaseURL et al. configure where and how the Icinga 2 API can be reached.
+	ApiBaseURL       string
 	ApiBasicAuthUser string
 	ApiBasicAuthPass string
 	ApiHttpTransport http.Transport
 
-	// IcingaNotificationsEventSourceId to be reflected in generated event.Events.
-	IcingaNotificationsEventSourceId int64
+	// EventSourceId to be reflected in generated event.Events.
+	EventSourceId int64
 	// IcingaWebRoot points to the Icinga Web 2 endpoint for generated URLs.
 	IcingaWebRoot string
 
 	// CallbackFn receives generated event.Event objects.
 	CallbackFn func(*event.Event)
-	// Ctx for all web requests as well as internal wait loops.
-	Ctx context.Context
+	// Ctx for all web requests as well as internal wait loops. The CtxCancel can be used to stop this Client.
+	// Both fields are being populated with a new context from the NewClientFromConfig function.
+	Ctx       context.Context
+	CtxCancel context.CancelFunc
 	// Logger to log to.
 	Logger *zap.SugaredLogger
 
@@ -61,87 +53,6 @@ type Client struct {
 	eventDispatcherEventStream chan *eventMsg
 	// catchupPhaseRequest requests the main worker to switch to the catch-up-phase to query the API for missed events.
 	catchupPhaseRequest chan struct{}
-}
-
-// NewClientsFromConfig returns all Clients defined in the conf.ConfigFile.
-//
-// Those are prepared and just needed to be started by calling their Client.Process method.
-func NewClientsFromConfig(
-	ctx context.Context,
-	logs *logging.Logging,
-	db *icingadb.DB,
-	runtimeConfig *config.RuntimeConfig,
-	conf *daemon.ConfigFile,
-) ([]*Client, error) {
-	clients := make([]*Client, 0, len(conf.Icinga2Apis))
-
-	for _, icinga2Api := range conf.Icinga2Apis {
-		logger := logs.GetChildLogger("eventstream").With(zap.Int64("source-id", icinga2Api.NotificationsEventSourceId))
-		client := &Client{
-			ApiHost:          icinga2Api.Host,
-			ApiBasicAuthUser: icinga2Api.AuthUser,
-			ApiBasicAuthPass: icinga2Api.AuthPass,
-			ApiHttpTransport: http.Transport{
-				// Hardened TLS config adjusted to Icinga 2's configuration:
-				// - https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#objecttype-apilistener
-				// - https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#security
-				// - https://ssl-config.mozilla.org/#server=go&config=intermediate
-				TLSClientConfig: &tls.Config{
-					MinVersion: tls.VersionTLS12,
-					CipherSuites: []uint16{
-						tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-						tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-						tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-						tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-						tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-						tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-					},
-				},
-			},
-
-			IcingaNotificationsEventSourceId: icinga2Api.NotificationsEventSourceId,
-			IcingaWebRoot:                    conf.Icingaweb2URL,
-
-			CallbackFn: func(ev *event.Event) {
-				l := logger.With(zap.Stringer("event", ev))
-
-				err := incident.ProcessEvent(ctx, db, logs, runtimeConfig, ev)
-				switch {
-				case errors.Is(err, incident.ErrSuperfluousStateChange):
-					l.Debugw("Stopped processing event with superfluous state change", zap.Error(err))
-				case err != nil:
-					l.Errorw("Cannot process event", zap.Error(err))
-				default:
-					l.Debug("Successfully processed event over callback")
-				}
-			},
-			Ctx:    ctx,
-			Logger: logger,
-		}
-
-		if icinga2Api.IcingaCaFile != "" {
-			caData, err := os.ReadFile(icinga2Api.IcingaCaFile)
-			if err != nil {
-				return nil, fmt.Errorf("cannot read CA file %q for Event Stream ID %d, %w",
-					icinga2Api.IcingaCaFile, icinga2Api.NotificationsEventSourceId, err)
-			}
-
-			certPool := x509.NewCertPool()
-			if !certPool.AppendCertsFromPEM(caData) {
-				return nil, fmt.Errorf("cannot add custom CA file to CA pool for Event Stream ID %d, %w",
-					icinga2Api.NotificationsEventSourceId, err)
-			}
-
-			client.ApiHttpTransport.TLSClientConfig.RootCAs = certPool
-		}
-
-		if icinga2Api.InsecureTls {
-			client.ApiHttpTransport.TLSClientConfig.InsecureSkipVerify = true
-		}
-
-		clients = append(clients, client)
-	}
-	return clients, nil
 }
 
 // buildCommonEvent creates an event.Event based on Host and (optional) Service attributes to be specified later.
@@ -206,7 +117,7 @@ func (client *Client) buildCommonEvent(ctx context.Context, host, service string
 
 	return &event.Event{
 		Time:      time.Now(),
-		SourceId:  client.IcingaNotificationsEventSourceId,
+		SourceId:  client.EventSourceId,
 		Name:      eventName,
 		URL:       eventUrl.String(),
 		Tags:      eventTags,
