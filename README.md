@@ -25,22 +25,11 @@ It is required that you have created a new database and imported the [schema](sc
 
 Additionally, it also requires you to manually insert items into the **source** table before starting the daemon.
 ```sql
-INSERT INTO source (id, type, name, listener_password_hash)
-VALUES (1, 'icinga2', 'Icinga 2', '$2y$10$QU8bJ7cpW1SmoVQ/RndX5O2J5L1PJF7NZ2dlIW7Rv3zUEcbUFg3z2');
+INSERT INTO source
+    (id, type, name, icinga2_base_url, icinga2_auth_user, icinga2_auth_pass, icinga2_insecure_tls)
+VALUES
+    (1, 'icinga2', 'Local Icinga 2', 'https://localhost:5665', 'root', 'icinga', 'y');
 ```
-The `listener_password_hash` is a [PHP `password_hash`](https://www.php.net/manual/en/function.password-hash.php) with the `PASSWORD_DEFAULT` algorithm, currently bcrypt.
-In the example above, this is "correct horse battery staple".
-This mimics Icinga Web 2's behavior, as stated in [its documentation](https://icinga.com/docs/icinga-web/latest/doc/20-Advanced-Topics/#manual-user-creation-for-database-authentication-backend).
-
-Currently, there are two ways how notifications get communicated between Icinga 2 and Icinga Notifications.
-Please select only one, whereby the first is recommended:
-
-* Icinga Notifications can pull those from the Icinga 2 API when being configured in the YAML configuration file.
-  For each `source`, as inserted in the database above, an `icinga2-apis` endpoint must be defined.
-* Otherwise, Icinga 2 can push the notifications to the Icinga Notification daemon.
-  Therefore, you need to copy the [Icinga 2 config](icinga2.conf) to `/etc/icinga2/features-enabled` on your master node(s) and restart the Icinga 2 service.
-  At the top of this file, you will find multiple configurations options that can be set in `/etc/icinga2/constants.conf`.
-  There are also Icinga2 `EventCommand` definitions in this file that will automatically match all your **checkables**, which may not work properly if the configuration already uses event commands for something else.
 
 Then, you can launch the daemon with the following command.
 ```go

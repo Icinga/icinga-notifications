@@ -86,10 +86,19 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	runtimeConfig := config.NewRuntimeConfig(db, logs)
+	esLauncher := &eventstream.Launcher{
+		Ctx:           ctx,
+		Logs:          logs,
+		Db:            db,
+		RuntimeConfig: nil, // Will be set below as it is interconnected..
+	}
+
+	runtimeConfig := config.NewRuntimeConfig(esLauncher.Launch, logs, db)
 	if err := runtimeConfig.UpdateFromDatabase(ctx); err != nil {
 		logger.Fatalw("failed to load config from database", zap.Error(err))
 	}
+
+	esLauncher.RuntimeConfig = runtimeConfig
 
 	go runtimeConfig.PeriodicUpdates(ctx, 1*time.Second)
 
@@ -98,14 +107,8 @@ func main() {
 		logger.Fatalw("Can't load incidents from database", zap.Error(err))
 	}
 
-	esClients, err := eventstream.NewClientsFromConfig(ctx, logs, db, runtimeConfig, conf)
-	if err != nil {
-		logger.Fatalw("cannot prepare Event Stream API Clients form config", zap.Error(err))
-	}
-	for _, esClient := range esClients {
-		go esClient.Process()
-	}
-
+	// Wait to load open incidents from the database before either starting Event Stream Clients or starting the Listener.
+	esLauncher.Ready()
 	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {
 		logger.Errorw("Listener has finished with an error", zap.Error(err))
 	} else {
