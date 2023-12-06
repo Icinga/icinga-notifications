@@ -55,7 +55,7 @@ func (client *Client) queryObjectsApi(
 	body io.Reader,
 	headers map[string]string,
 ) (io.ReadCloser, error) {
-	apiUrl, err := url.JoinPath(client.ApiHost, urlPaths...)
+	apiUrl, err := url.JoinPath(client.ApiBaseURL, urlPaths...)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +281,7 @@ func (e *connectEventStreamReadCloser) Close() error {
 //
 // An error will only be returned if reconnecting - retrying the (almost) same thing - will not help.
 func (client *Client) connectEventStream(esTypes []string) (io.ReadCloser, error) {
-	apiUrl, err := url.JoinPath(client.ApiHost, "/v1/events")
+	apiUrl, err := url.JoinPath(client.ApiBaseURL, "/v1/events")
 	if err != nil {
 		return nil, err
 	}
