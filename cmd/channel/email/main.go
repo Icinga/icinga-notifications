@@ -109,7 +109,7 @@ func (ch *Email) GetInfo() *plugin.Info {
 				"en_US": "From",
 				"de_DE": "Von",
 			},
-			Placeholder: "icinga@example.com",
+			Default: "icinga@example.com",
 		},
 	}
 

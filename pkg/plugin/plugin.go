@@ -36,13 +36,10 @@ type ConfigOption struct {
 	//  An "en_US" locale must be given as a fallback
 	Label map[string]string `json:"label"`
 
-	// Element placeholder
-	Placeholder string `json:"placeholder,omitempty"`
-
 	// Element title: When the user moves the mouse pointer over an element, a tooltip is displayed with a given message.
 	Help map[string]string `json:"help,omitempty"`
 
-	// Element default value: bool for checkbox, string for other elements
+	// Element default: bool for checkbox default value, string for other elements (used as placeholder)
 	Default any `json:"default,omitempty"`
 
 	// Set true if this element is required, omit otherwise
