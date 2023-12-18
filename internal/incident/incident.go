@@ -35,6 +35,9 @@ type Incident struct {
 
 	incidentRowID int64
 
+	// set true if the incident is just created
+	IsNew bool
+
 	// timer calls RetriggerEscalations the next time any escalation could be reached on the incident.
 	//
 	// For example, if there are escalations configured for incident_age>=1h and incident_age>=2h, if the incident
@@ -103,7 +106,7 @@ func (i *Incident) IsNotifiable(role ContactRole) bool {
 }
 
 // ProcessEvent processes the given event for the current incident in an own transaction.
-func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bool) error {
+func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	i.Lock()
 	defer i.Unlock()
 
@@ -124,7 +127,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 		return errors.New("can't insert event and fetch its ID")
 	}
 
-	if created {
+	if i.IsNew {
 		err = i.processIncidentOpenedEvent(ctx, tx, ev)
 		if err != nil {
 			return err
@@ -154,7 +157,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 	}
 
 	var causedBy types.Int
-	if !created {
+	if !i.IsNew {
 		causedBy, err = i.processSeverityChangedEvent(ctx, tx, ev)
 		if err != nil {
 			return err

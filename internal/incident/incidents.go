@@ -44,7 +44,7 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 			continue
 		}
 
-		incident, _, err := GetCurrent(ctx, db, obj, logger, runtimeConfig, false)
+		incident, err := GetCurrent(ctx, db, obj, logger, runtimeConfig, false)
 		if err != nil {
 			continue
 		}
@@ -62,11 +62,10 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 func GetCurrent(
 	ctx context.Context, db *icingadb.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
 	create bool,
-) (*Incident, bool, error) {
+) (*Incident, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
 
-	created := false
 	currentIncident := currentIncidents[obj]
 
 	if currentIncident == nil {
@@ -78,7 +77,7 @@ func GetCurrent(
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			logger.Errorw("Failed to load incident from database", zap.String("object", obj.DisplayName()), zap.Error(err))
 
-			return nil, false, errors.New("failed to load incident from database")
+			return nil, errors.New("failed to load incident from database")
 		} else if err == nil {
 			incident.incidentRowID = ir.ID
 			incident.StartedAt = ir.StartedAt.Time()
@@ -86,32 +85,35 @@ func GetCurrent(
 			incident.logger = logger.With(zap.String("object", obj.DisplayName()), zap.String("incident", incident.String()))
 
 			if err := incident.restoreEscalationsState(ctx); err != nil {
-				return nil, false, err
+				return nil, err
 			}
 
 			currentIncident = incident
 		}
 
 		if create && currentIncident == nil {
-			created = true
 			currentIncident = incident
+			currentIncident.IsNew = true
 		}
 
 		if currentIncident != nil {
 			currentIncidents[obj] = currentIncident
 		}
+	} else {
+		currentIncident.IsNew = false
+		currentIncidents[obj] = currentIncident
 	}
 
-	if !created && currentIncident != nil {
+	if currentIncident != nil && !currentIncident.IsNew {
 		currentIncident.Lock()
 		defer currentIncident.Unlock()
 
 		if err := currentIncident.restoreRecipients(ctx); err != nil {
-			return nil, false, err
+			return nil, err
 		}
 	}
 
-	return currentIncident, created, nil
+	return currentIncident, nil
 }
 
 func RemoveCurrent(obj *object.Object) {
@@ -156,7 +158,7 @@ func ProcessEvent(
 	}
 
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
-	currentIncident, created, err := GetCurrent(
+	currentIncident, err := GetCurrent(
 		ctx,
 		db,
 		obj,
@@ -179,5 +181,5 @@ func ProcessEvent(
 		}
 	}
 
-	return currentIncident.ProcessEvent(ctx, ev, created)
+	return currentIncident.ProcessEvent(ctx, ev)
 }
