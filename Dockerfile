@@ -20,6 +20,9 @@ FROM docker.io/library/alpine
 COPY --from=build /src/icinga-notifications/bin/icinga-notifications-daemon /usr/bin/icinga-notifications-daemon
 COPY --from=build /src/icinga-notifications/bin/channel /usr/libexec/icinga-notifications/channel
 
+RUN mkdir /etc/icinga-notifications/
+COPY config.example.yml /etc/icinga-notifications/config.yml
+
 RUN apk add tzdata
 
 ARG username=notifications
