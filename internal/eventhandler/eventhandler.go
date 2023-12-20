@@ -3,6 +3,7 @@ package eventhandler
 import (
 	"context"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/common"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
@@ -56,8 +57,8 @@ type Notification struct {
 	HistoryId int64 `db:"id"`
 	ContactID int64
 	ChannelId int64
-	State     incident.NotificationState `db:"notification_state"` // TODO: extract from incident package
-	SentAt    types.UnixMilli            `db:"sent_at"`
+	State     common.NotificationState `db:"notification_state"` // TODO: extract from incident package
+	SentAt    types.UnixMilli          `db:"sent_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.
@@ -624,7 +625,7 @@ func (eh *EventHandler) addPendingNotifications(ctx context.Context, tx *sqlx.Tx
 				HistoryId: historyId,
 				ContactID: contact.ID,
 				ChannelId: chID,
-				State:     incident.NotificationStatePending,
+				State:     common.NotificationStatePending,
 			})
 		}
 	}
@@ -657,9 +658,9 @@ func (eh *EventHandler) notifyContacts(ctx context.Context, ev *event.Event, not
 		contact := eh.runtimeConfig.Contacts[n.ContactID]
 
 		if eh.notifyContact(contact, ev, n.ChannelId) != nil {
-			n.State = incident.NotificationStateFailed
+			n.State = common.NotificationStateFailed
 		} else {
-			n.State = incident.NotificationStateSent
+			n.State = common.NotificationStateSent
 		}
 
 		n.SentAt = types.UnixMilli(time.Now())
