@@ -79,9 +79,9 @@ func (i *Incident) AddEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) e
 // AddRecipient adds recipient from the given *rule.Escalation to this incident.
 // Syncs also all the recipients with the database and returns an error on db failure.
 func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *rule.EscalationTemplate, eventId int64) error {
-	newRole := RoleRecipient
+	newRole := common.RoleRecipient
 	if i.HasManager() {
-		newRole = RoleSubscriber
+		newRole = common.RoleSubscriber
 	}
 
 	for _, escalationRecipient := range escalation.Recipients {
