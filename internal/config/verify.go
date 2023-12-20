@@ -234,95 +234,120 @@ func (r *RuntimeConfig) debugVerifySchedule(id int64, schedule *recipient.Schedu
 	return nil
 }
 
-func (r *RuntimeConfig) debugVerifyRule(id int64, rule *rule.Rule) error {
-	if rule.ID != id {
-		return fmt.Errorf("rule has ID %d but is referenced as %d", rule.ID, id)
+func (r *RuntimeConfig) debugVerifyRule(id int64, ru *rule.Rule) error {
+	if ru.ID != id {
+		return fmt.Errorf("rule has ID %d but is referenced as %d", ru.ID, id)
 	}
 
-	if other := r.Rules[id]; other != rule {
-		return fmt.Errorf("rule %p is inconsistent with RuntimeConfig.Rules[%d] = %p", rule, id, other)
+	if other := r.Rules[id]; other != ru {
+		return fmt.Errorf("rule %p is inconsistent with RuntimeConfig.Rules[%d] = %p", ru, id, other)
 	}
 
-	if rule.TimePeriodID.Valid && rule.TimePeriod == nil {
+	if ru.TimePeriodID.Valid && ru.TimePeriod == nil {
 		return fmt.Errorf("rule has a TimePeriodID but TimePeriod is nil")
 	}
 
-	if rule.TimePeriod != nil {
-		err := r.debugVerifyTimePeriod(rule.TimePeriodID.Int64, rule.TimePeriod)
+	if ru.TimePeriod != nil {
+		err := r.debugVerifyTimePeriod(ru.TimePeriodID.Int64, ru.TimePeriod)
 		if err != nil {
 			return fmt.Errorf("TimePeriod: %w", err)
 		}
 	}
 
-	if rule.ObjectFilterExpr.Valid && rule.ObjectFilter == nil {
+	if ru.ObjectFilterExpr.Valid && ru.ObjectFilter == nil {
 		return fmt.Errorf("rule has a ObjectFilterExpr but ObjectFilter is nil")
 	}
 
-	for escalationID, escalation := range rule.Escalations {
-		if escalation == nil {
-			return fmt.Errorf("Escalations[%d] is nil", escalationID)
+	for escalationID, escalation := range ru.Escalations {
+		if err := r.debugVerifyEscalation(ru, escalation.EscalationTemplate, escalationID, rule.TypeEscalation); err != nil {
+			return err
+		}
+	}
+
+	for escalationID, escalation := range ru.NonStateEscalations {
+		if err := r.debugVerifyEscalation(ru, escalation.EscalationTemplate, escalationID, rule.TypeNonStateEscalation); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *RuntimeConfig) debugVerifyEscalation(rule *rule.Rule, escalation *rule.EscalationTemplate, escalationID int64, escType string) error {
+	escType = escType + "s"
+
+	if escalation == nil {
+		return fmt.Errorf("%s[%d] is nil", escType, escalationID)
+	}
+
+	if escalation.ID != escalationID {
+		return fmt.Errorf("%s[%d]: ecalation has ID %d but is referenced as %d",
+			escType, escalationID, escalation.ID, escalationID)
+	}
+
+	if escalation.RuleID != rule.ID {
+		return fmt.Errorf("%s[%d] (ID=%d) has RuleID = %d while being referenced from rule %d",
+			escType, escalationID, escalation.ID, escalation.RuleID, rule.ID)
+	}
+
+	if escalation.ConditionExpr.Valid && escalation.Condition == nil {
+		return fmt.Errorf("%s[%d] (ID=%d) has ConditionExpr but Condition is nil", escType, escalationID, escalation.ID)
+	}
+
+	// TODO: verify fallback
+
+	for i, escalationRecpient := range escalation.Recipients {
+		if escalationRecpient == nil {
+			return fmt.Errorf("%s[%d].Recipients[%d] is nil", escType, escalationID, i)
 		}
 
-		if escalation.ID != escalationID {
-			return fmt.Errorf("Escalations[%d]: ecalation has ID %d but is referenced as %d",
-				escalationID, escalation.ID, escalationID)
+		if escalationRecpient.EscalationID.Valid {
+			if escalationRecpient.EscalationID.Int64 != escalation.ID {
+				return fmt.Errorf("Escalation[%d].Recipients[%d].EscalationID = %d does not match %s[%d].ID = %d",
+					escalationID, i, escalationRecpient.EscalationID.Int64, escType, escalationID, escalation.ID)
+			}
+		} else if escalationRecpient.NonStateEscalationID.Valid {
+			if escalationRecpient.NonStateEscalationID.Int64 != escalation.ID {
+				return fmt.Errorf("%s[%d].Recipients[%d].NonStateEscalationID = %d does not match NonStateEscalations[%d].ID = %d",
+					escType, escalationID, i, escalationRecpient.NonStateEscalationID.Int64, escalationID, escalation.ID)
+			}
+		} else {
+			return fmt.Errorf("esclation recipient has no escalation and non state escalation")
 		}
 
-		if escalation.RuleID != rule.ID {
-			return fmt.Errorf("Escalations[%d] (ID=%d) has RuleID = %d while being referenced from rule %d",
-				escalationID, escalation.ID, escalation.RuleID, rule.ID)
-		}
-
-		if escalation.ConditionExpr.Valid && escalation.Condition == nil {
-			return fmt.Errorf("Escalations[%d] (ID=%d) has ConditionExpr but Condition is nil", escalationID, escalation.ID)
-		}
-
-		// TODO: verify fallback
-
-		for i, escalationRecpient := range escalation.Recipients {
-			if escalationRecpient == nil {
-				return fmt.Errorf("Escalations[%d].Recipients[%d] is nil", escalationID, i)
+		switch rec := escalationRecpient.Recipient.(type) {
+		case *recipient.Contact:
+			if rec == nil {
+				return fmt.Errorf("%s[%d].Recipients[%d].Recipient (Contact) is nil", escType, escalationID, i)
 			}
 
-			if escalationRecpient.EscalationID != escalation.ID {
-				return fmt.Errorf("Escalation[%d].Recipients[%d].EscalationID = %d does not match Escalations[%d].ID = %d",
-					escalationID, i, escalationRecpient.EscalationID, escalationID, escalation.ID)
+			err := r.debugVerifyContact(escalationRecpient.ContactID.Int64, rec)
+			if err != nil {
+				return fmt.Errorf("%s[%d].Recipients[%d].Recipient (Contact): %w", escType, escalationID, i, err)
 			}
 
-			switch rec := escalationRecpient.Recipient.(type) {
-			case *recipient.Contact:
-				if rec == nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Contact) is nil", escalationID, i)
-				}
-
-				err := r.debugVerifyContact(escalationRecpient.ContactID.Int64, rec)
-				if err != nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Contact): %w", escalationID, i, err)
-				}
-
-			case *recipient.Group:
-				if rec == nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Group) is nil", escalationID, i)
-				}
-
-				err := r.debugVerifyGroup(escalationRecpient.GroupID.Int64, rec)
-				if err != nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Group): %w", escalationID, i, err)
-				}
-
-			case *recipient.Schedule:
-				if rec == nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Schedule) is nil", escalationID, i)
-				}
-
-				err := r.debugVerifySchedule(escalationRecpient.ScheduleID.Int64, rec)
-				if err != nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Schedule): %w", escalationID, i, err)
-				}
-
-			default:
-				return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient has invalid type %T", escalationID, i, rec)
+		case *recipient.Group:
+			if rec == nil {
+				return fmt.Errorf("%s[%d].Recipients[%d].Recipient (Group) is nil", escType, escalationID, i)
 			}
+
+			err := r.debugVerifyGroup(escalationRecpient.GroupID.Int64, rec)
+			if err != nil {
+				return fmt.Errorf("%s[%d].Recipients[%d].Recipient (Group): %w", escType, escalationID, i, err)
+			}
+
+		case *recipient.Schedule:
+			if rec == nil {
+				return fmt.Errorf("%s[%d].Recipients[%d].Recipient (Schedule) is nil", escType, escalationID, i)
+			}
+
+			err := r.debugVerifySchedule(escalationRecpient.ScheduleID.Int64, rec)
+			if err != nil {
+				return fmt.Errorf("%s[%d].Recipients[%d].Recipient (Schedule): %w", escType, escalationID, i, err)
+			}
+
+		default:
+			return fmt.Errorf("%s[%d].Recipients[%d].Recipient has invalid type %T", escType, escalationID, i, rec)
 		}
 	}
 
