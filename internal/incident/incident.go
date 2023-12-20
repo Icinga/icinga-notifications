@@ -31,7 +31,7 @@ type Incident struct {
 
 	EscalationState map[escalationID]*EscalationState
 	Rules           map[ruleID]struct{}
-	Recipients      map[recipient.Key]*RecipientState
+	Recipients      map[recipient.Key]common.ContactRole
 
 	incidentRowID int64
 
@@ -55,7 +55,7 @@ func NewIncident(
 		runtimeConfig:   runtimeConfig,
 		EscalationState: map[escalationID]*EscalationState{},
 		Rules:           map[ruleID]struct{}{},
-		Recipients:      map[recipient.Key]*RecipientState{},
+		Recipients:      make(map[recipient.Key]common.ContactRole),
 	}
 }
 
@@ -76,8 +76,8 @@ func (i *Incident) ID() int64 {
 }
 
 func (i *Incident) HasManager() bool {
-	for _, state := range i.Recipients {
-		if state.Role == common.RoleManager {
+	for _, role := range i.Recipients {
+		if role == common.RoleManager {
 			return true
 		}
 	}
@@ -340,18 +340,19 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 	}
 
 	recipientKey := recipient.ToKey(contact)
-	state := i.Recipients[recipientKey]
+	role := i.Recipients[recipientKey]
+
+	if role == common.RoleManager {
+		// The user is already a manager
+		return nil
+	}
+
 	oldRole := common.RoleNone
 	newRole := common.RoleManager
-	if state != nil {
-		oldRole = state.Role
-
-		if oldRole == common.RoleManager {
-			// The user is already a manager
-			return nil
-		}
+	if role != oldRole {
+		oldRole = role
 	} else {
-		i.Recipients[recipientKey] = &RecipientState{Role: newRole}
+		i.Recipients[recipientKey] = newRole
 	}
 
 	i.logger.Infof("Contact %q role changed from %s to %s", contact.String(), oldRole.String(), newRole.String())
@@ -416,9 +417,9 @@ func (i *Incident) restoreRecipients(ctx context.Context) error {
 		return errors.New("failed to restore incident recipients")
 	}
 
-	recipients := make(map[recipient.Key]*RecipientState)
+	recipients := make(map[recipient.Key]common.ContactRole)
 	for _, contact := range contacts {
-		recipients[contact.Key] = &RecipientState{Role: contact.Role}
+		recipients[contact.Key] = contact.Role
 	}
 
 	i.Recipients = recipients
@@ -458,10 +459,6 @@ func (e *EscalationState) TableName() string {
 	return "incident_rule_escalation_state"
 }
 
-type RecipientState struct {
-	Role common.ContactRole
-}
-
 // ContactChannels stores a set of channel IDs for each set of individual contacts.
 type ContactChannels map[*recipient.Contact]map[int64]bool
 
@@ -483,12 +480,12 @@ func (i *Incident) GetRecipientsChannel(evTime time.Time) ContactChannels {
 // LoadEscalationRecipientsChannel loads all the configured channel of all the provided escalation recipients.
 func (rct ContactChannels) LoadEscalationRecipientsChannel(escRecipients []*rule.EscalationRecipient, i *Incident, t time.Time) {
 	for _, escalationRecipient := range escRecipients {
-		state := i.Recipients[escalationRecipient.Key]
-		if state == nil {
+		role := i.Recipients[escalationRecipient.Key]
+		if role == common.RoleNone {
 			continue
 		}
 
-		if i.IsNotifiable(state.Role) {
+		if i.IsNotifiable(role) {
 			for _, c := range escalationRecipient.Recipient.GetContactsAt(t) {
 				if rct[c] == nil {
 					rct[c] = make(map[int64]bool)

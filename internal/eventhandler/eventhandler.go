@@ -30,7 +30,7 @@ type EventHandler struct {
 	Incident *incident.Incident
 
 	Rules      map[ruleID]struct{}
-	Recipients map[recipient.Key]*incident.RecipientState
+	Recipients map[recipient.Key]common.ContactRole
 
 	db            *icingadb.DB
 	logger        *zap.SugaredLogger
@@ -77,7 +77,7 @@ func NewEventHandler(
 		Event:         ev,
 		Incident:      i,
 		Rules:         map[ruleID]struct{}{},
-		Recipients:    map[recipient.Key]*incident.RecipientState{},
+		Recipients:    make(map[recipient.Key]common.ContactRole),
 	}
 }
 
@@ -548,7 +548,7 @@ func (eh *EventHandler) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalatio
 
 		_, ok := eh.Recipients[recipientKey]
 		if !ok {
-			eh.Recipients[recipientKey] = &incident.RecipientState{Role: common.RoleRecipient}
+			eh.Recipients[recipientKey] = common.RoleRecipient
 		}
 	}
 
@@ -566,13 +566,13 @@ func (eh *EventHandler) getRecipientsChannel() incident.ContactChannels {
 	// Check whether all the incident recipients do have an appropriate contact channel configured.
 	// When a recipient has subscribed/managed this incident via the UI or using an ACK, fallback
 	// to the default contact channel.
-	for recipientKey, state := range eh.Recipients {
+	for recipientKey, role := range eh.Recipients {
 		r := eh.runtimeConfig.GetRecipient(recipientKey)
 		if r == nil {
 			continue
 		}
 
-		if i == nil || i.IsNotifiable(state.Role) {
+		if i == nil || i.IsNotifiable(role) {
 			for _, contact := range r.GetContactsAt(eventTime) {
 				if contactChs[contact] == nil {
 					contactChs[contact] = make(map[int64]bool)

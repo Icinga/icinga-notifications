@@ -91,15 +91,15 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 		recipientKey := recipient.ToKey(r)
 		cr.Key = recipientKey
 
-		state, ok := i.Recipients[recipientKey]
+		role, ok := i.Recipients[recipientKey]
 		if !ok {
-			i.Recipients[recipientKey] = &RecipientState{Role: newRole}
+			i.Recipients[recipientKey] = newRole
 		} else {
-			if state.Role < newRole {
-				oldRole := state.Role
-				state.Role = newRole
+			if role < newRole {
+				oldRole := role
+				role = newRole
 
-				i.logger.Infof("Contact %q role changed from %s to %s", r, state.Role.String(), newRole.String())
+				i.logger.Infof("Contact %q role changed from %s to %s", r, oldRole.String(), newRole.String())
 
 				hr := &HistoryRow{
 					EventID:          utils.ToDBInt(eventId),
@@ -120,7 +120,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 					return errors.New("failed to insert recipient role changed incident history")
 				}
 			}
-			cr.Role = state.Role
+			cr.Role = role
 		}
 
 		stmt, _ := i.db.BuildUpsertStmt(cr)
