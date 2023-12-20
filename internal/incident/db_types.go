@@ -70,7 +70,7 @@ func (e *EventRow) TableName() string {
 type ContactRow struct {
 	IncidentID    int64 `db:"incident_id"`
 	recipient.Key `db:",inline"`
-	Role          ContactRole `db:"role"`
+	Role          common.ContactRole `db:"role"`
 }
 
 // TableName implements the contracts.TableNamer interface.
@@ -81,7 +81,7 @@ func (c *ContactRow) TableName() string {
 // Upsert implements the contracts.Upserter interface.
 func (c *ContactRow) Upsert() interface{} {
 	return &struct {
-		Role ContactRole `db:"role"`
+		Role common.ContactRole `db:"role"`
 	}{Role: c.Role}
 }
 
@@ -125,8 +125,8 @@ type HistoryRow struct {
 	ChannelID                types.Int                `db:"channel_id"`
 	NewSeverity              event.Severity           `db:"new_severity"`
 	OldSeverity              event.Severity           `db:"old_severity"`
-	NewRecipientRole         ContactRole              `db:"new_recipient_role"`
-	OldRecipientRole         ContactRole              `db:"old_recipient_role"`
+	NewRecipientRole         common.ContactRole       `db:"new_recipient_role"`
+	OldRecipientRole         common.ContactRole       `db:"old_recipient_role"`
 	Message                  types.String             `db:"message"`
 	NotificationState        common.NotificationState `db:"notification_state"`
 	SentAt                   types.UnixMilli          `db:"sent_at"`

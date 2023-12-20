@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/common"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
@@ -76,7 +77,7 @@ func (i *Incident) ID() int64 {
 
 func (i *Incident) HasManager() bool {
 	for _, state := range i.Recipients {
-		if state.Role == RoleManager {
+		if state.Role == common.RoleManager {
 			return true
 		}
 	}
@@ -88,12 +89,12 @@ func (i *Incident) HasManager() bool {
 //
 // For a managed incident, only managers and subscribers should be notified, for unmanaged incidents,
 // regular recipients are notified as well.
-func (i *Incident) IsNotifiable(role ContactRole) bool {
+func (i *Incident) IsNotifiable(role common.ContactRole) bool {
 	if !i.HasManager() {
 		return true
 	}
 
-	return role > RoleRecipient
+	return role > common.RoleRecipient
 }
 
 func (i *Incident) ProcessEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) (types.Int, error) {
@@ -340,12 +341,12 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 
 	recipientKey := recipient.ToKey(contact)
 	state := i.Recipients[recipientKey]
-	oldRole := RoleNone
-	newRole := RoleManager
+	oldRole := common.RoleNone
+	newRole := common.RoleManager
 	if state != nil {
 		oldRole = state.Role
 
-		if oldRole == RoleManager {
+		if oldRole == common.RoleManager {
 			// The user is already a manager
 			return nil
 		}
@@ -458,7 +459,7 @@ func (e *EscalationState) TableName() string {
 }
 
 type RecipientState struct {
-	Role ContactRole
+	Role common.ContactRole
 }
 
 // ContactChannels stores a set of channel IDs for each set of individual contacts.

@@ -548,7 +548,7 @@ func (eh *EventHandler) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalatio
 
 		_, ok := eh.Recipients[recipientKey]
 		if !ok {
-			eh.Recipients[recipientKey] = &incident.RecipientState{Role: incident.RoleRecipient}
+			eh.Recipients[recipientKey] = &incident.RecipientState{Role: common.RoleRecipient}
 		}
 	}
 
