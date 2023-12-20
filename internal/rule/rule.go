@@ -7,12 +7,13 @@ import (
 )
 
 type Rule struct {
-	ID               int64      `db:"id"`
-	IsActive         types.Bool `db:"is_active"`
-	Name             string     `db:"name"`
-	TimePeriod       *timeperiod.TimePeriod
-	TimePeriodID     types.Int     `db:"timeperiod_id"`
-	ObjectFilter     filter.Filter `db:"-"`
-	ObjectFilterExpr types.String  `db:"object_filter"`
-	Escalations      map[int64]*Escalation
+	ID                  int64      `db:"id"`
+	IsActive            types.Bool `db:"is_active"`
+	Name                string     `db:"name"`
+	TimePeriod          *timeperiod.TimePeriod
+	TimePeriodID        types.Int     `db:"timeperiod_id"`
+	ObjectFilter        filter.Filter `db:"-"`
+	ObjectFilterExpr    types.String  `db:"object_filter"`
+	Escalations         map[int64]*Escalation
+	NonStateEscalations map[int64]*NonStateEscalation
 }

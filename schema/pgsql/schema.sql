@@ -222,9 +222,24 @@ CREATE TABLE rule_escalation (
     CHECK (NOT (condition IS NOT NULL AND fallback_for IS NOT NULL))
 );
 
+CREATE TABLE rule_non_state_escalation (
+    id bigserial,
+    rule_id bigint NOT NULL REFERENCES rule(id),
+    position integer NOT NULL,
+    condition text,
+    name text, -- if not set, recipients are used as a fallback for display purposes
+    fallback_for bigint REFERENCES rule_escalation(id),
+
+    CONSTRAINT pk_non_state_escalation PRIMARY KEY (id),
+
+    UNIQUE (rule_id, position),
+    CHECK (NOT (condition IS NOT NULL AND fallback_for IS NOT NULL))
+);
+
 CREATE TABLE rule_escalation_recipient (
     id bigserial,
-    rule_escalation_id bigint NOT NULL REFERENCES rule_escalation(id),
+    rule_escalation_id bigint REFERENCES rule_escalation(id),
+    rule_non_state_escalation_id bigint REFERENCES rule_non_state_escalation(id),
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),
     schedule_id bigint REFERENCES schedule(id),
@@ -232,7 +247,10 @@ CREATE TABLE rule_escalation_recipient (
 
     CONSTRAINT pk_rule_escalation_recipient PRIMARY KEY (id),
 
-    CHECK (num_nonnulls(contact_id, contactgroup_id, schedule_id) = 1)
+    CHECK ((num_nonnulls(contact_id, contactgroup_id, schedule_id) = 1)
+               AND
+           (num_nonnulls(rule_escalation_id, rule_non_state_escalation_id) = 1)
+        )
 );
 
 CREATE TABLE incident (
