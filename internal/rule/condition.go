@@ -14,6 +14,8 @@ const RetryNever = time.Duration(math.MaxInt64)
 type EscalationFilter struct {
 	IncidentAge      time.Duration
 	IncidentSeverity event.Severity
+
+	Type string
 }
 
 // ReevaluateAfter returns the duration after which escalationCond should be reevaluated the
@@ -43,6 +45,8 @@ func (e *EscalationFilter) ReevaluateAfter(escalationCond filter.Filter) time.Du
 
 func (e *EscalationFilter) EvalEqual(key string, value string) (bool, error) {
 	switch key {
+	case "type":
+		return e.Type == value, nil
 	case "incident_age":
 		age, err := time.ParseDuration(value)
 		if err != nil {
@@ -110,6 +114,8 @@ func (e *EscalationFilter) EvalLessOrEqual(key string, value string) (bool, erro
 
 func (e *EscalationFilter) EvalExists(key string) bool {
 	switch key {
+	case "type":
+		fallthrough
 	case "incident_age":
 		fallthrough
 	case "incident_severity":

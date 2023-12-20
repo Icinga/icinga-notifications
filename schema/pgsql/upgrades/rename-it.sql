@@ -48,3 +48,15 @@ UPDATE history h SET object_id = (SELECT object_id from incident i where i.id = 
 
 ALTER TABLE history
     ALTER COLUMN object_id SET NOT NULL;
+
+ALTER TABLE history
+    ADD COLUMN rule_non_state_escalation_id bigint REFERENCES rule_non_state_escalation(id);
+
+ALTER TYPE history_event_type ADD VALUE 'downtime_started';
+ALTER TYPE history_event_type ADD VALUE 'downtime_ended';
+ALTER TYPE history_event_type ADD VALUE 'downtime_cancelled';
+ALTER TYPE history_event_type ADD VALUE 'custom';
+ALTER TYPE history_event_type ADD VALUE 'flapping_started';
+ALTER TYPE history_event_type ADD VALUE 'flapping_ended';
+ALTER TYPE history_event_type ADD VALUE 'comment_added';
+ALTER TYPE history_event_type ADD VALUE 'comment_removed';

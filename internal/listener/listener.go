@@ -9,6 +9,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/eventhandler"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
@@ -129,7 +130,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
-	err = incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
+	err = eventhandler.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
 	if err != nil {
 		abort(http.StatusInternalServerError, &ev, err.Error())
 		return

@@ -3,6 +3,7 @@ package incident
 import (
 	"database/sql/driver"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/event"
 )
 
 type HistoryEventType int
@@ -16,6 +17,14 @@ const (
 	Opened
 	Closed
 	Notified
+	DowntimeStarted
+	DowntimeEnded
+	DowntimeCancelled
+	Custom
+	FlappingStarted
+	FlappingEnded
+	CommentAdded
+	CommentRemoved
 )
 
 var historyTypeByName = map[string]HistoryEventType{
@@ -26,6 +35,14 @@ var historyTypeByName = map[string]HistoryEventType{
 	"opened":                    Opened,
 	"closed":                    Closed,
 	"notified":                  Notified,
+	"downtime_started":          DowntimeStarted,
+	"downtime_ended":            DowntimeEnded,
+	"downtime_cancelled":        DowntimeCancelled,
+	"custom":                    Custom,
+	"flapping_started":          FlappingStarted,
+	"flapping_ended":            FlappingEnded,
+	"comment_added":             CommentAdded,
+	"comment_removed":           CommentRemoved,
 }
 
 var historyEventTypeToName = func() map[HistoryEventType]string {
@@ -74,4 +91,29 @@ func (h HistoryEventType) Value() (driver.Value, error) {
 
 func (h *HistoryEventType) String() string {
 	return historyEventTypeToName[*h]
+}
+
+func GetHistoryEventType(eventType string) (HistoryEventType, error) {
+	var historyEvType HistoryEventType
+	switch eventType {
+	case event.TypeDowntimeStart:
+		historyEvType = DowntimeStarted
+	case event.TypeDowntimeEnd:
+		historyEvType = DowntimeEnded
+	case event.TypeDowntimeCancelled:
+		historyEvType = DowntimeCancelled
+	case event.TypeFlappingStart:
+		historyEvType = FlappingStarted
+	case event.TypeFlappingEnd:
+		historyEvType = FlappingEnded
+	case event.TypeCustom:
+		historyEvType = Custom
+	case event.TypeCommentAdded:
+		historyEvType = CommentAdded
+	default:
+		//TODO: other events
+		return historyEvType, fmt.Errorf("type %s not implemented yet", eventType)
+	}
+
+	return historyEvType, nil
 }

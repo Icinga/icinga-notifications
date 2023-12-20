@@ -8,6 +8,8 @@ import (
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
+	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/eventhandler"
 	"github.com/icinga/icinga-notifications/internal/icinga2"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
@@ -105,6 +107,13 @@ func main() {
 	err = incident.LoadOpenIncidents(ctx, db, logs.GetChildLogger("incident"), runtimeConfig)
 	if err != nil {
 		logger.Fatalw("Can't load incidents from database", zap.Error(err))
+	}
+	for _, i := range incident.GetCurrentIncidents() {
+		eventhandler.NewEventHandler(db, runtimeConfig, i.Logger(), i.Object, nil, i).RetriggerEscalations(&event.Event{
+			Time:    time.Now(),
+			Type:    event.TypeInternal,
+			Message: "Incident reevaluation at daemon startup",
+		})
 	}
 
 	// Wait to load open incidents from the database before either starting Event Stream Clients or starting the Listener.

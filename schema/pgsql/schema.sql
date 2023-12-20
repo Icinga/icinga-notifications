@@ -1,5 +1,21 @@
 CREATE TYPE boolenum AS ENUM ( 'n', 'y' );
-CREATE TYPE history_event_type AS ENUM ( 'incident_severity_changed', 'recipient_role_changed', 'escalation_triggered', 'rule_matched', 'opened', 'closed', 'notified' );
+CREATE TYPE history_event_type AS ENUM (
+    'incident_severity_changed',
+    'recipient_role_changed',
+    'escalation_triggered',
+    'rule_matched',
+    'opened',
+    'closed',
+    'notified',
+    'downtime_started',
+    'downtime_ended',
+    'downtime_cancelled',
+    'custom',
+    'flapping_started',
+    'flapping_ended',
+    'comment_added',
+    'comment_removed'
+);
 CREATE TYPE frequency_type AS ENUM ( 'MINUTELY', 'HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY' );
 CREATE TYPE notification_state_type AS ENUM ( 'pending', 'sent', 'failed' );
 
@@ -305,6 +321,7 @@ CREATE TABLE history (
     object_id bytea NOT NULL REFERENCES object(id),
     incident_id bigint REFERENCES incident(id),
     rule_escalation_id bigint REFERENCES rule_escalation(id),
+    rule_non_state_escalation_id bigint REFERENCES rule_non_state_escalation(id),
     event_id bigint REFERENCES event(id),
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),

@@ -11,6 +11,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/eventhandler"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
@@ -126,7 +127,7 @@ func (launcher *Launcher) launch(src *config.Source) {
 		CallbackFn: func(ev *event.Event) {
 			l := logger.With(zap.Stringer("event", ev))
 
-			err := incident.ProcessEvent(subCtx, launcher.Db, launcher.Logs, launcher.RuntimeConfig, ev)
+			err := eventhandler.ProcessEvent(subCtx, launcher.Db, launcher.Logs, launcher.RuntimeConfig, ev)
 			switch {
 			case errors.Is(err, incident.ErrSuperfluousStateChange):
 				l.Debugw("Stopped processing event with superfluous state change", zap.Error(err))

@@ -4,16 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"github.com/icinga/icinga-notifications/internal/config"
-	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/icinga/icingadb/pkg/types"
 	"go.uber.org/zap"
 	"sync"
-	"time"
 )
 
 // ErrSuperfluousStateChange indicates a superfluous state change being ignored and stopping further processing.
@@ -44,16 +41,10 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 			continue
 		}
 
-		incident, err := GetCurrent(ctx, db, obj, logger, runtimeConfig, false)
+		_, err = GetCurrent(ctx, db, obj, logger, runtimeConfig, false)
 		if err != nil {
 			continue
 		}
-
-		incident.RetriggerEscalations(&event.Event{
-			Time:    time.Now(),
-			Type:    event.TypeInternal,
-			Message: "Incident reevaluation at daemon startup",
-		})
 	}
 
 	return nil
@@ -65,9 +56,7 @@ func GetCurrent(
 ) (*Incident, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
-
 	currentIncident := currentIncidents[obj]
-
 	if currentIncident == nil {
 		ir := &IncidentRow{}
 		incidentLogger := logger.With(zap.String("object", obj.DisplayName()))
@@ -127,7 +116,7 @@ func RemoveCurrent(obj *object.Object) {
 	}
 }
 
-// GetCurrentIncidents returns a map of all incidents for debugging purposes.
+// GetCurrentIncidents returns a map of all incidents
 func GetCurrentIncidents() map[int64]*Incident {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
@@ -137,49 +126,4 @@ func GetCurrentIncidents() map[int64]*Incident {
 		m[incident.incidentRowID] = incident
 	}
 	return m
-}
-
-// ProcessEvent from an event.Event.
-//
-// This function first gets this Event's object.Object and its incident.Incident. Then, after performing some safety
-// checks, it calls the Incident.ProcessEvent method.
-//
-// The returned error might be wrapped around ErrSuperfluousStateChange.
-func ProcessEvent(
-	ctx context.Context,
-	db *icingadb.DB,
-	logs *logging.Logging,
-	runtimeConfig *config.RuntimeConfig,
-	ev *event.Event,
-) error {
-	obj, err := object.FromEvent(ctx, db, ev)
-	if err != nil {
-		return fmt.Errorf("cannot sync event object: %w", err)
-	}
-
-	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
-	currentIncident, err := GetCurrent(
-		ctx,
-		db,
-		obj,
-		logs.GetChildLogger("incident"),
-		runtimeConfig,
-		createIncident)
-	if err != nil {
-		return fmt.Errorf("cannot get current incident for %q: %w", obj.DisplayName(), err)
-	}
-
-	if currentIncident == nil {
-		switch {
-		case ev.Type == event.TypeAcknowledgement:
-			return fmt.Errorf("%q does not have an active incident, ignoring acknowledgement event from source %d",
-				obj.DisplayName(), ev.SourceId)
-		case ev.Severity != event.SeverityOK:
-			panic(fmt.Sprintf("cannot process event %v with a non-OK state %v without a known incident", ev, ev.Severity))
-		default:
-			return fmt.Errorf("%w: ok state event from source %d", ErrSuperfluousStateChange, ev.SourceId)
-		}
-	}
-
-	return currentIncident.ProcessEvent(ctx, ev)
 }
