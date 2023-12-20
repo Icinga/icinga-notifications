@@ -3,6 +3,7 @@ package incident
 import (
 	"context"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/common"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/utils"
@@ -117,18 +118,18 @@ type HistoryRow struct {
 	RuleNonStateEscalationID types.Int    `db:"rule_non_state_escalation_id"`
 	EventID                  types.Int    `db:"event_id"`
 	recipient.Key            `db:",inline"`
-	RuleID                   types.Int         `db:"rule_id"`
-	CausedByHistoryID        types.Int         `db:"caused_by_history_id"`
-	Time                     types.UnixMilli   `db:"time"`
-	Type                     HistoryEventType  `db:"type"`
-	ChannelID                types.Int         `db:"channel_id"`
-	NewSeverity              event.Severity    `db:"new_severity"`
-	OldSeverity              event.Severity    `db:"old_severity"`
-	NewRecipientRole         ContactRole       `db:"new_recipient_role"`
-	OldRecipientRole         ContactRole       `db:"old_recipient_role"`
-	Message                  types.String      `db:"message"`
-	NotificationState        NotificationState `db:"notification_state"`
-	SentAt                   types.UnixMilli   `db:"sent_at"`
+	RuleID                   types.Int                `db:"rule_id"`
+	CausedByHistoryID        types.Int                `db:"caused_by_history_id"`
+	Time                     types.UnixMilli          `db:"time"`
+	Type                     HistoryEventType         `db:"type"`
+	ChannelID                types.Int                `db:"channel_id"`
+	NewSeverity              event.Severity           `db:"new_severity"`
+	OldSeverity              event.Severity           `db:"old_severity"`
+	NewRecipientRole         ContactRole              `db:"new_recipient_role"`
+	OldRecipientRole         ContactRole              `db:"old_recipient_role"`
+	Message                  types.String             `db:"message"`
+	NotificationState        common.NotificationState `db:"notification_state"`
+	SentAt                   types.UnixMilli          `db:"sent_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.

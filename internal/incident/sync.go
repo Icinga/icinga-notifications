@@ -3,6 +3,7 @@ package incident
 import (
 	"context"
 	"errors"
+	"github.com/icinga/icinga-notifications/internal/common"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
@@ -157,7 +158,7 @@ func (i *Incident) AddPendingNotificationHistory(
 		Type:              Notified,
 		ChannelID:         utils.ToDBInt(chID),
 		CausedByHistoryID: causedBy,
-		NotificationState: NotificationStatePending,
+		NotificationState: common.NotificationStatePending,
 	}
 
 	id, err := i.AddHistory(ctx, tx, hr, true)
