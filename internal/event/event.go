@@ -34,10 +34,48 @@ type Event struct {
 }
 
 const (
-	TypeState           = "state"
-	TypeAcknowledgement = "acknowledgement"
-	TypeInternal        = "internal"
+	TypeState             = "state"
+	TypeAcknowledgement   = "acknowledgement"
+	TypeCommentAdded      = "commentAdded"
+	TypeCommentRemoved    = "commentRemoved"
+	TypeDowntimeStart     = "downtimeStart"
+	TypeDowntimeEnd       = "downtimeEnd"
+	TypeDowntimeCancelled = "downtimeCancelled"
+	TypeCustom            = "custom"
+	TypeFlappingStart     = "flappingStart"
+	TypeFlappingEnd       = "flappingEnd"
+	TypeInternal          = "internal"
 )
+
+// Validate checks the event. Returns an error if the validation fails
+func (e *Event) Validate() error {
+	if len(e.Tags) == 0 {
+		return fmt.Errorf("invalid event: tags cannot be empty")
+	} else if e.Severity == SeverityNone {
+		if e.Type == "" {
+			return fmt.Errorf("invalid event: must set 'type' or 'severity'")
+		}
+
+		switch e.Type {
+		case TypeState:
+		case TypeAcknowledgement:
+		case TypeCommentAdded:
+		case TypeCommentRemoved:
+		case TypeDowntimeStart:
+		case TypeDowntimeEnd:
+		case TypeDowntimeCancelled:
+		case TypeCustom:
+		case TypeFlappingStart:
+		case TypeFlappingEnd:
+			return nil
+		default:
+			return fmt.Errorf("invalid event type: %s", e.Type)
+		}
+	} else if e.Type != "" && e.Type != TypeState {
+		return fmt.Errorf("invalid event: if 'severity' is set, 'type' must not be set or set to %q", TypeState)
+	}
+	return nil
+}
 
 func (e *Event) String() string {
 	return fmt.Sprintf("[time=%s type=%q severity=%s]", e.Time, e.Type, e.Severity.String())
