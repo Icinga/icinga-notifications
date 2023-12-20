@@ -370,7 +370,7 @@ func (client *Client) listenEventStream() error {
 		typeStateChange,
 		typeAcknowledgementSet,
 		// typeAcknowledgementCleared,
-		// typeCommentAdded,
+		typeCommentAdded,
 		// typeCommentRemoved,
 		// typeDowntimeAdded,
 		// typeDowntimeRemoved,
@@ -413,8 +413,12 @@ func (client *Client) listenEventStream() error {
 			ev, err = client.buildAcknowledgementEvent(client.Ctx, respT.Host, respT.Service, respT.Author, respT.Comment)
 			evTime = respT.Timestamp.Time
 
-		// case *AcknowledgementCleared:
-		// case *CommentAdded:
+			// case *AcknowledgementCleared:
+		case *CommentAdded:
+			ev, err = client.buildCommonEvent(client.Ctx, respT.Comment.Host, respT.Comment.Service)
+			ev.Type = "commentAdded"
+			ev.Username = "icingaadmin"
+			ev.Message = "testtiinnnggg"
 		// case *CommentRemoved:
 		// case *DowntimeAdded:
 		// case *DowntimeRemoved:
