@@ -36,7 +36,7 @@ func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 	return nil
 }
 
-func (i *Incident) AddHistory(ctx context.Context, tx *sqlx.Tx, historyRow *HistoryRow, fetchId bool) (types.Int, error) {
+func (i *Incident) AddHistory(ctx context.Context, tx *sqlx.Tx, historyRow *common.HistoryRow, fetchId bool) (types.Int, error) {
 	historyRow.IncidentID = utils.ToDBInt(i.incidentRowID)
 	historyRow.ObjectID = i.Object.ID
 
@@ -101,11 +101,11 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 
 				i.logger.Infof("Contact %q role changed from %s to %s", r, oldRole.String(), newRole.String())
 
-				hr := &HistoryRow{
+				hr := &common.HistoryRow{
 					EventID:          utils.ToDBInt(eventId),
 					Key:              cr.Key,
 					Time:             types.UnixMilli(time.Now()),
-					Type:             RecipientRoleChanged,
+					Type:             common.RecipientRoleChanged,
 					NewRecipientRole: newRole,
 					OldRecipientRole: oldRole,
 				}
@@ -151,11 +151,11 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 func (i *Incident) AddPendingNotificationHistory(
 	ctx context.Context, tx *sqlx.Tx, eventID int64, contact *recipient.Contact, causedBy types.Int, chID int64,
 ) (int64, error) {
-	hr := &HistoryRow{
+	hr := &common.HistoryRow{
 		Key:               recipient.ToKey(contact),
 		EventID:           utils.ToDBInt(eventID),
 		Time:              types.UnixMilli(time.Now()),
-		Type:              Notified,
+		Type:              common.Notified,
 		ChannelID:         utils.ToDBInt(chID),
 		CausedByHistoryID: causedBy,
 		NotificationState: common.NotificationStatePending,
