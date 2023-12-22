@@ -108,31 +108,3 @@ type RuleRow struct {
 func (r *RuleRow) TableName() string {
 	return "incident_rule"
 }
-
-// HistoryRow represents a single incident history database entry.
-type HistoryRow struct {
-	ID                       int64        `db:"id"`
-	ObjectID                 types.Binary `db:"object_id"`
-	IncidentID               types.Int    `db:"incident_id"`
-	RuleEscalationID         types.Int    `db:"rule_escalation_id"`
-	RuleNonStateEscalationID types.Int    `db:"rule_non_state_escalation_id"`
-	EventID                  types.Int    `db:"event_id"`
-	recipient.Key            `db:",inline"`
-	RuleID                   types.Int                `db:"rule_id"`
-	CausedByHistoryID        types.Int                `db:"caused_by_history_id"`
-	Time                     types.UnixMilli          `db:"time"`
-	Type                     HistoryEventType         `db:"type"`
-	ChannelID                types.Int                `db:"channel_id"`
-	NewSeverity              event.Severity           `db:"new_severity"`
-	OldSeverity              event.Severity           `db:"old_severity"`
-	NewRecipientRole         common.ContactRole       `db:"new_recipient_role"`
-	OldRecipientRole         common.ContactRole       `db:"old_recipient_role"`
-	Message                  types.String             `db:"message"`
-	NotificationState        common.NotificationState `db:"notification_state"`
-	SentAt                   types.UnixMilli          `db:"sent_at"`
-}
-
-// TableName implements the contracts.TableNamer interface.
-func (h *HistoryRow) TableName() string {
-	return "history"
-}

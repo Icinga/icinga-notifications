@@ -172,12 +172,12 @@ func (eh *EventHandler) handle(ctx context.Context) error {
 			eh.timer = nil
 		}
 	} else {
-		historyEvType, err := incident.GetHistoryEventType(ev.Type)
+		historyEvType, err := common.GetHistoryEventType(ev.Type)
 		if err != nil {
 			return err
 		}
 
-		hr := &incident.HistoryRow{
+		hr := &common.HistoryRow{
 			EventID: utils.ToDBInt(ev.ID),
 			Time:    types.UnixMilli(time.Now()),
 			Type:    historyEvType,
@@ -262,11 +262,11 @@ func (eh *EventHandler) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID 
 				}
 			} else {
 				//TODO: NON-incident history entry
-				history := &incident.HistoryRow{
+				history := &common.HistoryRow{
 					Time:              types.UnixMilli(time.Now()),
 					EventID:           utils.ToDBInt(eventID),
 					RuleID:            utils.ToDBInt(r.ID),
-					Type:              incident.RuleMatched,
+					Type:              common.RuleMatched,
 					CausedByHistoryID: causedBy,
 				}
 
@@ -506,12 +506,12 @@ func (eh *EventHandler) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev 
 		} else {
 			//TODO: non incident
 			eh.logger.Infof("Rule %q reached escalation %q", r.Name, escalation.DisplayName())
-			history := &incident.HistoryRow{
+			history := &common.HistoryRow{
 				Time:                     types.UnixMilli(time.Now()),
 				EventID:                  utils.ToDBInt(ev.ID),
 				RuleNonStateEscalationID: utils.ToDBInt(escalation.ID),
 				RuleID:                   utils.ToDBInt(r.ID),
-				Type:                     incident.EscalationTriggered,
+				Type:                     common.EscalationTriggered,
 				CausedByHistoryID:        causedBy,
 			}
 
@@ -598,14 +598,14 @@ func (eh *EventHandler) addPendingNotifications(ctx context.Context, tx *sqlx.Tx
 					return nil, err
 				}
 			} else {
-				hr := &incident.HistoryRow{
+				hr := &common.HistoryRow{
 					Key:               recipient.ToKey(contact),
 					EventID:           utils.ToDBInt(ev.ID),
 					Time:              types.UnixMilli(time.Now()),
-					Type:              incident.Notified,
+					Type:              common.Notified,
 					ChannelID:         utils.ToDBInt(chID),
 					CausedByHistoryID: causedBy,
-					NotificationState: incident.NotificationStatePending,
+					NotificationState: common.NotificationStatePending,
 				}
 
 				id, err := eh.addNonIncidentHistory(ctx, tx, hr, true)
@@ -633,7 +633,7 @@ func (eh *EventHandler) addPendingNotifications(ctx context.Context, tx *sqlx.Tx
 	return notifications, nil
 }
 
-func (eh *EventHandler) addNonIncidentHistory(ctx context.Context, tx *sqlx.Tx, historyRow *incident.HistoryRow, fetchId bool) (types.Int, error) {
+func (eh *EventHandler) addNonIncidentHistory(ctx context.Context, tx *sqlx.Tx, historyRow *common.HistoryRow, fetchId bool) (types.Int, error) {
 	historyRow.ObjectID = eh.Object.ID
 	stmt := utils.BuildInsertStmtWithout(eh.db, historyRow, "id")
 	if fetchId {

@@ -134,11 +134,11 @@ func (i *Incident) HandleRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.R
 		return types.Int{}, errors.New("failed to insert incident rule")
 	}
 
-	history := &HistoryRow{
+	history := &common.HistoryRow{
 		Time:              types.UnixMilli(time.Now()),
 		EventID:           utils.ToDBInt(eventID),
 		RuleID:            utils.ToDBInt(r.ID),
-		Type:              RuleMatched,
+		Type:              common.RuleMatched,
 		CausedByHistoryID: causedBy,
 	}
 
@@ -171,10 +171,10 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 	i.logger.Infof("Incident severity changed from %s to %s", oldSeverity.String(), newSeverity.String())
 
-	history := &HistoryRow{
+	history := &common.HistoryRow{
 		EventID:     utils.ToDBInt(ev.ID),
 		Time:        types.UnixMilli(time.Now()),
-		Type:        SeverityChanged,
+		Type:        common.SeverityChanged,
 		NewSeverity: newSeverity,
 		OldSeverity: oldSeverity,
 		Message:     utils.ToDBString(ev.Message),
@@ -195,10 +195,10 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 		RemoveCurrent(i.Object)
 
-		history := &HistoryRow{
+		history := &common.HistoryRow{
 			EventID: utils.ToDBInt(ev.ID),
 			Time:    types.UnixMilli(i.RecoveredAt),
-			Type:    Closed,
+			Type:    common.Closed,
 		}
 
 		_, err = i.AddHistory(ctx, tx, history, false)
@@ -230,8 +230,8 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 
 	i.logger.Infow(fmt.Sprintf("Source %d opened incident at severity %q", ev.SourceId, i.Severity.String()), zap.String("message", ev.Message))
 
-	historyRow := &HistoryRow{
-		Type:        Opened,
+	historyRow := &common.HistoryRow{
+		Type:        common.Opened,
 		Time:        types.UnixMilli(ev.Time),
 		EventID:     utils.ToDBInt(ev.ID),
 		NewSeverity: i.Severity,
@@ -251,11 +251,11 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 // Returns an error on database failure.
 func (i *Incident) TriggerEscalation(ctx context.Context, tx *sqlx.Tx, ev *event.Event, causedBy types.Int, escalation *rule.EscalationTemplate, r *rule.Rule) error {
 	i.logger.Infof("Rule %q reached escalation %q", r.Name, escalation.DisplayName())
-	history := &HistoryRow{
+	history := &common.HistoryRow{
 		Time:              types.UnixMilli(time.Now()),
 		EventID:           utils.ToDBInt(ev.ID),
 		RuleID:            utils.ToDBInt(r.ID),
-		Type:              EscalationTriggered,
+		Type:              common.EscalationTriggered,
 		CausedByHistoryID: causedBy,
 	}
 
@@ -306,12 +306,12 @@ func (i *Incident) processNonStateTypeEvent(ctx context.Context, tx *sqlx.Tx, ev
 		}
 	}
 
-	historyEvType, err := GetHistoryEventType(ev.Type)
+	historyEvType, err := common.GetHistoryEventType(ev.Type)
 	if err != nil {
 		return err
 	}
 
-	hr := &HistoryRow{
+	hr := &common.HistoryRow{
 		EventID: utils.ToDBInt(ev.ID),
 		Time:    types.UnixMilli(time.Now()),
 		Type:    historyEvType,
@@ -357,10 +357,10 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 
 	i.logger.Infof("Contact %q role changed from %s to %s", contact.String(), oldRole.String(), newRole.String())
 
-	hr := &HistoryRow{
+	hr := &common.HistoryRow{
 		Key:              recipientKey,
 		EventID:          utils.ToDBInt(ev.ID),
-		Type:             RecipientRoleChanged,
+		Type:             common.RecipientRoleChanged,
 		Time:             types.UnixMilli(time.Now()),
 		NewRecipientRole: newRole,
 		OldRecipientRole: oldRole,
