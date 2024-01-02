@@ -36,7 +36,8 @@ func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 }
 
 func (i *Incident) AddHistory(ctx context.Context, tx *sqlx.Tx, historyRow *HistoryRow, fetchId bool) (types.Int, error) {
-	historyRow.IncidentID = i.incidentRowID
+	historyRow.IncidentID = utils.ToDBInt(i.incidentRowID)
+	historyRow.ObjectID = i.Object.ID
 
 	stmt := utils.BuildInsertStmtWithout(i.db, historyRow, "id")
 	if fetchId {
@@ -100,7 +101,6 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 				i.logger.Infof("Contact %q role changed from %s to %s", r, state.Role.String(), newRole.String())
 
 				hr := &HistoryRow{
-					IncidentID:       i.incidentRowID,
 					EventID:          utils.ToDBInt(eventId),
 					Key:              cr.Key,
 					Time:             types.UnixMilli(time.Now()),
@@ -155,13 +155,13 @@ func (i *Incident) addPendingNotifications(
 	for contact, channels := range contactChannels {
 		for chID := range channels {
 			hr := &HistoryRow{
-				Key:                       recipient.ToKey(contact),
-				EventID:                   utils.ToDBInt(ev.ID),
-				Time:                      types.UnixMilli(time.Now()),
-				Type:                      Notified,
-				ChannelID:                 utils.ToDBInt(chID),
-				CausedByIncidentHistoryID: causedBy,
-				NotificationState:         NotificationStatePending,
+				Key:               recipient.ToKey(contact),
+				EventID:           utils.ToDBInt(ev.ID),
+				Time:              types.UnixMilli(time.Now()),
+				Type:              Notified,
+				ChannelID:         utils.ToDBInt(chID),
+				CausedByHistoryID: causedBy,
+				NotificationState: NotificationStatePending,
 			}
 
 			id, err := i.AddHistory(ctx, tx, hr, true)

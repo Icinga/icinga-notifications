@@ -26,3 +26,25 @@ ALTER TABLE rule_escalation_recipient
                 AND
                 (num_nonnulls(rule_escalation_id, rule_non_state_escalation_id) = 1)
             );
+
+ALTER TYPE incident_history_event_type RENAME TO history_event_type;
+
+ALTER TABLE incident_history
+    RENAME TO history;
+
+ALTER TABLE history
+    ALTER COLUMN type TYPE history_event_type;
+
+ALTER TABLE history
+    RENAME COLUMN caused_by_incident_history_id TO caused_by_history_id;
+
+ALTER TABLE history
+    ALTER COLUMN incident_id DROP NOT NULL;
+
+ALTER TABLE history
+    ADD COLUMN object_id bytea REFERENCES object(id);
+
+UPDATE history h SET object_id = (SELECT object_id from incident i where i.id = h.incident_id);
+
+ALTER TABLE history
+    ALTER COLUMN object_id SET NOT NULL;
