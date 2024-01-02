@@ -388,11 +388,11 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 			}
 
 			history := &HistoryRow{
-				Time:                      types.UnixMilli(time.Now()),
-				EventID:                   utils.ToDBInt(eventID),
-				RuleID:                    utils.ToDBInt(r.ID),
-				Type:                      RuleMatched,
-				CausedByIncidentHistoryID: causedBy,
+				Time:              types.UnixMilli(time.Now()),
+				EventID:           utils.ToDBInt(eventID),
+				RuleID:            utils.ToDBInt(r.ID),
+				Type:              RuleMatched,
+				CausedByHistoryID: causedBy,
 			}
 			insertedID, err := i.AddHistory(ctx, tx, history, true)
 			if err != nil {
@@ -509,12 +509,12 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 		}
 
 		history := &HistoryRow{
-			Time:                      state.TriggeredAt,
-			EventID:                   utils.ToDBInt(ev.ID),
-			RuleEscalationID:          utils.ToDBInt(state.RuleEscalationID),
-			RuleID:                    utils.ToDBInt(r.ID),
-			Type:                      EscalationTriggered,
-			CausedByIncidentHistoryID: causedBy,
+			Time:              state.TriggeredAt,
+			EventID:           utils.ToDBInt(ev.ID),
+			RuleEscalationID:  utils.ToDBInt(state.RuleEscalationID),
+			RuleID:            utils.ToDBInt(r.ID),
+			Type:              EscalationTriggered,
+			CausedByHistoryID: causedBy,
 		}
 
 		if _, err := i.AddHistory(ctx, tx, history, false); err != nil {
@@ -634,7 +634,7 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 		return errors.New("failed to add recipient role changed history")
 	}
 
-	cr := &ContactRow{IncidentID: hr.IncidentID, Key: recipientKey, Role: newRole}
+	cr := &ContactRow{IncidentID: hr.IncidentID.Int64, Key: recipientKey, Role: newRole}
 
 	stmt, _ := i.db.BuildUpsertStmt(cr)
 	_, err = tx.NamedExecContext(ctx, stmt, cr)
