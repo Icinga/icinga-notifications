@@ -7,19 +7,21 @@ import (
 	"time"
 )
 
-// Icinga2Time is a custom time.Time type for JSON unmarshalling from Icinga 2's unix timestamp type.
-type Icinga2Time struct {
-	time.Time
+// UnixFloat is a custom time.Time type for millisecond Unix timestamp, as used in Icinga 2's API.
+type UnixFloat time.Time
+
+// Time returns the time.Time of UnixFloat.
+func (t *UnixFloat) Time() time.Time {
+	return time.Time(*t)
 }
 
-func (iciTime *Icinga2Time) UnmarshalJSON(data []byte) error {
+func (t *UnixFloat) UnmarshalJSON(data []byte) error {
 	unixTs, err := strconv.ParseFloat(string(data), 64)
 	if err != nil {
 		return err
 	}
 
-	unixMicro := int64(unixTs * 1_000_000)
-	iciTime.Time = time.UnixMicro(unixMicro)
+	*t = UnixFloat(time.UnixMicro(int64(unixTs * 1_000_000)))
 	return nil
 }
 
@@ -31,23 +33,23 @@ func (iciTime *Icinga2Time) UnmarshalJSON(data []byte) error {
 //
 // https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#objecttype-comment
 type Comment struct {
-	Host      string      `json:"host_name"`
-	Service   string      `json:"service_name"`
-	Author    string      `json:"author"`
-	Text      string      `json:"text"`
-	EntryTime Icinga2Time `json:"entry_time"`
-	EntryType int         `json:"entry_type"`
+	Host      string    `json:"host_name"`
+	Service   string    `json:"service_name"`
+	Author    string    `json:"author"`
+	Text      string    `json:"text"`
+	EntryTime UnixFloat `json:"entry_time"`
+	EntryType int       `json:"entry_type"`
 }
 
 // CheckResult represents the Icinga 2 API CheckResult object.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/08-advanced-topics/#advanced-value-types-checkresult
 type CheckResult struct {
-	ExitStatus     int         `json:"exit_status"`
-	Output         string      `json:"output"`
-	State          int         `json:"state"`
-	ExecutionStart Icinga2Time `json:"execution_start"`
-	ExecutionEnd   Icinga2Time `json:"execution_end"`
+	ExitStatus     int       `json:"exit_status"`
+	Output         string    `json:"output"`
+	State          int       `json:"state"`
+	ExecutionStart UnixFloat `json:"execution_start"`
+	ExecutionEnd   UnixFloat `json:"execution_end"`
 }
 
 // Downtime represents the Icinga 2 API Downtime object.
@@ -82,10 +84,10 @@ type HostServiceRuntimeAttributes struct {
 	Groups                    []string    `json:"groups"`
 	State                     int         `json:"state"`
 	LastCheckResult           CheckResult `json:"last_check_result"`
-	LastStateChange           Icinga2Time `json:"last_state_change"`
+	LastStateChange           UnixFloat   `json:"last_state_change"`
 	DowntimeDepth             int         `json:"downtime_depth"`
 	Acknowledgement           int         `json:"acknowledgement"`
-	AcknowledgementLastChange Icinga2Time `json:"acknowledgement_last_change"`
+	AcknowledgementLastChange UnixFloat   `json:"acknowledgement_last_change"`
 }
 
 // ObjectQueriesResult represents the Icinga 2 API Object Queries Result wrapper object.
@@ -120,7 +122,7 @@ const (
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-statechange
 type StateChange struct {
-	Timestamp       Icinga2Time `json:"timestamp"`
+	Timestamp       UnixFloat   `json:"timestamp"`
 	Host            string      `json:"host"`
 	Service         string      `json:"service"`
 	State           int         `json:"state"`
@@ -139,13 +141,13 @@ type StateChange struct {
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-acknowledgementset
 type AcknowledgementSet struct {
-	Timestamp Icinga2Time `json:"timestamp"`
-	Host      string      `json:"host"`
-	Service   string      `json:"service"`
-	State     int         `json:"state"`
-	StateType int         `json:"state_type"`
-	Author    string      `json:"author"`
-	Comment   string      `json:"comment"`
+	Timestamp UnixFloat `json:"timestamp"`
+	Host      string    `json:"host"`
+	Service   string    `json:"service"`
+	State     int       `json:"state"`
+	StateType int       `json:"state_type"`
+	Author    string    `json:"author"`
+	Comment   string    `json:"comment"`
 }
 
 // AcknowledgementCleared represents the Icinga 2 API Event Stream AcknowledgementCleared response for acknowledgements cleared on hosts/services.
@@ -157,59 +159,59 @@ type AcknowledgementSet struct {
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-acknowledgementcleared
 type AcknowledgementCleared struct {
-	Timestamp Icinga2Time `json:"timestamp"`
-	Host      string      `json:"host"`
-	Service   string      `json:"service"`
-	State     int         `json:"state"`
-	StateType int         `json:"state_type"`
+	Timestamp UnixFloat `json:"timestamp"`
+	Host      string    `json:"host"`
+	Service   string    `json:"service"`
+	State     int       `json:"state"`
+	StateType int       `json:"state_type"`
 }
 
 // CommentAdded represents the Icinga 2 API Event Stream CommentAdded response for added host/service comments.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-commentadded
 type CommentAdded struct {
-	Timestamp Icinga2Time `json:"timestamp"`
-	Comment   Comment     `json:"comment"`
+	Timestamp UnixFloat `json:"timestamp"`
+	Comment   Comment   `json:"comment"`
 }
 
 // CommentRemoved represents the Icinga 2 API Event Stream CommentRemoved response for removed host/service comments.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-commentremoved
 type CommentRemoved struct {
-	Timestamp Icinga2Time `json:"timestamp"`
-	Comment   Comment     `json:"comment"`
+	Timestamp UnixFloat `json:"timestamp"`
+	Comment   Comment   `json:"comment"`
 }
 
 // DowntimeAdded represents the Icinga 2 API Event Stream DowntimeAdded response for added downtimes on host/services.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-downtimeadded
 type DowntimeAdded struct {
-	Timestamp Icinga2Time `json:"timestamp"`
-	Downtime  Downtime    `json:"downtime"`
+	Timestamp UnixFloat `json:"timestamp"`
+	Downtime  Downtime  `json:"downtime"`
 }
 
 // DowntimeRemoved represents the Icinga 2 API Event Stream DowntimeRemoved response for removed downtimes on host/services.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-commentremoved
 type DowntimeRemoved struct {
-	Timestamp Icinga2Time `json:"timestamp"`
-	Downtime  Downtime    `json:"downtime"`
+	Timestamp UnixFloat `json:"timestamp"`
+	Downtime  Downtime  `json:"downtime"`
 }
 
 // DowntimeStarted represents the Icinga 2 API Event Stream DowntimeStarted response for started downtimes on host/services.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-downtimestarted
 type DowntimeStarted struct {
-	Timestamp Icinga2Time `json:"timestamp"`
-	Downtime  Downtime    `json:"downtime"`
+	Timestamp UnixFloat `json:"timestamp"`
+	Downtime  Downtime  `json:"downtime"`
 }
 
 // DowntimeTriggered represents the Icinga 2 API Event Stream DowntimeTriggered response for triggered downtimes on host/services.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-downtimetriggered
 type DowntimeTriggered struct {
-	Timestamp Icinga2Time `json:"timestamp"`
-	Downtime  Downtime    `json:"downtime"`
+	Timestamp UnixFloat `json:"timestamp"`
+	Downtime  Downtime  `json:"downtime"`
 }
 
 // UnmarshalEventStreamResponse unmarshal a JSON response line from the Icinga 2 API Event Stream.
