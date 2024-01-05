@@ -8,7 +8,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
-	"github.com/icinga/icinga-notifications/internal/eventstream"
+	"github.com/icinga/icinga-notifications/internal/icinga2"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
 	"github.com/icinga/icingadb/pkg/logging"
@@ -86,19 +86,19 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	esLauncher := &eventstream.Launcher{
+	icinga2Launcher := &icinga2.Launcher{
 		Ctx:           ctx,
 		Logs:          logs,
 		Db:            db,
 		RuntimeConfig: nil, // Will be set below as it is interconnected..
 	}
 
-	runtimeConfig := config.NewRuntimeConfig(esLauncher.Launch, logs, db)
+	runtimeConfig := config.NewRuntimeConfig(icinga2Launcher.Launch, logs, db)
 	if err := runtimeConfig.UpdateFromDatabase(ctx); err != nil {
 		logger.Fatalw("failed to load config from database", zap.Error(err))
 	}
 
-	esLauncher.RuntimeConfig = runtimeConfig
+	icinga2Launcher.RuntimeConfig = runtimeConfig
 
 	go runtimeConfig.PeriodicUpdates(ctx, 1*time.Second)
 
@@ -108,7 +108,7 @@ func main() {
 	}
 
 	// Wait to load open incidents from the database before either starting Event Stream Clients or starting the Listener.
-	esLauncher.Ready()
+	icinga2Launcher.Ready()
 	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {
 		logger.Errorw("Listener has finished with an error", zap.Error(err))
 	} else {

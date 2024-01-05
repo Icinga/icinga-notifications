@@ -26,7 +26,7 @@ type RuntimeConfig struct {
 	ConfigSet
 
 	// EventStreamLaunchFunc is a callback to launch an Event Stream API Client.
-	// This became necessary due to circular imports, either with the incident or eventstream package.
+	// This became necessary due to circular imports, either with the incident or icinga2 package.
 	EventStreamLaunchFunc func(source *Source)
 
 	// pending contains changes to config objects that are to be applied to the embedded live config.
