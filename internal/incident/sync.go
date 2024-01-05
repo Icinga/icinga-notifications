@@ -36,28 +36,6 @@ func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 	return nil
 }
 
-func (i *Incident) AddHistory(ctx context.Context, tx *sqlx.Tx, historyRow *common.HistoryRow, fetchId bool) (types.Int, error) {
-	historyRow.IncidentID = utils.ToDBInt(i.incidentRowID)
-	historyRow.ObjectID = i.Object.ID
-
-	stmt := utils.BuildInsertStmtWithout(i.db, historyRow, "id")
-	if fetchId {
-		historyId, err := utils.InsertAndFetchId(ctx, tx, stmt, historyRow)
-		if err != nil {
-			return types.Int{}, err
-		}
-
-		return utils.ToDBInt(historyId), nil
-	} else {
-		_, err := tx.NamedExecContext(ctx, stmt, historyRow)
-		if err != nil {
-			return types.Int{}, err
-		}
-	}
-
-	return types.Int{}, nil
-}
-
 func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, state *EscalationState) error {
 	state.IncidentID = i.incidentRowID
 
@@ -102,6 +80,8 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 				i.logger.Infof("Contact %q role changed from %s to %s", r, oldRole.String(), newRole.String())
 
 				hr := &common.HistoryRow{
+					IncidentID:       utils.ToDBInt(i.incidentRowID),
+					ObjectID:         i.Object.ID,
 					EventID:          utils.ToDBInt(eventId),
 					Key:              cr.Key,
 					Time:             types.UnixMilli(time.Now()),
@@ -110,7 +90,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 					OldRecipientRole: oldRole,
 				}
 
-				_, err := i.AddHistory(ctx, tx, hr, false)
+				_, err := common.AddHistory(i.db, ctx, tx, hr, false)
 				if err != nil {
 					i.logger.Errorw(
 						"Failed to insert recipient role changed incident history", zap.String("escalation", escalation.DisplayName()),
@@ -152,6 +132,8 @@ func (i *Incident) AddPendingNotificationHistory(
 	ctx context.Context, tx *sqlx.Tx, eventID int64, contact *recipient.Contact, causedBy types.Int, chID int64,
 ) (int64, error) {
 	hr := &common.HistoryRow{
+		IncidentID:        utils.ToDBInt(i.incidentRowID),
+		ObjectID:          i.Object.ID,
 		Key:               recipient.ToKey(contact),
 		EventID:           utils.ToDBInt(eventID),
 		Time:              types.UnixMilli(time.Now()),
@@ -161,7 +143,7 @@ func (i *Incident) AddPendingNotificationHistory(
 		NotificationState: common.NotificationStatePending,
 	}
 
-	id, err := i.AddHistory(ctx, tx, hr, true)
+	id, err := common.AddHistory(i.db, ctx, tx, hr, true)
 	if err != nil {
 		i.logger.Errorw(
 			"Failed to insert contact pending notification incident history",
