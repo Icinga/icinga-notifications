@@ -3,6 +3,7 @@ package icinga2
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -171,11 +172,11 @@ func (client *Client) fetchAcknowledgementComment(ctx context.Context, host, ser
 	}
 
 	slices.SortFunc(objQueriesResults, func(a, b ObjectQueriesResult[Comment]) int {
-		distA := a.Attrs.EntryTime.Time.Sub(ackTime).Abs()
-		distB := b.Attrs.EntryTime.Time.Sub(ackTime).Abs()
-		return int(distA - distB)
+		distA := a.Attrs.EntryTime.Time().Sub(ackTime).Abs()
+		distB := b.Attrs.EntryTime.Time().Sub(ackTime).Abs()
+		return cmp.Compare(distA, distB)
 	})
-	if objQueriesResults[0].Attrs.EntryTime.Sub(ackTime).Abs() > time.Second {
+	if objQueriesResults[0].Attrs.EntryTime.Time().Sub(ackTime).Abs() > time.Second {
 		return nil, fmt.Errorf("found no ACK Comment for %q with %v close to %v", filterExpr, filterVars, ackTime)
 	}
 
@@ -229,7 +230,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case eventCh <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time}:
+		case eventCh <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time()}:
 			stateChangeEvents++
 		}
 
@@ -241,7 +242,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 		ackComment, err := client.fetchAcknowledgementComment(
 			ctx,
 			hostName, serviceName,
-			objQueriesResult.Attrs.AcknowledgementLastChange.Time)
+			objQueriesResult.Attrs.AcknowledgementLastChange.Time())
 		if err != nil {
 			return fmt.Errorf("fetching acknowledgement comment for %v failed, %w", ev, err)
 		}
@@ -256,7 +257,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case eventCh <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time}:
+		case eventCh <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time()}:
 			acknowledgementEvents++
 		}
 	}
@@ -408,11 +409,11 @@ func (client *Client) listenEventStream() error {
 		switch respT := resp.(type) {
 		case *StateChange:
 			ev, err = client.buildHostServiceEvent(client.Ctx, respT.CheckResult, respT.State, respT.Host, respT.Service)
-			evTime = respT.Timestamp.Time
+			evTime = respT.Timestamp.Time()
 
 		case *AcknowledgementSet:
 			ev, err = client.buildAcknowledgementEvent(client.Ctx, respT.Host, respT.Service, respT.Author, respT.Comment)
-			evTime = respT.Timestamp.Time
+			evTime = respT.Timestamp.Time()
 
 		// case *AcknowledgementCleared:
 		// case *CommentAdded:
