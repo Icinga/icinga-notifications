@@ -2,6 +2,7 @@ package icinga2
 
 import (
 	"context"
+	"fmt"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -165,15 +166,72 @@ func (client *Client) buildHostServiceEvent(ctx context.Context, result CheckRes
 }
 
 // buildAcknowledgementEvent from the given fields.
-func (client *Client) buildAcknowledgementEvent(ctx context.Context, host, service, author, comment string) (*event.Event, error) {
+func (client *Client) buildAcknowledgementEvent(ctx context.Context, host, service, author, comment, evType string) (*event.Event, error) {
 	ev, err := client.buildCommonEvent(ctx, host, service)
 	if err != nil {
 		return nil, err
 	}
 
-	ev.Type = event.TypeAcknowledgementSet
+	if !(evType == event.TypeAcknowledgementSet || evType == event.TypeAcknowledgementCleared) {
+		return nil, fmt.Errorf("unknown acknowledgement event type %q given", evType)
+	}
+
+	ev.Type = evType
 	ev.Username = author
 	ev.Message = comment
+
+	return ev, nil
+}
+
+// buildCommentEvent from the given fields.
+func (client *Client) buildCommentEvent(ctx context.Context, c Comment, evType string) (*event.Event, error) {
+	ev, err := client.buildCommonEvent(ctx, c.Host, c.Service)
+	if err != nil {
+		return nil, err
+	}
+
+	if !(evType == event.TypeCommentAdded || evType == event.TypeCommentRemoved) {
+		return nil, fmt.Errorf("unknown comment event type %q given", evType)
+	}
+
+	ev.Type = evType
+	ev.Username = c.Author
+	ev.Message = c.Text
+
+	return ev, nil
+}
+
+// buildDowntimeEvent from the given fields.
+func (client *Client) buildDowntimeEvent(ctx context.Context, d Downtime, evType string) (*event.Event, error) {
+	ev, err := client.buildCommonEvent(ctx, d.Host, d.Service)
+	if err != nil {
+		return nil, err
+	}
+
+	switch evType {
+	case event.TypeDowntimeStart, event.TypeDowntimeCancelled, event.TypeDowntimeEnd, event.TypeDowntimeAdded, event.TypeDowntimeTriggered:
+	default:
+		return nil, fmt.Errorf("unknown downtime event type %q given", evType)
+	}
+
+	ev.Type = evType
+	ev.Username = d.Author
+	ev.Message = d.Comment
+
+	return ev, nil
+}
+
+// buildFlappingEvent from the given fields.
+func (client *Client) buildFlappingEvent(ctx context.Context, host, service string, state, stateType int, isFlapping bool) (*event.Event, error) {
+	ev, err := client.buildCommonEvent(ctx, host, service)
+	if err != nil {
+		return nil, err
+	}
+
+	ev.Type = event.TypeFlappingStart
+	if !isFlapping {
+		ev.Type = event.TypeFlappingEnd
+	}
 
 	return ev, nil
 }
