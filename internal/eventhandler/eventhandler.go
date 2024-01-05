@@ -171,26 +171,6 @@ func (eh *EventHandler) handle(ctx context.Context) error {
 			eh.timer.Stop()
 			eh.timer = nil
 		}
-	} else {
-		historyEvType, err := common.GetHistoryEventType(ev.Type)
-		if err != nil {
-			return err
-		}
-
-		hr := &common.HistoryRow{
-			EventID: utils.ToDBInt(ev.ID),
-			Time:    types.UnixMilli(time.Now()),
-			Type:    historyEvType,
-			Message: utils.ToDBString(ev.Message),
-		}
-
-		// TODO: do we need causedby here? for rule_matched, etc entries
-		causedBy, err = eh.addNonIncidentHistory(ctx, tx, hr, true)
-		if err != nil {
-			eh.logger.Errorw("Failed to add non-incident history", zap.String("type", historyEvType.String()), zap.Error(err))
-
-			return fmt.Errorf("failed to add %s non-incident history", historyEvType.String())
-		}
 	}
 
 	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
@@ -206,7 +186,12 @@ func (eh *EventHandler) handle(ctx context.Context) error {
 		return err
 	}
 
-	if err := eh.triggerEscalations(ctx, tx, ev, causedBy, escalations); err != nil {
+	if len(escalations) == 0 {
+		// No non-state recipients configured, sent to all incident recipients
+		if eh.Incident != nil && ev.Type != event.TypeState {
+			eh.Recipients = eh.Incident.Recipients
+		}
+	} else if err := eh.triggerEscalations(ctx, tx, ev, causedBy, escalations); err != nil {
 		return err
 	}
 
@@ -260,22 +245,6 @@ func (eh *EventHandler) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID 
 				if err != nil {
 					return causedBy, err
 				}
-			} else {
-				//TODO: NON-incident history entry
-				history := &common.HistoryRow{
-					Time:              types.UnixMilli(time.Now()),
-					EventID:           utils.ToDBInt(eventID),
-					RuleID:            utils.ToDBInt(r.ID),
-					Type:              common.RuleMatched,
-					CausedByHistoryID: causedBy,
-				}
-
-				causedBy, err = eh.addNonIncidentHistory(ctx, tx, history, true) //TODO: fethedId??
-				if err != nil {
-					eh.logger.Errorw("Failed to insert rule matched non-incident history", zap.String("rule", r.Name), zap.Error(err))
-
-					return types.Int{}, fmt.Errorf("failed to insert rule matched non-incident history")
-				}
 			}
 		}
 	}
@@ -286,20 +255,16 @@ func (eh *EventHandler) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID 
 // evaluateEscalations evaluates this incidents rule escalations to be triggered if they aren't already.
 // Returns the newly evaluated escalations to be triggered or an error on database failure.
 func (eh *EventHandler) evaluateEscalations() ([]*rule.EscalationTemplate, error) {
-	i := eh.Incident
 	ev := eh.Event
 	var escalations []*rule.EscalationTemplate
 	var err error
-	if i != nil {
-		escalations, err = eh.EvaluateIncidentEscalations(eh.Event)
+	if ev.Type == event.TypeState {
+		escalations, err = eh.EvaluateIncidentEscalations(ev)
 		if err != nil {
 			return nil, err
 		}
 
-		// any incident escalation/ no no-state rule or incident is rocovered
-		if len(escalations) != 0 || i.Severity == event.SeverityOK {
-			return escalations, nil
-		}
+		return escalations, nil
 	}
 
 	nonStateEscFilter := &rule.EscalationFilter{Type: ev.Type}
@@ -422,8 +387,6 @@ func (eh *EventHandler) EvaluateIncidentEscalations(ev *event.Event) ([]*rule.Es
 	}
 
 	filterContext := &rule.EscalationFilter{IncidentAge: ev.Time.Sub(eh.Incident.StartedAt), IncidentSeverity: eh.Incident.Severity}
-	// if Rule does not define any non-state escalation, all incident recipients should be notified for non-state esc.
-	var isNonStateEscForAll bool
 	var escalations []*rule.EscalationTemplate
 	retryAfter := rule.RetryNever
 
@@ -434,7 +397,6 @@ func (eh *EventHandler) EvaluateIncidentEscalations(ev *event.Event) ([]*rule.Es
 			continue
 		}
 
-		isNonStateEscForAll = len(r.NonStateEscalations) == 0 && ev.Type != event.TypeState
 		// Check if new escalation stages are reached
 		for _, escalation := range r.Escalations {
 			matched := false
@@ -458,12 +420,7 @@ func (eh *EventHandler) EvaluateIncidentEscalations(ev *event.Event) ([]*rule.Es
 				}
 			}
 
-			//TODO: test fails: Add a non-state escalation with comment_added filter
-			// Add a escalation rule incident age 30s.. set host to down, and a comment before 30 sec.. see, the logs..
-			// Yes, comment notifications reevaluate the time based escalation and it is then never triggred..
-
-			//TODO: this must be handled differently. the returned escalations should not contain escalations that have a retryAfter
-			if matched || isNonStateEscForAll {
+			if matched {
 				escalations = append(escalations, escalation.EscalationTemplate)
 			}
 		}
@@ -504,30 +461,7 @@ func (eh *EventHandler) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev 
 			}
 			eh.Recipients = eh.Incident.Recipients
 		} else {
-			//TODO: non incident
-			eh.logger.Infof("Rule %q reached escalation %q", r.Name, escalation.DisplayName())
-			history := &common.HistoryRow{
-				Time:                     types.UnixMilli(time.Now()),
-				EventID:                  utils.ToDBInt(ev.ID),
-				RuleNonStateEscalationID: utils.ToDBInt(escalation.ID),
-				RuleID:                   utils.ToDBInt(r.ID),
-				Type:                     common.EscalationTriggered,
-				CausedByHistoryID:        causedBy,
-			}
-
-			var err error
-			causedBy, err = eh.addNonIncidentHistory(ctx, tx, history, false)
-			if err != nil {
-				eh.logger.Errorw(
-					"Failed to insert non-state-escalation triggered non-incident history",
-					zap.String("rule", r.Name),
-					zap.String("escalation",
-						escalation.DisplayName()), zap.Error(err))
-
-				return fmt.Errorf("failed to insert non-state-escalation triggered non-incident history")
-			}
-
-			err = eh.AddRecipient(ctx, tx, escalation, ev.ID)
+			err := eh.AddRecipient(ctx, tx, escalation, ev.ID)
 			if err != nil {
 				return err
 			}
@@ -632,26 +566,6 @@ func (eh *EventHandler) addPendingNotifications(ctx context.Context, tx *sqlx.Tx
 	}
 
 	return notifications, nil
-}
-
-func (eh *EventHandler) addNonIncidentHistory(ctx context.Context, tx *sqlx.Tx, historyRow *common.HistoryRow, fetchId bool) (types.Int, error) {
-	historyRow.ObjectID = eh.Object.ID
-	stmt := utils.BuildInsertStmtWithout(eh.db, historyRow, "id")
-	if fetchId {
-		historyId, err := utils.InsertAndFetchId(ctx, tx, stmt, historyRow)
-		if err != nil {
-			return types.Int{}, err
-		}
-
-		return utils.ToDBInt(historyId), nil
-	} else {
-		_, err := tx.NamedExecContext(ctx, stmt, historyRow)
-		if err != nil {
-			return types.Int{}, err
-		}
-	}
-
-	return types.Int{}, nil
 }
 
 func (eh *EventHandler) notifyContacts(ctx context.Context, ev *event.Event, notifications []*Notification) error {

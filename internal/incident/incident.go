@@ -269,7 +269,7 @@ func (i *Incident) TriggerEscalation(ctx context.Context, tx *sqlx.Tx, ev *event
 		CausedByHistoryID: causedBy,
 	}
 
-	if ev.Type == event.TypeState {
+	if ev.Type == event.TypeState || ev.Type == event.TypeInternal {
 		history.RuleEscalationID = utils.ToDBInt(escalation.ID)
 
 		state := &EscalationState{RuleEscalationID: escalation.ID, TriggeredAt: history.Time}
