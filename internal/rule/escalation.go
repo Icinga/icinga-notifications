@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-type Escalation struct {
+type EscalationTemplate struct {
 	ID            int64          `db:"id"`
 	RuleID        int64          `db:"rule_id"`
 	Name          string         `db:"-"`
@@ -21,7 +21,7 @@ type Escalation struct {
 	Recipients []*EscalationRecipient
 }
 
-func (e *Escalation) DisplayName() string {
+func (e *EscalationTemplate) DisplayName() string {
 	if e.Name != "" {
 		return e.Name
 	}
@@ -46,7 +46,7 @@ func (e *Escalation) DisplayName() string {
 	return strings.Join(recipients, ", ")
 }
 
-func (e *Escalation) GetContactsAt(t time.Time) []ContactChannelPair {
+func (e *EscalationTemplate) GetContactsAt(t time.Time) []ContactChannelPair {
 	var pairs []ContactChannelPair
 
 	for _, r := range e.Recipients {
@@ -58,16 +58,34 @@ func (e *Escalation) GetContactsAt(t time.Time) []ContactChannelPair {
 	return pairs
 }
 
+const (
+	TypeEscalation         = "Escalation"
+	TypeNonStateEscalation = "NonStateEscalation"
+)
+
+type Escalation struct {
+	*EscalationTemplate
+}
+
 func (e *Escalation) TableName() string {
 	return "rule_escalation"
 }
 
+type NonStateEscalation struct {
+	*EscalationTemplate
+}
+
+func (e *NonStateEscalation) TableName() string {
+	return "rule_non_state_escalation"
+}
+
 type EscalationRecipient struct {
-	ID            int64         `db:"id"`
-	EscalationID  int64         `db:"rule_escalation_id"`
-	ChannelID     sql.NullInt64 `db:"channel_id"`
-	recipient.Key `db:",inline"`
-	Recipient     recipient.Recipient
+	ID                   int64         `db:"id"`
+	EscalationID         sql.NullInt64 `db:"rule_escalation_id"`
+	NonStateEscalationID sql.NullInt64 `db:"rule_non_state_escalation_id"`
+	ChannelID            sql.NullInt64 `db:"channel_id"`
+	recipient.Key        `db:",inline"`
+	Recipient            recipient.Recipient
 }
 
 func (r *EscalationRecipient) TableName() string {

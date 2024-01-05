@@ -9,6 +9,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/eventhandler"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
@@ -116,39 +117,20 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if len(ev.Tags) == 0 {
-		abort(http.StatusBadRequest, &ev, "ignoring invalid event: tags cannot be empty")
-		return
-	}
-
 	ev.Time = time.Now()
 	ev.SourceId = source.ID
 
-	if ev.Severity == event.SeverityNone && ev.Type == "" {
-		abort(http.StatusBadRequest, &ev, "ignoring invalid event: must set 'type' or 'severity'")
+	if err = ev.Validate(); err != nil {
+		abort(http.StatusBadRequest, &ev, err.Error())
 		return
 	}
 
-	if ev.Severity != event.SeverityNone {
-		if ev.Type == "" {
-			ev.Type = event.TypeState
-		} else if ev.Type != event.TypeState {
-			abort(http.StatusBadRequest, &ev,
-				"ignoring invalid event: if 'severity' is set, 'type' must not be set or set to %q", event.TypeState)
-			return
-		}
-	}
-
-	if ev.Severity == event.SeverityNone {
-		if ev.Type != event.TypeAcknowledgement {
-			// It's neither a state nor an acknowledgement event.
-			abort(http.StatusBadRequest, &ev, "received not a state/acknowledgement event, ignoring")
-			return
-		}
+	if ev.Type == "" {
+		ev.Type = event.TypeState
 	}
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
-	err = incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
+	err = eventhandler.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
 	if err != nil {
 		abort(http.StatusInternalServerError, &ev, err.Error())
 		return
@@ -157,6 +139,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintln(w, "event processed successfully")
 	_, _ = fmt.Fprintln(w)
+
+	l.logger.Infow("event processed successfully")
 }
 
 // checkDebugPassword checks if the valid debug password was provided. If there is no password configured or the

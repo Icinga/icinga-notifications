@@ -1,5 +1,21 @@
 CREATE TYPE boolenum AS ENUM ( 'n', 'y' );
-CREATE TYPE incident_history_event_type AS ENUM ( 'incident_severity_changed', 'recipient_role_changed', 'escalation_triggered', 'rule_matched', 'opened', 'closed', 'notified' );
+CREATE TYPE history_event_type AS ENUM (
+    'incident_severity_changed',
+    'recipient_role_changed',
+    'escalation_triggered',
+    'rule_matched',
+    'opened',
+    'closed',
+    'notified',
+    'downtime_started',
+    'downtime_ended',
+    'downtime_cancelled',
+    'custom',
+    'flapping_started',
+    'flapping_ended',
+    'comment_added',
+    'comment_removed'
+);
 CREATE TYPE frequency_type AS ENUM ( 'MINUTELY', 'HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY' );
 CREATE TYPE notification_state_type AS ENUM ( 'pending', 'sent', 'failed' );
 
@@ -217,9 +233,24 @@ CREATE TABLE rule_escalation (
     CHECK (NOT (condition IS NOT NULL AND fallback_for IS NOT NULL))
 );
 
+CREATE TABLE rule_non_state_escalation (
+    id bigserial,
+    rule_id bigint NOT NULL REFERENCES rule(id),
+    position integer NOT NULL,
+    condition text,
+    name text, -- if not set, recipients are used as a fallback for display purposes
+    fallback_for bigint REFERENCES rule_escalation(id),
+
+    CONSTRAINT pk_non_state_escalation PRIMARY KEY (id),
+
+    UNIQUE (rule_id, position),
+    CHECK (NOT (condition IS NOT NULL AND fallback_for IS NOT NULL))
+);
+
 CREATE TABLE rule_escalation_recipient (
     id bigserial,
-    rule_escalation_id bigint NOT NULL REFERENCES rule_escalation(id),
+    rule_escalation_id bigint REFERENCES rule_escalation(id),
+    rule_non_state_escalation_id bigint REFERENCES rule_non_state_escalation(id),
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),
     schedule_id bigint REFERENCES schedule(id),
@@ -227,7 +258,10 @@ CREATE TABLE rule_escalation_recipient (
 
     CONSTRAINT pk_rule_escalation_recipient PRIMARY KEY (id),
 
-    CHECK (num_nonnulls(contact_id, contactgroup_id, schedule_id) = 1)
+    CHECK ((num_nonnulls(contact_id, contactgroup_id, schedule_id) = 1)
+               AND
+           (num_nonnulls(rule_escalation_id, rule_non_state_escalation_id) = 1)
+        )
 );
 
 CREATE TABLE incident (
@@ -277,20 +311,22 @@ CREATE TABLE incident_rule_escalation_state (
     CONSTRAINT pk_incident_rule_escalation_state PRIMARY KEY (incident_id, rule_escalation_id)
 );
 
-CREATE TABLE incident_history (
+CREATE TABLE history (
     id bigserial,
-    incident_id bigint NOT NULL REFERENCES incident(id),
+    object_id bytea NOT NULL REFERENCES object(id),
+    incident_id bigint REFERENCES incident(id),
     rule_escalation_id bigint REFERENCES rule_escalation(id),
+    rule_non_state_escalation_id bigint REFERENCES rule_non_state_escalation(id),
     event_id bigint REFERENCES event(id),
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),
     schedule_id bigint REFERENCES schedule(id),
     rule_id bigint REFERENCES rule(id),
     channel_id bigint REFERENCES channel(id),
-    caused_by_incident_history_id bigint REFERENCES incident_history(id),
+    caused_by_history_id bigint REFERENCES history(id),
     time bigint NOT NULL,
     message text,
-    type incident_history_event_type NOT NULL,
+    type history_event_type NOT NULL,
     new_severity severity,
     old_severity severity,
     new_recipient_role incident_contact_role,
@@ -298,6 +334,6 @@ CREATE TABLE incident_history (
     notification_state notification_state_type,
     sent_at bigint,
 
-    CONSTRAINT pk_incident_history PRIMARY KEY (id),
+    CONSTRAINT pk_history PRIMARY KEY (id),
     FOREIGN KEY (incident_id, rule_escalation_id) REFERENCES incident_rule_escalation_state(incident_id, rule_escalation_id)
 );
