@@ -1,4 +1,4 @@
-package eventstream
+package icinga2
 
 // This file contains the Launcher type to, well, launch new Event Stream Clients through a callback function.
 
@@ -18,7 +18,7 @@ import (
 	"sync"
 )
 
-// Launcher allows starting a new Event Stream API Client through a callback from within the config package.
+// Launcher allows starting a new Icinga 2 Event Stream API Client through a callback from within the config package.
 //
 // This architecture became kind of necessary to work around circular imports due to the RuntimeConfig's omnipresence.
 type Launcher struct {
@@ -32,13 +32,13 @@ type Launcher struct {
 	waitingSources []*config.Source
 }
 
-// Launch either directly launches an Event Stream Client for this Source or enqueues it until the Launcher is Ready.
+// Launch either directly launches an Icinga 2 Event Stream Client for this Source or enqueues it until the Launcher is Ready.
 func (launcher *Launcher) Launch(src *config.Source) {
 	launcher.mutex.Lock()
 	defer launcher.mutex.Unlock()
 
 	if !launcher.isReady {
-		launcher.Logs.GetChildLogger("eventstream").
+		launcher.Logs.GetChildLogger("icinga2").
 			With(zap.Int64("source-id", src.ID)).
 			Debug("Postponing Event Stream Client Launch as Launcher is not ready yet")
 		launcher.waitingSources = append(launcher.waitingSources, src)
@@ -55,7 +55,7 @@ func (launcher *Launcher) Ready() {
 
 	launcher.isReady = true
 	for _, src := range launcher.waitingSources {
-		launcher.Logs.GetChildLogger("eventstream").
+		launcher.Logs.GetChildLogger("icinga2").
 			With(zap.Int64("source-id", src.ID)).
 			Debug("Launching postponed Event Stream Client")
 		launcher.launch(src)
@@ -63,9 +63,9 @@ func (launcher *Launcher) Ready() {
 	launcher.waitingSources = nil
 }
 
-// launch a new Event Stream API Client based on the Icinga2Source configuration.
+// launch a new Icinga 2 Event Stream API Client based on the config.Source configuration.
 func (launcher *Launcher) launch(src *config.Source) {
-	logger := launcher.Logs.GetChildLogger("eventstream").With(zap.Int64("source-id", src.ID))
+	logger := launcher.Logs.GetChildLogger("icinga2").With(zap.Int64("source-id", src.ID))
 
 	if src.Type != config.SourceTypeIcinga2 ||
 		!src.Icinga2BaseURL.Valid ||

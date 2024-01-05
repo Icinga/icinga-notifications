@@ -1,4 +1,4 @@
-package eventstream
+package icinga2
 
 import (
 	"context"
