@@ -91,6 +91,10 @@ type Downtime struct {
 	Service string `json:"service_name"`
 	Author  string `json:"author"`
 	Comment string `json:"comment"`
+
+	// RemoveTime is used to indicate whether a downtime was ended automatically or cancelled prematurely by a user.
+	// It is set to zero time for the former case, otherwise to the timestamp at which time has been cancelled.
+	RemoveTime UnixFloat `json:"remove_time"`
 }
 
 // HostServiceRuntimeAttributes are common attributes of both Host and Service objects.
@@ -141,6 +145,7 @@ const (
 	typeDowntimeRemoved        = "DowntimeRemoved"
 	typeDowntimeStarted        = "DowntimeStarted"
 	typeDowntimeTriggered      = "DowntimeTriggered"
+	typeFlapping               = "Flapping"
 )
 
 // StateChange represents the Icinga 2 API Event Stream StateChange response for host/service state changes.
@@ -244,6 +249,21 @@ type DowntimeTriggered struct {
 	Downtime  Downtime  `json:"downtime"`
 }
 
+// Flapping represents the Icinga 2 API Event Stream Flapping response for flapping host/services.
+//
+// NOTE:
+//   - An empty Service field indicates a host being in flapping state.
+//
+// https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-flapping
+type Flapping struct {
+	Timestamp  UnixFloat `json:"timestamp"`
+	Host       string    `json:"host"`
+	Service    string    `json:"service"`
+	State      int       `json:"state"`
+	StateType  int       `json:"state_type"`
+	IsFlapping bool      `json:"is_flapping"`
+}
+
 // UnmarshalEventStreamResponse unmarshal a JSON response line from the Icinga 2 API Event Stream.
 //
 // The function expects an Icinga 2 API Event Stream Response in its JSON form and tries to unmarshal it into one of the
@@ -281,6 +301,8 @@ func UnmarshalEventStreamResponse(bytes []byte) (any, error) {
 		resp = new(DowntimeStarted)
 	case typeDowntimeTriggered:
 		resp = new(DowntimeTriggered)
+	case typeFlapping:
+		resp = new(Flapping)
 	default:
 		return nil, fmt.Errorf("unsupported type %q", responseType)
 	}

@@ -176,15 +176,58 @@ func (client *Client) buildHostServiceEvent(ctx context.Context, result CheckRes
 }
 
 // buildAcknowledgementEvent from the given fields.
-func (client *Client) buildAcknowledgementEvent(ctx context.Context, host, service, author, comment string) (*event.Event, error) {
+func (client *Client) buildAcknowledgementEvent(
+	ctx context.Context, host, service, author, comment string, clearEvent bool,
+) (*event.Event, error) {
 	ev, err := client.buildCommonEvent(ctx, host, service)
 	if err != nil {
 		return nil, err
 	}
 
-	ev.Type = event.TypeAcknowledgementSet
+	if clearEvent {
+		ev.Type = event.TypeAcknowledgementCleared
+	} else {
+		ev.Type = event.TypeAcknowledgementSet
+	}
+
 	ev.Username = author
 	ev.Message = comment
+
+	return ev, nil
+}
+
+// buildDowntimeEvent from the given fields.
+func (client *Client) buildDowntimeEvent(ctx context.Context, d Downtime, startEvent bool) (*event.Event, error) {
+	ev, err := client.buildCommonEvent(ctx, d.Host, d.Service)
+	if err != nil {
+		return nil, err
+	}
+
+	if startEvent {
+		ev.Type = event.TypeDowntimeStart
+	} else if d.RemoveTime.Time().IsZero() {
+		ev.Type = event.TypeDowntimeEnd
+	} else {
+		ev.Type = event.TypeDowntimeRemoved
+	}
+
+	ev.Username = d.Author
+	ev.Message = d.Comment
+
+	return ev, nil
+}
+
+// buildFlappingEvent from the given fields.
+func (client *Client) buildFlappingEvent(ctx context.Context, host, service string, state, stateType int, isFlapping bool) (*event.Event, error) {
+	ev, err := client.buildCommonEvent(ctx, host, service)
+	if err != nil {
+		return nil, err
+	}
+
+	ev.Type = event.TypeFlappingStart
+	if !isFlapping {
+		ev.Type = event.TypeFlappingEnd
+	}
 
 	return ev, nil
 }
