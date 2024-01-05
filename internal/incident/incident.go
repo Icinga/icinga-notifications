@@ -135,6 +135,8 @@ func (i *Incident) HandleRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.R
 	}
 
 	history := &common.HistoryRow{
+		IncidentID:        utils.ToDBInt(i.incidentRowID),
+		ObjectID:          i.Object.ID,
 		Time:              types.UnixMilli(time.Now()),
 		EventID:           utils.ToDBInt(eventID),
 		RuleID:            utils.ToDBInt(r.ID),
@@ -142,7 +144,7 @@ func (i *Incident) HandleRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.R
 		CausedByHistoryID: causedBy,
 	}
 
-	insertedID, err := i.AddHistory(ctx, tx, history, true)
+	insertedID, err := common.AddHistory(i.db, ctx, tx, history, true)
 	if err != nil {
 		i.logger.Errorw("Failed to insert rule matched incident history", zap.String("rule", r.Name), zap.Error(err))
 
@@ -172,6 +174,8 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 	i.logger.Infof("Incident severity changed from %s to %s", oldSeverity.String(), newSeverity.String())
 
 	history := &common.HistoryRow{
+		IncidentID:  utils.ToDBInt(i.incidentRowID),
+		ObjectID:    i.Object.ID,
 		EventID:     utils.ToDBInt(ev.ID),
 		Time:        types.UnixMilli(time.Now()),
 		Type:        common.SeverityChanged,
@@ -180,7 +184,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		Message:     utils.ToDBString(ev.Message),
 	}
 
-	historyId, err := i.AddHistory(ctx, tx, history, true)
+	historyId, err := common.AddHistory(i.db, ctx, tx, history, true)
 	if err != nil {
 		i.logger.Errorw("Failed to insert incident severity changed history", zap.Error(err))
 
@@ -196,12 +200,14 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		RemoveCurrent(i.Object)
 
 		history := &common.HistoryRow{
-			EventID: utils.ToDBInt(ev.ID),
-			Time:    types.UnixMilli(i.RecoveredAt),
-			Type:    common.Closed,
+			IncidentID: utils.ToDBInt(i.incidentRowID),
+			ObjectID:   i.Object.ID,
+			EventID:    utils.ToDBInt(ev.ID),
+			Time:       types.UnixMilli(i.RecoveredAt),
+			Type:       common.Closed,
 		}
 
-		_, err = i.AddHistory(ctx, tx, history, false)
+		_, err = common.AddHistory(i.db, ctx, tx, history, false)
 		if err != nil {
 			i.logger.Errorw("Can't insert incident closed history to the database", zap.Error(err))
 
@@ -231,6 +237,8 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 	i.logger.Infow(fmt.Sprintf("Source %d opened incident at severity %q", ev.SourceId, i.Severity.String()), zap.String("message", ev.Message))
 
 	historyRow := &common.HistoryRow{
+		IncidentID:  utils.ToDBInt(i.incidentRowID),
+		ObjectID:    i.Object.ID,
 		Type:        common.Opened,
 		Time:        types.UnixMilli(ev.Time),
 		EventID:     utils.ToDBInt(ev.ID),
@@ -238,7 +246,7 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 		Message:     utils.ToDBString(ev.Message),
 	}
 
-	if _, err := i.AddHistory(ctx, tx, historyRow, false); err != nil {
+	if _, err := common.AddHistory(i.db, ctx, tx, historyRow, false); err != nil {
 		i.logger.Errorw("Can't insert incident opened history event", zap.Error(err))
 
 		return errors.New("can't insert incident opened history event")
@@ -252,6 +260,8 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 func (i *Incident) TriggerEscalation(ctx context.Context, tx *sqlx.Tx, ev *event.Event, causedBy types.Int, escalation *rule.EscalationTemplate, r *rule.Rule) error {
 	i.logger.Infof("Rule %q reached escalation %q", r.Name, escalation.DisplayName())
 	history := &common.HistoryRow{
+		IncidentID:        utils.ToDBInt(i.incidentRowID),
+		ObjectID:          i.Object.ID,
 		Time:              types.UnixMilli(time.Now()),
 		EventID:           utils.ToDBInt(ev.ID),
 		RuleID:            utils.ToDBInt(r.ID),
@@ -277,7 +287,7 @@ func (i *Incident) TriggerEscalation(ctx context.Context, tx *sqlx.Tx, ev *event
 		history.RuleNonStateEscalationID = utils.ToDBInt(escalation.ID)
 	}
 
-	if _, err := i.AddHistory(ctx, tx, history, false); err != nil {
+	if _, err := common.AddHistory(i.db, ctx, tx, history, false); err != nil {
 		i.logger.Errorw(
 			"Failed to insert escalation triggered incident history", zap.String("rule", r.Name),
 			zap.String("escalation", escalation.DisplayName()), zap.Error(err),
@@ -312,13 +322,15 @@ func (i *Incident) processNonStateTypeEvent(ctx context.Context, tx *sqlx.Tx, ev
 	}
 
 	hr := &common.HistoryRow{
-		EventID: utils.ToDBInt(ev.ID),
-		Time:    types.UnixMilli(time.Now()),
-		Type:    historyEvType,
-		Message: utils.ToDBString(ev.Message),
+		IncidentID: utils.ToDBInt(i.incidentRowID),
+		ObjectID:   i.Object.ID,
+		EventID:    utils.ToDBInt(ev.ID),
+		Time:       types.UnixMilli(time.Now()),
+		Type:       historyEvType,
+		Message:    utils.ToDBString(ev.Message),
 	}
 
-	_, err = i.AddHistory(ctx, tx, hr, false)
+	_, err = common.AddHistory(i.db, ctx, tx, hr, false)
 	if err != nil {
 		i.logger.Errorw("Failed to add incident history", zap.String("type", historyEvType.String()), zap.Error(err))
 
@@ -358,6 +370,8 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 	i.logger.Infof("Contact %q role changed from %s to %s", contact.String(), oldRole.String(), newRole.String())
 
 	hr := &common.HistoryRow{
+		IncidentID:       utils.ToDBInt(i.incidentRowID),
+		ObjectID:         i.Object.ID,
 		Key:              recipientKey,
 		EventID:          utils.ToDBInt(ev.ID),
 		Type:             common.RecipientRoleChanged,
@@ -367,7 +381,7 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 		Message:          utils.ToDBString(ev.Message),
 	}
 
-	_, err := i.AddHistory(ctx, tx, hr, false)
+	_, err := common.AddHistory(i.db, ctx, tx, hr, false)
 	if err != nil {
 		i.logger.Errorw(
 			"Failed to add recipient role changed history", zap.String("recipient", contact.String()), zap.Error(err),

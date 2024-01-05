@@ -599,6 +599,7 @@ func (eh *EventHandler) addPendingNotifications(ctx context.Context, tx *sqlx.Tx
 				}
 			} else {
 				hr := &common.HistoryRow{
+					ObjectID:          eh.Object.ID,
 					Key:               recipient.ToKey(contact),
 					EventID:           utils.ToDBInt(ev.ID),
 					Time:              types.UnixMilli(time.Now()),
@@ -608,7 +609,7 @@ func (eh *EventHandler) addPendingNotifications(ctx context.Context, tx *sqlx.Tx
 					NotificationState: common.NotificationStatePending,
 				}
 
-				id, err := eh.addNonIncidentHistory(ctx, tx, hr, true)
+				id, err := common.AddHistory(eh.db, ctx, tx, hr, true)
 				if err != nil {
 					eh.logger.Errorw(
 						"Failed to insert contact pending notification non-incident history",

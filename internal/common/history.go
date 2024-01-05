@@ -1,11 +1,15 @@
 package common
 
 import (
+	"context"
 	"database/sql/driver"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/utils"
+	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
+	"github.com/jmoiron/sqlx"
 )
 
 type HistoryEventType int
@@ -146,4 +150,23 @@ type HistoryRow struct {
 // TableName implements the contracts.TableNamer interface.
 func (h *HistoryRow) TableName() string {
 	return "history"
+}
+
+func AddHistory(db *icingadb.DB, ctx context.Context, tx *sqlx.Tx, historyRow *HistoryRow, fetchId bool) (types.Int, error) {
+	stmt := utils.BuildInsertStmtWithout(db, historyRow, "id")
+	if fetchId {
+		historyId, err := utils.InsertAndFetchId(ctx, tx, stmt, historyRow)
+		if err != nil {
+			return types.Int{}, err
+		}
+
+		return utils.ToDBInt(historyId), nil
+	} else {
+		_, err := tx.NamedExecContext(ctx, stmt, historyRow)
+		if err != nil {
+			return types.Int{}, err
+		}
+	}
+
+	return types.Int{}, nil
 }
