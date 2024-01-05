@@ -22,7 +22,7 @@ func (r *RuntimeConfig) fetchContacts(ctx context.Context, tx *sqlx.Tx) error {
 	for _, c := range contacts {
 		contactsByID[c.ID] = c
 
-		r.logger.Debugw("loaded contact config",
+		r.logger.Debugw("Successfully loaded contact config",
 			zap.Int64("id", c.ID),
 			zap.String("name", c.FullName))
 	}

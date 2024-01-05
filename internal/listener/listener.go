@@ -151,7 +151,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	ctx := context.Background()
 	obj, err := object.FromEvent(ctx, l.db, &ev)
 	if err != nil {
-		l.logger.Errorw("Can't sync object", zap.Error(err))
+		l.logger.Errorw("Cannot sync object", zap.Error(err))
 		abort(http.StatusInternalServerError, &ev, err.Error())
 		return
 	}
@@ -167,7 +167,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusNotAcceptable)
 
 		if ev.Type == event.TypeAcknowledgement {
-			msg := fmt.Sprintf("%q doesn't have active incident. Ignoring acknowledgement event from source %d", obj.DisplayName(), ev.SourceId)
+			msg := fmt.Sprintf("%q does not have active incident. Ignoring acknowledgement event from source %d", obj.DisplayName(), ev.SourceId)
 			_, _ = fmt.Fprintln(w, msg)
 
 			l.logger.Warnln(msg)
@@ -187,14 +187,13 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
 
-	err = currentIncident.ProcessEvent(ctx, &ev, created)
-	if err != nil {
-		abort(http.StatusInternalServerError, &ev, err.Error())
+	if currentIncident.ProcessEvent(ctx, &ev, created) != nil {
+		abort(http.StatusInternalServerError, &ev, "Error while processing HTTP request, check server logs for details")
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintln(w, "event processed successfully")
+	_, _ = fmt.Fprintln(w, "Successfully processed event")
 	_, _ = fmt.Fprintln(w)
 }
 

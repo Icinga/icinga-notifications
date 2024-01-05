@@ -34,7 +34,7 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 	}
 
 	if len(to) == 0 {
-		return fmt.Errorf("contact user %s doesn't have an e-mail address", req.Contact.FullName)
+		return fmt.Errorf("contact user %s does not have an e-mail address", req.Contact.FullName)
 	}
 
 	var msg bytes.Buffer
@@ -68,12 +68,12 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 	if ch.From == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
-			return fmt.Errorf("failed to get the os's hostname: %w", err)
+			return fmt.Errorf("failed to get the OS hostname: %w", err)
 		}
 
 		usr, err := user.Current()
 		if err != nil {
-			return fmt.Errorf("failed to get the os's current user: %w", err)
+			return fmt.Errorf("failed to get the OS current user: %w", err)
 		}
 
 		ch.From = usr.Username + "@" + hostname

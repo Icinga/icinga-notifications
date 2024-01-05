@@ -18,11 +18,11 @@ func TestEntry(t *testing.T) {
 		start := berlinTime("2023-03-01 09:00:00")
 		end := berlinTime("2023-03-01 11:00:00")
 		until := berlinTime("2023-03-03 09:00:00")
-		e := &timeperiod.Entry{
+		e := initEntry(&timeperiod.Entry{
 			Start:          start,
 			End:            end,
 			RecurrenceRule: fmt.Sprintf("FREQ=DAILY;UNTIL=%s", until.UTC().Format(rrule.DateTimeFormat)),
-		}
+		})
 
 		t.Run("TimeAtFirstRecurrenceStart", func(t *testing.T) {
 			assert.True(t, e.Contains(start))
@@ -72,11 +72,11 @@ func TestEntry(t *testing.T) {
 		t.Run("DST", func(t *testing.T) {
 			start := berlinTime("2023-03-25 01:00:00")
 			end := berlinTime("2023-03-25 02:30:00")
-			e := &timeperiod.Entry{
+			e := initEntry(&timeperiod.Entry{
 				Start:          start,
 				End:            end,
 				RecurrenceRule: "FREQ=DAILY",
-			}
+			})
 
 			assert.True(t, e.Contains(start))
 
@@ -94,11 +94,11 @@ func TestEntry(t *testing.T) {
 
 		start := berlinTime("2023-03-01 08:00:00")
 		end := berlinTime("2023-03-01 12:30:00")
-		e := &timeperiod.Entry{
+		e := initEntry(&timeperiod.Entry{
 			Start:          start,
 			End:            end,
 			RecurrenceRule: "FREQ=DAILY",
-		}
+		})
 
 		t.Run("TimeAtFirstRecurrenceStart", func(t *testing.T) {
 			assert.Equal(t, end, e.NextTransition(start))
@@ -123,11 +123,11 @@ func TestEntry(t *testing.T) {
 		t.Run("DST", func(t *testing.T) {
 			start := berlinTime("2023-03-25 01:00:00")
 			end := berlinTime("2023-03-25 02:30:00")
-			e := &timeperiod.Entry{
+			e := initEntry(&timeperiod.Entry{
 				Start:          start,
 				End:            end,
 				RecurrenceRule: "FREQ=DAILY",
-			}
+			})
 
 			assert.Equal(t, end, e.NextTransition(start), "next transition should match the first recurrence end")
 
@@ -149,13 +149,14 @@ func TestTimePeriodTransitions(t *testing.T) {
 	t.Run("WithOneEntry", func(t *testing.T) {
 		start := berlinTime("2023-03-27 09:00:00")
 		end := berlinTime("2023-03-27 17:00:00")
+
 		p := &timeperiod.TimePeriod{
 			Name: "Transition Test",
-			Entries: []*timeperiod.Entry{{
+			Entries: []*timeperiod.Entry{initEntry(&timeperiod.Entry{
 				Start:          start,
 				End:            end,
 				RecurrenceRule: "FREQ=DAILY",
-			}},
+			})},
 		}
 
 		assert.Equal(t, end, p.NextTransition(start), "next transition should match the interval end")
@@ -169,16 +170,16 @@ func TestTimePeriodTransitions(t *testing.T) {
 		p := &timeperiod.TimePeriod{
 			Name: "Transition Test",
 			Entries: []*timeperiod.Entry{
-				{
+				initEntry(&timeperiod.Entry{
 					Start:          start,
 					End:            end,
 					RecurrenceRule: "FREQ=HOURLY;BYHOUR=1,3,5,7,9,11,13,15",
-				},
-				{
+				}),
+				initEntry(&timeperiod.Entry{
 					Start:          berlinTime("2023-03-27 08:00:00"),
 					End:            berlinTime("2023-03-27 08:30:00"),
 					RecurrenceRule: "FREQ=HOURLY;BYHOUR=0,2,4,6,8,10,12,14",
-				},
+				}),
 			},
 		}
 
@@ -218,4 +219,13 @@ func berlinTime(value string) time.Time {
 	}
 
 	return t
+}
+
+func initEntry(e *timeperiod.Entry) *timeperiod.Entry {
+	err := e.Init()
+	if err != nil {
+		panic(err)
+	}
+
+	return e
 }

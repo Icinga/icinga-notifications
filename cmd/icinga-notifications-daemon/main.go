@@ -70,13 +70,13 @@ func main() {
 	logger.Infof("Starting Icinga Notifications daemon (%s)", internal.Version.Version)
 	db, err := conf.Database.Open(logs.GetChildLogger("database"))
 	if err != nil {
-		logger.Fatalw("cannot create database connection from config", zap.Error(err))
+		logger.Fatalw("Cannot create database connection from config", zap.Error(err))
 	}
 	defer db.Close()
 	{
 		logger.Infof("Connecting to database at '%s'", utils.JoinHostPort(conf.Database.Host, conf.Database.Port))
 		if err := db.Ping(); err != nil {
-			logger.Fatalw("cannot connect to database", zap.Error(err))
+			logger.Fatalw("Cannot connect to database", zap.Error(err))
 		}
 	}
 
@@ -87,14 +87,14 @@ func main() {
 
 	runtimeConfig := config.NewRuntimeConfig(db, logs)
 	if err := runtimeConfig.UpdateFromDatabase(ctx); err != nil {
-		logger.Fatalw("failed to load config from database", zap.Error(err))
+		logger.Fatalw("Failed to load config from database", zap.Error(err))
 	}
 
 	go runtimeConfig.PeriodicUpdates(ctx, 1*time.Second)
 
 	err = incident.LoadOpenIncidents(ctx, db, logs.GetChildLogger("incident"), runtimeConfig)
 	if err != nil {
-		logger.Fatalw("Can't load incidents from database", zap.Error(err))
+		logger.Fatalw("Cannot load incidents from database", zap.Error(err))
 	}
 
 	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {
