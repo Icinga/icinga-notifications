@@ -139,12 +139,12 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 		return errors.New("can't insert incident event to the database")
 	}
 
-	if ev.Type == event.TypeAcknowledgementSet {
-		return i.processAcknowledgementEvent(ctx, tx, ev)
-	}
-
 	var causedBy types.Int
-	if !created {
+	if ev.Type != event.TypeState {
+		if err := i.processNonStateTypeEvent(ctx, tx, ev); err != nil {
+			return err
+		}
+	} else if !created {
 		causedBy, err = i.processSeverityChangedEvent(ctx, tx, ev)
 		if err != nil {
 			return err
@@ -331,6 +331,18 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 
 		return errors.New("can't insert incident opened history event")
 	}
+
+	return nil
+}
+
+func (i *Incident) processNonStateTypeEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
+	if ev.Type == event.TypeAcknowledgementSet {
+		if err := i.processAcknowledgementEvent(ctx, tx, ev); err != nil {
+			return err
+		}
+	}
+
+	// nothing to do for other non-state event types
 
 	return nil
 }
