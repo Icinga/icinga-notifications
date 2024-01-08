@@ -219,7 +219,13 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 			return fmt.Errorf("querying API delivered a wrong object type %q", objQueriesResult.Type)
 		}
 
-		// State change event first
+		// Only process HARD states
+		if objQueriesResult.Attrs.StateType == STATE_TYPE_SOFT {
+			client.Logger.Debugf("Skipping SOFT event, %#v", objQueriesResult.Attrs)
+			continue
+		}
+
+		// First: State change event
 		ev, err := client.buildHostServiceEvent(
 			ctx,
 			objQueriesResult.Attrs.LastCheckResult, objQueriesResult.Attrs.State,
@@ -234,7 +240,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 			stateChangeEvents++
 		}
 
-		// Optional acknowledgement event second
+		// Second: Optional acknowledgement event
 		if objQueriesResult.Attrs.Acknowledgement == 0 {
 			continue
 		}
@@ -408,6 +414,12 @@ func (client *Client) listenEventStream() error {
 		)
 		switch respT := resp.(type) {
 		case *StateChange:
+			// Only process HARD states
+			if respT.StateType == STATE_TYPE_SOFT {
+				client.Logger.Debugf("Skipping SOFT State Change, %#v", respT)
+				continue
+			}
+
 			ev, err = client.buildHostServiceEvent(client.Ctx, respT.CheckResult, respT.State, respT.Host, respT.Service)
 			evTime = respT.Timestamp.Time()
 
