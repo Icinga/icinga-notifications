@@ -132,20 +132,20 @@ func (client *Client) buildHostServiceEvent(ctx context.Context, result CheckRes
 
 	if service != "" {
 		switch state {
-		case 0: // OK
+		case STATE_SERVICE_OK:
 			eventSeverity = event.SeverityOK
-		case 1: // WARNING
+		case STATE_SERVICE_WARNING:
 			eventSeverity = event.SeverityWarning
-		case 2: // CRITICAL
+		case STATE_SERVICE_CRITICAL:
 			eventSeverity = event.SeverityCrit
 		default: // UNKNOWN or faulty
 			eventSeverity = event.SeverityErr
 		}
 	} else {
 		switch state {
-		case 0: // UP
+		case STATE_HOST_UP:
 			eventSeverity = event.SeverityOK
-		case 1: // DOWN
+		case STATE_HOST_DOWN:
 			eventSeverity = event.SeverityCrit
 		default: // faulty
 			eventSeverity = event.SeverityErr

@@ -25,11 +25,40 @@ func (t *UnixFloat) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// The following const values are representing constant integer values, e.g., 0 for an OK state service.
+const (
+	// ACKNOWLEDGEMENT_* consts are describing an acknowledgement, e.g., from HostServiceRuntimeAttributes.
+	ACKNOWLEDGEMENT_NONE   = 0
+	ACKNOWLEDGEMENT_NORMAL = 1
+	ACKNOWLEDGEMENT_STICKY = 2
+
+	// ENTRY_TYPE_* consts are describing an entry_type, e.g., from Comment.
+	ENTRY_TYPE_USER            = 1
+	ENTRY_TYPE_DOWNTIME        = 2
+	ENTRY_TYPE_FLAPPING        = 3
+	ENTRY_TYPE_ACKNOWLEDGEMENT = 4
+
+	// STATE_HOST_* consts are describing a host state, e.g., from CheckResult.
+	STATE_HOST_UP   = 0
+	STATE_HOST_DOWN = 1
+
+	// STATE_SERVICE_* consts are describing a service state, e.g., from CheckResult.
+	STATE_SERVICE_OK       = 0
+	STATE_SERVICE_WARNING  = 1
+	STATE_SERVICE_CRITICAL = 2
+	STATE_SERVICE_UNKNOWN  = 3
+
+	// STATE_TYPE_* consts are describing a state type, e.g., from HostServiceRuntimeAttributes.
+	STATE_TYPE_SOFT = 0
+	STATE_TYPE_HARD = 1
+)
+
 // Comment represents the Icinga 2 API Comment object.
 //
 // NOTE:
 //   - An empty Service field indicates a host comment.
-//   - The optional EntryType should be User = 1, Downtime = 2, Flapping = 3, Acknowledgement = 4.
+//   - The optional EntryType should be User = ENTRY_TYPE_USER, Downtime = ENTRY_TYPE_DOWNTIME,
+//     Flapping = ENTRY_TYPE_FLAPPING, Acknowledgement = ENTRY_TYPE_ACKNOWLEDGEMENT (ENTRY_TYPE_* consts)
 //
 // https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#objecttype-comment
 type Comment struct {
@@ -73,8 +102,9 @@ type Downtime struct {
 // NOTE:
 //   - Name is either the Host or the Service name.
 //   - Host is empty for Host objects; Host contains the Service's Host object name for Services.
-//   - State might be 0 = UP, 1 = DOWN for hosts and 0 = OK, 1 = WARNING, 2 = CRITICAL, 3 = UNKNOWN for services.
-//   - Acknowledgement type is 0 = NONE, 1 = NORMAL, 2 = STICKY.
+//   - State might be STATE_HOST_{UP,DOWN} for hosts or STATE_SERVICE_{OK,WARNING,CRITICAL,UNKNOWN} for services.
+//   - StateType might be STATE_TYPE_SOFT or STATE_TYPE_HARD.
+//   - Acknowledgement type might be ACKNOWLEDGEMENT_{NONE,NORMAL,STICKY}.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#host
 // https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#service
@@ -83,6 +113,7 @@ type HostServiceRuntimeAttributes struct {
 	Host                      string      `json:"host_name,omitempty"`
 	Groups                    []string    `json:"groups"`
 	State                     int         `json:"state"`
+	StateType                 int         `json:"state_type"`
 	LastCheckResult           CheckResult `json:"last_check_result"`
 	LastStateChange           UnixFloat   `json:"last_state_change"`
 	DowntimeDepth             int         `json:"downtime_depth"`
@@ -117,8 +148,8 @@ const (
 //
 // NOTE:
 //   - An empty Service field indicates a host state change.
-//   - State might be 0 = UP, 1 = DOWN for hosts and 0 = OK, 1 = WARNING, 2 = CRITICAL, 3 = UNKNOWN for services.
-//   - StateType might be 0 = SOFT, 1 = HARD.
+//   - State might be STATE_HOST_{UP,DOWN} for hosts or STATE_SERVICE_{OK,WARNING,CRITICAL,UNKNOWN} for services.
+//   - StateType might be STATE_TYPE_SOFT or STATE_TYPE_HARD.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-statechange
 type StateChange struct {
@@ -136,8 +167,8 @@ type StateChange struct {
 //
 // NOTE:
 //   - An empty Service field indicates a host acknowledgement.
-//   - State might be 0 = UP, 1 = DOWN for hosts and 0 = OK, 1 = WARNING, 2 = CRITICAL, 3 = UNKNOWN for services.
-//   - StateType might be 0 = SOFT, 1 = HARD.
+//   - State might be STATE_HOST_{UP,DOWN} for hosts or STATE_SERVICE_{OK,WARNING,CRITICAL,UNKNOWN} for services.
+//   - StateType might be STATE_TYPE_SOFT or STATE_TYPE_HARD.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-acknowledgementset
 type AcknowledgementSet struct {
@@ -154,8 +185,8 @@ type AcknowledgementSet struct {
 //
 // NOTE:
 //   - An empty Service field indicates a host acknowledgement.
-//   - State might be 0 = UP, 1 = DOWN for hosts and 0 = OK, 1 = WARNING, 2 = CRITICAL, 3 = UNKNOWN for services.
-//   - StateType might be 0 = SOFT, 1 = HARD.
+//   - State might be STATE_HOST_{UP,DOWN} for hosts or STATE_SERVICE_{OK,WARNING,CRITICAL,UNKNOWN} for services.
+//   - StateType might be STATE_TYPE_SOFT or STATE_TYPE_HARD.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-acknowledgementcleared
 type AcknowledgementCleared struct {
