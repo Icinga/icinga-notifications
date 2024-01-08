@@ -182,7 +182,7 @@ func (client *Client) buildAcknowledgementEvent(ctx context.Context, host, servi
 		return nil, err
 	}
 
-	ev.Type = event.TypeAcknowledgement
+	ev.Type = event.TypeAcknowledgementSet
 	ev.Username = author
 	ev.Message = comment
 

@@ -35,7 +35,7 @@ type Event struct {
 
 const (
 	TypeState                  = "state"
-	TypeAcknowledgement        = "acknowledgement"
+	TypeAcknowledgementSet     = "acknowledgement-set"
 	TypeAcknowledgementCleared = "acknowledgement-cleared"
 	TypeInternal               = "internal"
 	TypeDowntimeRemoved        = "downtime-removed"
@@ -65,7 +65,7 @@ func (e *Event) Validate() error {
 	case "":
 		return fmt.Errorf("invalid event: 'type' must not be empty")
 	case TypeState,
-		TypeAcknowledgement,
+		TypeAcknowledgementSet,
 		TypeAcknowledgementCleared,
 		TypeInternal,
 		TypeDowntimeRemoved,
