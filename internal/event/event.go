@@ -34,19 +34,20 @@ type Event struct {
 }
 
 const (
-	TypeState             = "state"
-	TypeAcknowledgement   = "acknowledgement"
-	TypeCommentAdded      = "commentAdded"
-	TypeCommentRemoved    = "commentRemoved"
-	TypeDowntimeAdded     = "downtimeAdded"
-	TypeDowntimeTriggered = "downtimeTriggered"
-	TypeDowntimeStart     = "downtimeStart"
-	TypeDowntimeEnd       = "downtimeEnd"
-	TypeDowntimeCancelled = "downtimeCancelled"
-	TypeCustom            = "custom"
-	TypeFlappingStart     = "flappingStart"
-	TypeFlappingEnd       = "flappingEnd"
-	TypeInternal          = "internal"
+	TypeState                  = "state"
+	TypeAcknowledgementSet     = "acknowledgementSet"
+	TypeAcknowledgementCleared = "acknowledgementCleared"
+	TypeCommentAdded           = "commentAdded"
+	TypeCommentRemoved         = "commentRemoved"
+	TypeDowntimeAdded          = "downtimeAdded"
+	TypeDowntimeTriggered      = "downtimeTriggered"
+	TypeDowntimeStart          = "downtimeStart"
+	TypeDowntimeEnd            = "downtimeEnd"
+	TypeDowntimeCancelled      = "downtimeCancelled"
+	TypeCustom                 = "custom"
+	TypeFlappingStart          = "flappingStart"
+	TypeFlappingEnd            = "flappingEnd"
+	TypeInternal               = "internal"
 )
 
 // Validate checks the event. Returns an error if the validation fails
@@ -61,7 +62,8 @@ func (e *Event) Validate() error {
 		switch e.Type {
 		case
 			TypeState,
-			TypeAcknowledgement,
+			TypeAcknowledgementSet,
+			TypeAcknowledgementCleared,
 			TypeCommentAdded,
 			TypeCommentRemoved,
 			TypeDowntimeAdded,

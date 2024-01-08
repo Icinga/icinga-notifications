@@ -139,7 +139,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 		return errors.New("can't insert incident event to the database")
 	}
 
-	if ev.Type == event.TypeAcknowledgement {
+	if ev.Type == event.TypeAcknowledgementSet {
 		return i.processAcknowledgementEvent(ctx, tx, ev)
 	}
 
