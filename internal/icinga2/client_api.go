@@ -220,7 +220,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 		}
 
 		// Only process HARD states
-		if objQueriesResult.Attrs.StateType == STATE_TYPE_SOFT {
+		if objQueriesResult.Attrs.StateType == StateTypeSoft {
 			client.Logger.Debugf("Skipping SOFT event, %#v", objQueriesResult.Attrs)
 			continue
 		}
@@ -415,7 +415,7 @@ func (client *Client) listenEventStream() error {
 		switch respT := resp.(type) {
 		case *StateChange:
 			// Only process HARD states
-			if respT.StateType == STATE_TYPE_SOFT {
+			if respT.StateType == StateTypeSoft {
 				client.Logger.Debugf("Skipping SOFT State Change, %#v", respT)
 				continue
 			}
