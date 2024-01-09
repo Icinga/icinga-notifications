@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/emersion/go-sasl"
 	"github.com/emersion/go-smtp"
+	"github.com/google/uuid"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"github.com/icinga/icingadb/pkg/types"
@@ -56,6 +57,7 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 		ToAddrs(to).
 		From(ch.SenderName, ch.SenderMail).
 		Subject(fmt.Sprintf("[#%d] %s %s is %s", req.Incident.Id, req.Event.Type, req.Object.Name, req.Incident.Severity)).
+		Header("Message-Id", fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail)).
 		Text(msg.Bytes()).
 		Send(ch)
 }
