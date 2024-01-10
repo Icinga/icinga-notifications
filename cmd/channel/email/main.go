@@ -54,7 +54,7 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 	return enmime.Builder().
 		ToAddrs(to).
 		From(ch.SenderName, ch.SenderMail).
-		Subject(fmt.Sprintf("[#%d] %s %s is %s", req.Incident.Id, req.Event.Type, req.Object.Name, req.Incident.Severity)).
+		Subject(plugin.FormatSubject(req)).
 		Header("Message-Id", fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail)).
 		Text(msg.Bytes()).
 		Send(ch)
