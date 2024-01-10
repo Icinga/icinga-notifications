@@ -14,8 +14,6 @@ import (
 	"github.com/jhillyerd/enmime"
 	"net"
 	"net/mail"
-	"os"
-	"os/user"
 )
 
 const (
@@ -103,30 +101,8 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 		return fmt.Errorf("failed to load config: %s %w", jsonStr, err)
 	}
 
-	if ch.Host == "" {
-		ch.Host = "localhost"
-	}
-
-	if ch.Port == "" {
-		ch.Port = "25"
-	}
-
-	if ch.SenderMail == "" {
-		hostname, err := os.Hostname()
-		if err != nil {
-			return fmt.Errorf("failed to get the OS hostname: %w", err)
-		}
-
-		usr, err := user.Current()
-		if err != nil {
-			return fmt.Errorf("failed to get the OS current user: %w", err)
-		}
-
-		ch.SenderMail = usr.Username + "@" + hostname
-	}
-
-	if ch.User == "" {
-		ch.User = ch.SenderMail
+	if (ch.User == "") != (ch.Password == "") {
+		return fmt.Errorf("user and password fields must both be set or empty")
 	}
 
 	return nil
@@ -143,8 +119,9 @@ func (ch *Email) GetInfo() *plugin.Info {
 			},
 		},
 		{
-			Name: "sender_mail",
-			Type: "string",
+			Name:     "sender_mail",
+			Type:     "string",
+			Required: true,
 			Label: map[string]string{
 				"en_US": "Sender Address",
 				"de_DE": "Absenderadresse",
@@ -152,16 +129,18 @@ func (ch *Email) GetInfo() *plugin.Info {
 			Default: "icinga@example.com",
 		},
 		{
-			Name: "host",
-			Type: "string",
+			Name:     "host",
+			Type:     "string",
+			Required: true,
 			Label: map[string]string{
 				"en_US": "SMTP Host",
 				"de_DE": "SMTP Host",
 			},
 		},
 		{
-			Name: "port",
-			Type: "number",
+			Name:     "port",
+			Type:     "number",
+			Required: true,
 			Label: map[string]string{
 				"en_US": "SMTP Port",
 				"de_DE": "SMTP Port",
