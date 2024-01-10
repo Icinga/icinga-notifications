@@ -256,7 +256,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 		ev, err = client.buildAcknowledgementEvent(
 			ctx,
 			hostName, serviceName,
-			ackComment.Author, ackComment.Text)
+			ackComment.Author, ackComment.Text, event.TypeAcknowledgementSet)
 		if err != nil {
 			return fmt.Errorf("failed to construct Event from Acknowledgement response, %w", err)
 		}
@@ -293,14 +293,18 @@ func (client *Client) connectEventStream(esTypes []string) (io.ReadCloser, error
 		return nil, err
 	}
 
+	// ignore ack based comment event
+	filter := "(event.type!=\"CommentAdded\" && event.type!=\"CommentRemoved\") || event.comment.entry_type==1"
+
 	for i := 0; ; i++ {
 		// Always ensure an unique queue name to mitigate possible naming conflicts.
 		queueNameRndBuff := make([]byte, 16)
 		_, _ = rand.Read(queueNameRndBuff)
 
 		reqBody, err := json.Marshal(map[string]any{
-			"queue": fmt.Sprintf("icinga-notifications-%x", queueNameRndBuff),
-			"types": esTypes,
+			"queue":  fmt.Sprintf("icinga-notifications-%x", queueNameRndBuff),
+			"types":  esTypes,
+			"filter": filter,
 		})
 		if err != nil {
 			return nil, err
@@ -376,13 +380,17 @@ func (client *Client) listenEventStream() error {
 	eventStream, err := client.connectEventStream([]string{
 		typeStateChange,
 		typeAcknowledgementSet,
-		// typeAcknowledgementCleared,
-		// typeCommentAdded,
-		// typeCommentRemoved,
-		// typeDowntimeAdded,
-		// typeDowntimeRemoved,
-		// typeDowntimeStarted,
-		// typeDowntimeTriggered,
+		typeAcknowledgementCleared,
+		typeCommentAdded,
+		typeCommentRemoved,
+		// TODO: It looks redundant to me.
+		// The downtimeStart and downtimeTriggered always (non-flexible) triggered at the same time.
+		// Flexible downtime triggers only downtimeTriggered event.
+		//typeDowntimeStarted,
+		typeDowntimeRemoved,
+		typeDowntimeAdded,
+		typeDowntimeTriggered,
+		typeFlapping,
 	})
 	if err != nil {
 		return err
@@ -411,6 +419,7 @@ func (client *Client) listenEventStream() error {
 			ev     *event.Event
 			evTime time.Time
 		)
+
 		switch respT := resp.(type) {
 		case *StateChange:
 			// Only process HARD states
@@ -421,18 +430,33 @@ func (client *Client) listenEventStream() error {
 
 			ev, err = client.buildHostServiceEvent(client.Ctx, respT.CheckResult, respT.State, respT.Host, respT.Service)
 			evTime = respT.Timestamp.Time()
-
 		case *AcknowledgementSet:
-			ev, err = client.buildAcknowledgementEvent(client.Ctx, respT.Host, respT.Service, respT.Author, respT.Comment)
+			ev, err = client.buildAcknowledgementEvent(client.Ctx, respT.Host, respT.Service, respT.Author, respT.Comment, event.TypeAcknowledgementSet)
 			evTime = respT.Timestamp.Time()
-
-		// case *AcknowledgementCleared:
-		// case *CommentAdded:
-		// case *CommentRemoved:
-		// case *DowntimeAdded:
-		// case *DowntimeRemoved:
-		// case *DowntimeStarted:
-		// case *DowntimeTriggered:
+		case *AcknowledgementCleared:
+			ev, err = client.buildAcknowledgementEvent(client.Ctx, respT.Host, respT.Service, "", "", event.TypeAcknowledgementCleared)
+			evTime = respT.Timestamp.Time()
+		case *CommentAdded:
+			ev, err = client.buildCommentEvent(client.Ctx, respT.Comment, event.TypeCommentAdded)
+			evTime = respT.Timestamp.Time()
+		case *CommentRemoved:
+			ev, err = client.buildCommentEvent(client.Ctx, respT.Comment, event.TypeCommentRemoved)
+			evTime = respT.Timestamp.Time()
+		case *DowntimeStarted:
+			ev, err = client.buildDowntimeEvent(client.Ctx, respT.Downtime, event.TypeDowntimeStart)
+			evTime = respT.Timestamp.Time()
+		case *DowntimeRemoved:
+			ev, err = client.buildDowntimeEvent(client.Ctx, respT.Downtime, event.TypeDowntimeCancelled)
+			evTime = respT.Timestamp.Time()
+		case *DowntimeAdded:
+			ev, err = client.buildDowntimeEvent(client.Ctx, respT.Downtime, event.TypeDowntimeAdded)
+			evTime = respT.Timestamp.Time()
+		case *DowntimeTriggered:
+			ev, err = client.buildDowntimeEvent(client.Ctx, respT.Downtime, event.TypeDowntimeTriggered)
+			evTime = respT.Timestamp.Time()
+		case *Flapping:
+			ev, err = client.buildFlappingEvent(client.Ctx, respT.Host, respT.Service, respT.State, respT.StateType, respT.IsFlapping)
+			evTime = respT.Timestamp.Time()
 		default:
 			err = fmt.Errorf("unsupported type %T", resp)
 		}

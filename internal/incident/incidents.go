@@ -169,9 +169,10 @@ func ProcessEvent(
 
 	if currentIncident == nil {
 		switch {
-		case ev.Type == event.TypeAcknowledgement:
-			return fmt.Errorf("%q does not have an active incident, ignoring acknowledgement event from source %d",
-				obj.DisplayName(), ev.SourceId)
+		// ignore non-state event without incident
+		case ev.Severity == event.SeverityNone:
+			return fmt.Errorf("%q does not have an active incident, ignoring %q event from source %d",
+				obj.DisplayName(), ev.Type, ev.SourceId)
 		case ev.Severity != event.SeverityOK:
 			panic(fmt.Sprintf("cannot process event %v with a non-OK state %v without a known incident", ev, ev.Severity))
 		default:

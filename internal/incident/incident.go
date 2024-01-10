@@ -92,10 +92,10 @@ func (i *Incident) HasManager() bool {
 
 // IsNotifiable returns whether contacts in the given role should be notified about this incident.
 //
-// For a managed incident, only managers and subscribers should be notified, for unmanaged incidents,
+// For a managed incident, only managers and subscribers should be notified, for unmanaged incidents or in case of acknowledgementSet event,
 // regular recipients are notified as well.
-func (i *Incident) IsNotifiable(role ContactRole) bool {
-	if !i.HasManager() {
+func (i *Incident) IsNotifiable(role ContactRole, evType string) bool {
+	if evType == event.TypeAcknowledgementSet || !i.HasManager() {
 		return true
 	}
 
@@ -139,12 +139,12 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 		return errors.New("can't insert incident event to the database")
 	}
 
-	if ev.Type == event.TypeAcknowledgement {
-		return i.processAcknowledgementEvent(ctx, tx, ev)
-	}
-
 	var causedBy types.Int
-	if !created {
+	if ev.Type != event.TypeState {
+		if err := i.processNonStateTypeEvent(ctx, tx, ev); err != nil {
+			return err
+		}
+	} else if !created {
 		causedBy, err = i.processSeverityChangedEvent(ctx, tx, ev)
 		if err != nil {
 			return err
@@ -168,7 +168,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 		return err
 	}
 
-	notifications, err := i.addPendingNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time), causedBy)
+	notifications, err := i.addPendingNotifications(ctx, tx, ev, i.getRecipientsChannel(ev), causedBy)
 	if err != nil {
 		return err
 	}
@@ -225,7 +225,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 
 		channels := make(contactChannels)
 		for _, escalation := range escalations {
-			channels.loadEscalationRecipientsChannel(escalation, i, ev.Time)
+			channels.loadEscalationRecipientsChannel(escalation, i, ev)
 		}
 
 		notifications, err = i.addPendingNotifications(ctx, tx, ev, channels, types.Int{})
@@ -331,6 +331,18 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 
 		return errors.New("can't insert incident opened history event")
 	}
+
+	return nil
+}
+
+func (i *Incident) processNonStateTypeEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
+	if ev.Type == event.TypeAcknowledgementSet {
+		if err := i.processAcknowledgementEvent(ctx, tx, ev); err != nil {
+			return err
+		}
+	}
+
+	// nothing to do for other non-state event types
 
 	return nil
 }
@@ -644,7 +656,7 @@ func (i *Incident) RestoreEscalationStateRules(states []*EscalationState) {
 }
 
 // getRecipientsChannel returns all the configured channels of the current incident and escalation recipients.
-func (i *Incident) getRecipientsChannel(t time.Time) contactChannels {
+func (i *Incident) getRecipientsChannel(ev *event.Event) contactChannels {
 	contactChs := make(contactChannels)
 	// Load all escalations recipients channels
 	for escalationID := range i.EscalationState {
@@ -653,7 +665,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) contactChannels {
 			continue
 		}
 
-		contactChs.loadEscalationRecipientsChannel(escalation, i, t)
+		contactChs.loadEscalationRecipientsChannel(escalation, i, ev)
 	}
 
 	// Check whether all the incident recipients do have an appropriate contact channel configured.
@@ -665,8 +677,8 @@ func (i *Incident) getRecipientsChannel(t time.Time) contactChannels {
 			continue
 		}
 
-		if i.IsNotifiable(state.Role) {
-			for _, contact := range r.GetContactsAt(t) {
+		if i.IsNotifiable(state.Role, ev.Type) {
+			for _, contact := range r.GetContactsAt(ev.Time) {
 				if contactChs[contact] == nil {
 					contactChs[contact] = make(map[int64]bool)
 					contactChs[contact][contact.DefaultChannelID] = true
@@ -743,15 +755,15 @@ type RecipientState struct {
 type contactChannels map[*recipient.Contact]map[int64]bool
 
 // loadEscalationRecipientsChannel loads all the configured channel of all the provided escalation recipients.
-func (rct contactChannels) loadEscalationRecipientsChannel(escalation *rule.Escalation, i *Incident, t time.Time) {
+func (rct contactChannels) loadEscalationRecipientsChannel(escalation *rule.Escalation, i *Incident, ev *event.Event) {
 	for _, escalationRecipient := range escalation.Recipients {
 		state := i.Recipients[escalationRecipient.Key]
 		if state == nil {
 			continue
 		}
 
-		if i.IsNotifiable(state.Role) {
-			for _, c := range escalationRecipient.Recipient.GetContactsAt(t) {
+		if i.IsNotifiable(state.Role, ev.Type) {
+			for _, c := range escalationRecipient.Recipient.GetContactsAt(ev.Time) {
 				if rct[c] == nil {
 					rct[c] = make(map[int64]bool)
 				}
