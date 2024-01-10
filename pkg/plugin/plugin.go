@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icinga-notifications/pkg/rpc"
 	"github.com/icinga/icingadb/pkg/types"
@@ -194,11 +195,19 @@ func RunPlugin(plugin Plugin) {
 
 // FormatMessage formats a notification message and adds to the given io.Writer
 func FormatMessage(writer io.Writer, req *NotificationRequest) {
-	_, _ = fmt.Fprintf(writer, "Info: %s\n\n", req.Event.Message)
+	if req.Event.Message != "" {
+		msgTitle := "Comment"
+		if req.Event.Type == event.TypeState {
+			msgTitle = "Output"
+		}
+
+		_, _ = fmt.Fprintf(writer, "%s: %s\n\n", msgTitle, req.Event.Message)
+	}
+
 	_, _ = fmt.Fprintf(writer, "When: %s\n\n", req.Event.Time.Format("2006-01-02 15:04:05 MST"))
 
 	if req.Event.Username != "" {
-		_, _ = fmt.Fprintf(writer, "Commented by %s\n\n", req.Event.Username)
+		_, _ = fmt.Fprintf(writer, "Author: %s\n\n", req.Event.Username)
 	}
 	_, _ = fmt.Fprintf(writer, "Object: %s\n\n", req.Object.Url)
 	_, _ = writer.Write([]byte("Tags:\n"))
@@ -216,4 +225,16 @@ func FormatMessage(writer io.Writer, req *NotificationRequest) {
 	}
 
 	_, _ = fmt.Fprintf(writer, "\nIncident: %s", req.Incident.Url)
+}
+
+// FormatSubject returns the formatted subject string based on the event type.
+func FormatSubject(req *NotificationRequest) string {
+	switch req.Event.Type {
+	case event.TypeState:
+		return fmt.Sprintf("[#%d] %s %s is %s", req.Incident.Id, req.Event.Type, req.Object.Name, req.Incident.Severity)
+	case event.TypeAcknowledgementCleared, event.TypeDowntimeRemoved:
+		return fmt.Sprintf("[#%d] %s from %s", req.Incident.Id, req.Event.Type, req.Object.Name)
+	default:
+		return fmt.Sprintf("[#%d] %s on %s", req.Incident.Id, req.Event.Type, req.Object.Name)
+	}
 }
