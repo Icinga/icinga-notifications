@@ -293,14 +293,18 @@ func (client *Client) connectEventStream(esTypes []string) (io.ReadCloser, error
 		return nil, err
 	}
 
+	// ignore ack based comment event
+	filter := "(event.type!=\"CommentAdded\" && event.type!=\"CommentRemoved\") || event.comment.entry_type==1"
+
 	for i := 0; ; i++ {
 		// Always ensure an unique queue name to mitigate possible naming conflicts.
 		queueNameRndBuff := make([]byte, 16)
 		_, _ = rand.Read(queueNameRndBuff)
 
 		reqBody, err := json.Marshal(map[string]any{
-			"queue": fmt.Sprintf("icinga-notifications-%x", queueNameRndBuff),
-			"types": esTypes,
+			"queue":  fmt.Sprintf("icinga-notifications-%x", queueNameRndBuff),
+			"types":  esTypes,
+			"filter": filter,
 		})
 		if err != nil {
 			return nil, err
@@ -430,17 +434,9 @@ func (client *Client) listenEventStream() error {
 			ev, err = client.buildAcknowledgementEvent(client.Ctx, respT.Host, respT.Service, "", "", event.TypeAcknowledgementRemoved)
 			evTime = respT.Timestamp.Time()
 		case *CommentAdded:
-			if respT.Comment.EntryType != 1 {
-				continue
-			}
-
 			ev, err = client.buildCommentEvent(client.Ctx, respT.Comment, event.TypeCommentAdded)
 			evTime = respT.Timestamp.Time()
 		case *CommentRemoved:
-			if respT.Comment.EntryType != 1 {
-				continue
-			}
-
 			ev, err = client.buildCommentEvent(client.Ctx, respT.Comment, event.TypeCommentRemoved)
 			evTime = respT.Timestamp.Time()
 		case *DowntimeStarted:
