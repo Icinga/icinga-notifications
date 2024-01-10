@@ -383,7 +383,10 @@ func (client *Client) listenEventStream() error {
 		typeAcknowledgementCleared,
 		typeCommentAdded,
 		typeCommentRemoved,
-		typeDowntimeStarted,
+		// TODO: It looks redundant to me.
+		// The downtimeStart and downtimeTriggered always (non-flexible) triggered at the same time.
+		// Flexible downtime triggers only downtimeTriggered event.
+		//typeDowntimeStarted,
 		typeDowntimeRemoved,
 		typeDowntimeAdded,
 		typeDowntimeTriggered,
