@@ -187,7 +187,7 @@ func (client *Client) fetchAcknowledgementComment(ctx context.Context, host, ser
 //
 // If the object's acknowledgement field is non-zero, an Acknowledgement Event will be constructed following the Host or
 // Service object. Each event will be delivered to the channel.
-func (client *Client) checkMissedChanges(ctx context.Context, objType string, eventCh chan *eventMsg) error {
+func (client *Client) checkMissedChanges(ctx context.Context, objType string, catchupEventCh chan *catchupEventMsg) error {
 	jsonRaw, err := client.queryObjectsApiDirect(ctx, objType, "")
 	if err != nil {
 		return err
@@ -236,7 +236,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case eventCh <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time()}:
+		case catchupEventCh <- &catchupEventMsg{eventMsg: &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time()}}:
 			stateChangeEvents++
 		}
 
@@ -263,7 +263,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ev
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case eventCh <- &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time()}:
+		case catchupEventCh <- &catchupEventMsg{eventMsg: &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time()}}:
 			acknowledgementEvents++
 		}
 	}
