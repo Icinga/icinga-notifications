@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/types"
 	"github.com/jmoiron/sqlx"
 	"time"
 )
@@ -82,15 +82,16 @@ func (e *Event) FullString() string {
 }
 
 // Sync transforms this event to *event.EventRow and synchronises with the database.
-func (e *Event) Sync(ctx context.Context, tx *sqlx.Tx, db *icingadb.DB, objectId types.Binary) error {
+func (e *Event) Sync(ctx context.Context, tx *sqlx.Tx, db *database.DB, objectId types.Binary) error {
 	if e.ID != 0 {
 		return nil
 	}
 
 	eventRow := NewEventRow(e, objectId)
-	eventID, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, eventRow, "id"), eventRow)
+	stmt, _ := db.BuildInsertStmt(eventRow, "id")
+	eventID, err := database.InsertObtainID(ctx, tx, stmt, eventRow)
 	if err == nil {
-		e.ID = eventID
+		e.ID = eventID.Int64
 	}
 
 	return err

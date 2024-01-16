@@ -3,11 +3,12 @@ package incident
 import (
 	"context"
 	"errors"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/icinga/icingadb/pkg/types"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 	"time"
@@ -38,14 +39,14 @@ func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 func (i *Incident) AddHistory(ctx context.Context, tx *sqlx.Tx, historyRow *HistoryRow, fetchId bool) (types.Int, error) {
 	historyRow.IncidentID = i.incidentRowID
 
-	stmt := utils.BuildInsertStmtWithout(i.db, historyRow, "id")
+	stmt, _ := i.db.BuildInsertStmt(historyRow, "id")
 	if fetchId {
-		historyId, err := utils.InsertAndFetchId(ctx, tx, stmt, historyRow)
+		historyId, err := database.InsertObtainID(ctx, tx, stmt, historyRow)
 		if err != nil {
 			return types.Int{}, err
 		}
 
-		return utils.ToDBInt(historyId), nil
+		return historyId, nil
 	} else {
 		_, err := tx.NamedExecContext(ctx, stmt, historyRow)
 		if err != nil {
