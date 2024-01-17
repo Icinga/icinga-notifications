@@ -5,6 +5,7 @@ ALTER TABLE source
     ADD COLUMN icinga2_auth_user text,
     ADD COLUMN icinga2_auth_pass text,
     ADD COLUMN icinga2_ca_pem text,
+    ADD COLUMN icinga2_common_name text,
     ADD COLUMN icinga2_insecure_tls boolenum NOT NULL DEFAULT 'n',
 
     DROP CONSTRAINT source_listener_password_hash_check;
