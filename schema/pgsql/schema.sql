@@ -140,7 +140,11 @@ CREATE TABLE source (
     icinga2_base_url text,
     icinga2_auth_user text,
     icinga2_auth_pass text,
+    -- icinga2_ca_pem specifies a custom CA to be used in the PEM format, if not NULL.
     icinga2_ca_pem text,
+    -- icinga2_common_name requires Icinga 2's certificate to hold this Common Name if not NULL. This allows using a
+    -- differing Common Name - maybe an Icinga 2 Endpoint object name - from the FQDN within icinga2_base_url.
+    icinga2_common_name text,
     icinga2_insecure_tls boolenum NOT NULL DEFAULT 'n',
 
     -- The hash is a PHP password_hash with PASSWORD_DEFAULT algorithm, defaulting to bcrypt. This check roughly ensures

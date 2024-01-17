@@ -22,6 +22,7 @@ type Source struct {
 	Icinga2AuthUser    types.String `db:"icinga2_auth_user"`
 	Icinga2AuthPass    types.String `db:"icinga2_auth_pass"`
 	Icinga2CAPem       types.String `db:"icinga2_ca_pem"`
+	Icinga2CommonName  types.String `db:"icinga2_common_name"`
 	Icinga2InsecureTLS types.Bool   `db:"icinga2_insecure_tls"`
 
 	// Icinga2SourceConf for Event Stream API sources, only if Source.Type == SourceTypeIcinga2.
@@ -41,6 +42,7 @@ func (source *Source) fieldEquals(other *Source) bool {
 		stringEq(source.Icinga2AuthUser, other.Icinga2AuthUser) &&
 		stringEq(source.Icinga2AuthPass, other.Icinga2AuthPass) &&
 		stringEq(source.Icinga2CAPem, other.Icinga2CAPem) &&
+		stringEq(source.Icinga2CommonName, other.Icinga2CommonName) &&
 		boolEq(source.Icinga2InsecureTLS, other.Icinga2InsecureTLS)
 }
 

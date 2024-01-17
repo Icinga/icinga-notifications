@@ -129,6 +129,10 @@ func (launcher *Launcher) launch(src *config.Source) {
 		client.ApiHttpTransport.TLSClientConfig.RootCAs = certPool
 	}
 
+	if src.Icinga2CommonName.Valid {
+		client.ApiHttpTransport.TLSClientConfig.ServerName = src.Icinga2CommonName.String
+	}
+
 	if src.Icinga2InsecureTLS.Valid && src.Icinga2InsecureTLS.Bool {
 		client.ApiHttpTransport.TLSClientConfig.InsecureSkipVerify = true
 	}
