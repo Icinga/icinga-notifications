@@ -36,7 +36,13 @@ type ConfigOption struct {
 	//  An "en_US" locale must be given as a fallback
 	Label map[string]string `json:"label"`
 
-	// Element title: When the user moves the mouse pointer over an element, a tooltip is displayed with a given message.
+	// Element description map. Locale in the standard format (language_REGION) as key and corresponding label as value.
+	// Locale is assumed to be UTF-8 encoded (Without the suffix in the locale)
+	//
+	// When the user moves the mouse pointer over an element in the web UI, a tooltip is displayed with a given message.
+	//
+	//  e.g. {"en_US": "HTTP request method for the request.", "de_DE": "HTTP-Methode für die Anfrage."}
+	//  An "en_US" locale must be given as a fallback
 	Help map[string]string `json:"help,omitempty"`
 
 	// Element default: bool for checkbox default value, string for other elements (used as placeholder)
