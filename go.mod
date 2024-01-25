@@ -5,8 +5,9 @@ go 1.21
 require (
 	github.com/creasty/defaults v1.7.0
 	github.com/emersion/go-sasl v0.0.0-20231106173351-e73c9f7bad43
-	github.com/emersion/go-smtp v0.20.1
+	github.com/emersion/go-smtp v0.20.2
 	github.com/goccy/go-yaml v1.11.2
+	github.com/google/uuid v1.3.0
 	github.com/icinga/icingadb v1.1.1-0.20230418113126-7c4b947aad3a
 	github.com/jhillyerd/enmime v1.1.0
 	github.com/jmoiron/sqlx v1.3.5
@@ -26,7 +27,6 @@ require (
 	github.com/go-redis/redis/v8 v8.11.5 // indirect
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/gogs/chardet v0.0.0-20211120154057-b7413eaefb8f // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056 // indirect
 	github.com/jessevdk/go-flags v1.5.0 // indirect
 	github.com/lib/pq v1.10.7 // indirect
