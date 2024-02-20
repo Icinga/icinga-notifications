@@ -13,7 +13,7 @@ require (
 	github.com/jmoiron/sqlx v1.3.5
 	github.com/stretchr/testify v1.8.4
 	github.com/teambition/rrule-go v1.8.2
-	go.uber.org/zap v1.26.0
+	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.18.0
 	golang.org/x/exp v0.0.0-20220613132600-b0d781184e0d
 )
