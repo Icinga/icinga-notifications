@@ -293,3 +293,21 @@ CREATE TABLE incident_history (
     CONSTRAINT pk_incident_history PRIMARY KEY (id),
     FOREIGN KEY (incident_id, rule_escalation_id) REFERENCES incident_rule_escalation_state(incident_id, rule_escalation_id)
 );
+
+CREATE EXTENSION IF NOT EXISTS citext;
+
+CREATE TABLE browser_session
+(
+    php_session_id   VARCHAR(256) NOT NULL,
+    username         CITEXT       NOT NULL,
+    user_agent       TEXT         NOT NULL,
+    authenticated_at bigint       NOT NULL DEFAULT (EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000),
+
+    CONSTRAINT pk_session PRIMARY KEY (php_session_id, username, user_agent)
+);
+
+CREATE INDEX browser_session_authenticated_at_idx
+    ON browser_session (
+        authenticated_at
+    )
+;
