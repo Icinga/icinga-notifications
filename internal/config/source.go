@@ -31,8 +31,8 @@ type Source struct {
 
 // fieldEquals checks if this Source's database fields are equal to those of another Source.
 func (source *Source) fieldEquals(other *Source) bool {
-	boolEq := func(a, b types.Bool) bool { return (!a.Valid && !b.Valid) || (a.Bool == b.Bool) }
-	stringEq := func(a, b types.String) bool { return (!a.Valid && !b.Valid) || (a.String == b.String) }
+	boolEq := func(a, b types.Bool) bool { return (!a.Valid && !b.Valid) || (a == b) }
+	stringEq := func(a, b types.String) bool { return (!a.Valid && !b.Valid) || (a == b) }
 
 	return source.ID == other.ID &&
 		source.Type == other.Type &&
