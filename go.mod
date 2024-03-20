@@ -11,7 +11,7 @@ require (
 	github.com/icinga/icingadb v1.1.1-0.20230418113126-7c4b947aad3a
 	github.com/jhillyerd/enmime v1.1.0
 	github.com/jmoiron/sqlx v1.3.5
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 	github.com/teambition/rrule-go v1.8.2
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.18.0
