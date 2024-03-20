@@ -19,6 +19,11 @@ git clone https://github.com/Icinga/icinga-notifications.git
 ```
 
 Next, you need to provide a `config.yml` file, similar to the [example config](config.example.yml), for the daemon.
+It is also possible to set environment variables by name instead of or in addition to the configuration file.
+The environment variable key is an underscore separated string of uppercase struct fields. For example
+* `ICINGA_NOTIFICATIONS_LISTEN` sets `ConfigFile.Listen` and
+* `ICINGA_NOTIFICATIONS_DATABASE_HOST` sets `ConfigFile.Database.Host`.
+
 It is required that you have created a new database and imported the [schema](schema/pgsql/schema.sql) file beforehand.
 > **Note**
 > At the moment **PostgreSQL** is the only database backend we support.
