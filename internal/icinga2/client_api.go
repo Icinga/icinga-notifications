@@ -11,7 +11,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"go.uber.org/zap"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -293,7 +292,7 @@ func (client *Client) connectEventStream(esTypes []string) (io.ReadCloser, error
 		return nil, err
 	}
 
-	for i := 0; ; i++ {
+	for retryDelay := time.Second; ; retryDelay = min(3*time.Minute, 2*retryDelay) {
 		// Always ensure an unique queue name to mitigate possible naming conflicts.
 		queueNameRndBuff := make([]byte, 16)
 		_, _ = rand.Read(queueNameRndBuff)
@@ -330,7 +329,9 @@ func (client *Client) connectEventStream(esTypes []string) (io.ReadCloser, error
 			httpClient := &http.Client{Transport: &client.ApiHttpTransport}
 			res, err := httpClient.Do(req)
 			if err != nil {
-				client.Logger.Warnw("Establishing an Event Stream API connection failed, will be retried", zap.Error(err))
+				client.Logger.Warnw("Establishing an Event Stream API connection failed, will be retried",
+					zap.Error(err),
+					zap.Duration("delay", retryDelay))
 				return
 			}
 
@@ -361,7 +362,7 @@ func (client *Client) connectEventStream(esTypes []string) (io.ReadCloser, error
 		// Rate limit API reconnections: slow down for successive failed attempts but limit to three minutes.
 		// 1s, 2s, 4s, 8s, 16s, 32s, 1m4s, 2m8s, 3m, 3m, 3m, ...
 		select {
-		case <-time.After(min(3*time.Minute, time.Duration(math.Exp2(float64(i)))*time.Second)):
+		case <-time.After(retryDelay):
 		case <-client.Ctx.Done():
 			return nil, client.Ctx.Err()
 		}
