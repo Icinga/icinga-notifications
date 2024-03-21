@@ -19,6 +19,18 @@ import (
 
 // This file contains Icinga 2 API related methods.
 
+// transport wraps http.Transport and overrides http.RoundTripper to set a custom User-Agent for all requests.
+type transport struct {
+	http.Transport
+	userAgent string
+}
+
+// RoundTrip implements http.RoundTripper to set a custom User-Agent header.
+func (trans *transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.Header.Set("User-Agent", trans.userAgent)
+	return trans.Transport.RoundTrip(req)
+}
+
 // extractObjectQueriesResult parses a typed ObjectQueriesResult array out of a JSON io.ReaderCloser.
 //
 // The generic type T is currently limited to all later needed types, even when the API might also return other known or
@@ -71,7 +83,7 @@ func (client *Client) queryObjectsApi(
 
 	// The underlying network connection is reused by using client.ApiHttpTransport.
 	httpClient := &http.Client{
-		Transport: &client.ApiHttpTransport,
+		Transport: client.ApiHttpTransport,
 		Timeout:   3 * time.Second,
 	}
 	res, err := httpClient.Do(req)
@@ -326,7 +338,7 @@ func (client *Client) connectEventStream(esTypes []string) (io.ReadCloser, error
 			defer close(resCh)
 
 			client.Logger.Debug("Try to establish an Event Stream API connection")
-			httpClient := &http.Client{Transport: &client.ApiHttpTransport}
+			httpClient := &http.Client{Transport: client.ApiHttpTransport}
 			res, err := httpClient.Do(req)
 			if err != nil {
 				client.Logger.Warnw("Establishing an Event Stream API connection failed, will be retried",

@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
@@ -75,12 +76,8 @@ func (launcher *Launcher) launch(src *config.Source) {
 		return
 	}
 
-	subCtx, subCtxCancel := context.WithCancel(launcher.Ctx)
-	client := &Client{
-		ApiBaseURL:       src.Icinga2BaseURL.String,
-		ApiBasicAuthUser: src.Icinga2AuthUser.String,
-		ApiBasicAuthPass: src.Icinga2AuthPass.String,
-		ApiHttpTransport: http.Transport{
+	trans := &transport{
+		Transport: http.Transport{
 			// Hardened TLS config adjusted to Icinga 2's configuration:
 			// - https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#objecttype-apilistener
 			// - https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#security
@@ -97,6 +94,31 @@ func (launcher *Launcher) launch(src *config.Source) {
 				},
 			},
 		},
+		userAgent: "icinga-notifications/" + internal.Version.Version,
+	}
+
+	if src.Icinga2CAPem.Valid {
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM([]byte(src.Icinga2CAPem.String)) {
+			logger.Error("Cannot add custom CA file to CA pool")
+			return
+		}
+
+		trans.TLSClientConfig.RootCAs = certPool
+	}
+	if src.Icinga2CommonName.Valid {
+		trans.TLSClientConfig.ServerName = src.Icinga2CommonName.String
+	}
+	if src.Icinga2InsecureTLS.Valid && src.Icinga2InsecureTLS.Bool {
+		trans.TLSClientConfig.InsecureSkipVerify = true
+	}
+
+	subCtx, subCtxCancel := context.WithCancel(launcher.Ctx)
+	client := &Client{
+		ApiBaseURL:       src.Icinga2BaseURL.String,
+		ApiBasicAuthUser: src.Icinga2AuthUser.String,
+		ApiBasicAuthPass: src.Icinga2AuthPass.String,
+		ApiHttpTransport: trans,
 
 		EventSourceId: src.ID,
 		IcingaWebRoot: daemon.Config().Icingaweb2URL,
@@ -117,24 +139,6 @@ func (launcher *Launcher) launch(src *config.Source) {
 		Ctx:       subCtx,
 		CtxCancel: subCtxCancel,
 		Logger:    logger,
-	}
-
-	if src.Icinga2CAPem.Valid {
-		certPool := x509.NewCertPool()
-		if !certPool.AppendCertsFromPEM([]byte(src.Icinga2CAPem.String)) {
-			logger.Error("Cannot add custom CA file to CA pool")
-			return
-		}
-
-		client.ApiHttpTransport.TLSClientConfig.RootCAs = certPool
-	}
-
-	if src.Icinga2CommonName.Valid {
-		client.ApiHttpTransport.TLSClientConfig.ServerName = src.Icinga2CommonName.String
-	}
-
-	if src.Icinga2InsecureTLS.Valid && src.Icinga2InsecureTLS.Bool {
-		client.ApiHttpTransport.TLSClientConfig.InsecureSkipVerify = true
 	}
 
 	go client.Process()

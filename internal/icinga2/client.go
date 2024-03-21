@@ -44,7 +44,7 @@ type Client struct {
 	ApiBaseURL       string
 	ApiBasicAuthUser string
 	ApiBasicAuthPass string
-	ApiHttpTransport http.Transport
+	ApiHttpTransport http.RoundTripper
 
 	// EventSourceId to be reflected in generated event.Events.
 	EventSourceId int64
