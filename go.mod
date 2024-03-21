@@ -9,7 +9,7 @@ require (
 	github.com/goccy/go-yaml v1.11.3
 	github.com/google/uuid v1.6.0
 	github.com/icinga/icingadb v1.1.1-0.20230418113126-7c4b947aad3a
-	github.com/jhillyerd/enmime v1.1.0
+	github.com/jhillyerd/enmime v1.2.0
 	github.com/jmoiron/sqlx v1.3.5
 	github.com/stretchr/testify v1.9.0
 	github.com/teambition/rrule-go v1.8.2
