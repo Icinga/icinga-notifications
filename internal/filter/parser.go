@@ -481,6 +481,7 @@ yydefault:
 						goto yystack
 					}
 				}
+
 				/* the current p has no shift on "error", pop stack */
 				if yyDebug >= 2 {
 					__yyfmt__.Printf("error recovery pops state %d\n", yyS[yyp].yys)
@@ -575,6 +576,7 @@ yydefault:
 //line parser.y:147
 		{
 			if yyDollar[1].text != "" {
+				// NewChain is only going to return an error if an invalid operator is specified, and since
 				// we explicitly provide the None operator, we don't expect an error to be returned.
 				yyVAL.expr, _ = NewChain(None, yyDollar[2].expr)
 			} else {
