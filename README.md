@@ -33,7 +33,7 @@ VALUES
 
 Then, you can launch the daemon with the following command.
 ```go
-go run ./cmd/icinga-notifications-daemon --config config.yml
+go run ./cmd/icinga-notifications --config config.yml
 ```
 
 ## License
