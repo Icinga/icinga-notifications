@@ -124,8 +124,8 @@ filter_rule: filter_chain logical_op filter_chain
 	}
 	| filter_rule logical_op filter_chain
 	{
-	    $$ = reduceFilter($1, $2, $3)
-        yylex.(*Lexer).rule = $$
+		$$ = reduceFilter($1, $2, $3)
+		yylex.(*Lexer).rule = $$
 	}
 	;
 
@@ -182,15 +182,15 @@ exists_expr: identifier
 	;
 
 identifier: T_IDENTIFIER
-    {
-        column, err := url.QueryUnescape($1)
-        if err != nil {
-            // Something went wrong, so just panic and filter.Parse will try to recover from this.
-            panic(err)
-        }
+	{
+		column, err := url.QueryUnescape($1)
+		if err != nil {
+			// Something went wrong, so just panic and filter.Parse will try to recover from this.
+			panic(err)
+		}
 
-        $$ = column
-    }
+		$$ = column
+	}
 	;
 
 optional_negation: /* empty */ { $$ = "" }
