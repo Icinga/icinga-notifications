@@ -8,7 +8,7 @@ WORKDIR /src/icinga-notifications
 RUN mkdir bin
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -o bin/ ./cmd/icinga-notifications-daemon
+    go build -o bin/ ./cmd/icinga-notifications
 
 RUN mkdir bin/channel
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM docker.io/library/alpine
 
-COPY --from=build /src/icinga-notifications/bin/icinga-notifications-daemon /usr/bin/icinga-notifications-daemon
+COPY --from=build /src/icinga-notifications/bin/icinga-notifications /usr/bin/icinga-notifications
 COPY --from=build /src/icinga-notifications/bin/channel /usr/libexec/icinga-notifications/channel
 
 RUN apk add tzdata
@@ -28,4 +28,4 @@ RUN adduser -u 1000 -H -D -G $username $username
 USER $username
 
 EXPOSE 5680
-CMD ["/usr/bin/icinga-notifications-daemon", "--config", "/etc/icinga-notifications/config.yml"]
+CMD ["/usr/bin/icinga-notifications", "--config", "/etc/icinga-notifications/config.yml"]
