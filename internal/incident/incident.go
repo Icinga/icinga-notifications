@@ -140,7 +140,17 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 	}
 
 	if ev.Type == event.TypeAcknowledgement {
-		return i.processAcknowledgementEvent(ctx, tx, ev)
+		if err = i.processAcknowledgementEvent(ctx, tx, ev); err != nil {
+			return err
+		}
+
+		if err = tx.Commit(); err != nil {
+			i.logger.Errorw("Can't commit db transaction", zap.Error(err))
+
+			return errors.New("can't commit db transaction")
+		}
+
+		return nil
 	}
 
 	var causedBy types.Int
