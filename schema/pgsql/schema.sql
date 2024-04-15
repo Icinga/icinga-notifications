@@ -292,7 +292,6 @@ CREATE TABLE incident_history (
     schedule_id bigint REFERENCES schedule(id),
     rule_id bigint REFERENCES rule(id),
     channel_id bigint REFERENCES channel(id),
-    caused_by_incident_history_id bigint REFERENCES incident_history(id),
     time bigint NOT NULL,
     message text,
     type incident_history_event_type NOT NULL,
