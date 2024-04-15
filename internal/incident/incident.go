@@ -229,6 +229,10 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 			return err
 		}
 
+		if err = i.AddEvent(ctx, tx, ev); err != nil {
+			return fmt.Errorf("can't insert incident event to the database: %w", err)
+		}
+
 		if err = i.triggerEscalations(ctx, tx, ev, types.Int{}, escalations); err != nil {
 			return err
 		}
