@@ -6,10 +6,10 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
+	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/com"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
-	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -77,8 +77,8 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 					chunkLen := len(bulk)
 					objectIds := make([]any, chunkLen)
 					incidentIds := make([]any, chunkLen)
-					incidentsById := make(map[any]*Incident, chunkLen)
-					incidentsByObjId := make(map[any]*Incident, chunkLen)
+					incidentsById := make(map[int64]*Incident, chunkLen)
+					incidentsByObjId := make(map[string]*Incident, chunkLen)
 
 					for k, i := range bulk {
 						incidentsById[i.Id] = i
@@ -89,27 +89,52 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 					}
 
 					// Restore all incident objects matching the given object ids
-					if err := restoreAttrsFor(chCtx, db, incidentsByObjId, new(object.Object), objectIds); err != nil {
+					err := utils.ForEachRow[object.Object](chCtx, db, "id", objectIds, func(o *object.Object) {
+						incidentsByObjId[o.ID.String()].Object = o
+					})
+					if err != nil {
 						return errors.Wrap(err, "cannot restore incidents object")
 					}
 
 					// Restore object ID tags matching the given object ids
-					if err := restoreAttrsFor(chCtx, db, incidentsByObjId, new(object.IdTagRow), objectIds); err != nil {
+					err = utils.ForEachRow[object.IdTagRow](ctx, db, "object_id", objectIds, func(ir *object.IdTagRow) {
+						incidentsByObjId[ir.ObjectId.String()].Object.Tags[ir.Tag] = ir.Value
+					})
+					if err != nil {
 						return errors.Wrap(err, "cannot restore incident object ID tags")
 					}
 
 					// Restore object extra tags matching the given object ids
-					if err := restoreAttrsFor(chCtx, db, incidentsByObjId, new(object.ExtraTagRow), objectIds); err != nil {
-						return errors.Wrap(err, "cannot restore incident object ID tags")
+					err = utils.ForEachRow[object.ExtraTagRow](ctx, db, "object_id", objectIds, func(et *object.ExtraTagRow) {
+						incidentsByObjId[et.ObjectId.String()].Object.ExtraTags[et.Tag] = et.Value
+					})
+					if err != nil {
+						return errors.Wrap(err, "cannot restore incident object extra tags")
 					}
 
 					// Restore all escalation states and incident rules matching the given incident ids.
-					if err := restoreAttrsFor(chCtx, db, incidentsById, new(EscalationState), incidentIds); err != nil {
+					err = utils.ForEachRow[EscalationState](ctx, db, "incident_id", incidentIds, func(state *EscalationState) {
+						i := incidentsById[state.IncidentID]
+						i.EscalationState[state.RuleEscalationID] = state
+
+						// Restore the incident rule matching the current escalation state if any.
+						i.runtimeConfig.RLock()
+						defer i.runtimeConfig.RUnlock()
+
+						escalation := i.runtimeConfig.GetRuleEscalation(state.RuleEscalationID)
+						if escalation != nil {
+							i.Rules[escalation.RuleID] = struct{}{}
+						}
+					})
+					if err != nil {
 						return errors.Wrap(err, "cannot restore incident rule escalation states")
 					}
 
 					// Restore incident recipients matching the given incident ids.
-					if err := restoreAttrsFor(chCtx, db, incidentsById, new(ContactRow), incidentIds); err != nil {
+					err = utils.ForEachRow[ContactRow](ctx, db, "incident_id", incidentIds, func(c *ContactRow) {
+						incidentsById[c.IncidentID].Recipients[c.Key] = &RecipientState{Role: c.Role}
+					})
+					if err != nil {
 						return errors.Wrap(err, "cannot restore incident recipients")
 					}
 
@@ -236,100 +261,4 @@ func ProcessEvent(
 	}
 
 	return currentIncident.ProcessEvent(ctx, ev, created)
-}
-
-// restoreAttrsFor restores the attributes of the given subject type from the database.
-//
-// It bulks SELECT the info from the database via a `SELECT ... WHERE ... IN(?)` query scoped to the specified args.
-// The column name for the where clause is determined automatically based on the provided subject type.
-// Currently, it only supports object.Object, object.IdTagRow, object.ExtraTagRow, EscalationState, ContactRow types
-// and panics if something else is provided.
-//
-// Note, this function accesses/modifies the specified incidents map without obtaining any locks
-// and must be protected against simultaneous write operations if a shared map is used.
-func restoreAttrsFor(ctx context.Context, db *icingadb.DB, incidents map[any]*Incident, subject any, scopes []any) error {
-	var (
-		// Name of the column used to filter the database query by.
-		column string
-		// A callback set based on the specified subject and called after each successful row retrieval.
-		restore func(any)
-		// A factory func set based on the given subject and called before each row scan.
-		factory func() any
-	)
-
-	switch subject.(type) {
-	case *EscalationState:
-		column = "incident_id"
-		factory = func() any { return new(EscalationState) }
-		restore = func(r any) {
-			state := r.(*EscalationState)
-			i := incidents[state.IncidentID]
-			i.EscalationState[state.RuleEscalationID] = state
-
-			// Restore the incident rule matching the current escalation state if any.
-			i.runtimeConfig.RLock()
-			escalation := i.runtimeConfig.GetRuleEscalation(state.RuleEscalationID)
-			if escalation != nil {
-				i.Rules[escalation.RuleID] = struct{}{}
-			}
-			i.runtimeConfig.RUnlock()
-		}
-	case *ContactRow:
-		column = "incident_id"
-		factory = func() any { return new(ContactRow) }
-		restore = func(r any) {
-			c := r.(*ContactRow)
-			incidents[c.IncidentID].Recipients[c.Key] = &RecipientState{Role: c.Role}
-		}
-	case *object.IdTagRow:
-		column = "object_id"
-		factory = func() any { return new(object.IdTagRow) }
-		restore = func(r any) {
-			id := r.(*object.IdTagRow)
-			incidents[id.ObjectId.String()].Object.Tags[id.Tag] = id.Value
-		}
-	case *object.ExtraTagRow:
-		column = "object_id"
-		factory = func() any { return new(object.ExtraTagRow) }
-		restore = func(r any) {
-			extraTag := r.(*object.ExtraTagRow)
-			incidents[extraTag.ObjectId.String()].Object.ExtraTags[extraTag.Tag] = extraTag.Value
-		}
-	case *object.Object:
-		column = "id"
-		ev := &event.Event{Tags: make(map[string]string), ExtraTags: make(map[string]string)}
-		factory = func() any { return object.New(db, ev) }
-		restore = func(r any) {
-			obj := r.(*object.Object)
-			incidents[obj.ID.String()].Object = obj
-		}
-	default: // should never happen!
-		panic(fmt.Sprintf("invalid database subject for incient#restoreAttrsFor() provided: %v", subject))
-	}
-
-	query := fmt.Sprintf("%s WHERE %q IN(?)", db.BuildSelectStmt(subject, subject), column)
-	stmt, args, err := sqlx.In(query, scopes)
-	if err != nil {
-		return errors.Wrapf(err, "cannot build placeholders for %q", query)
-	}
-
-	rows, err := db.QueryxContext(ctx, db.Rebind(stmt), args...)
-	if err != nil {
-		return err
-	}
-	// In case the records in the loop below are successfully traversed, rows is automatically closed and an
-	// error is returned (if any), making this rows#Close() call a no-op. Escaping from this function unexpectedly
-	// means we have a more serious problem, so in either case just discard the error here.
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		row := factory()
-		if err = rows.StructScan(row); err != nil {
-			return err
-		}
-
-		restore(row)
-	}
-
-	return rows.Err()
 }
