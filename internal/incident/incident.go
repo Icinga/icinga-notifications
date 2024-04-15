@@ -153,9 +153,8 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 		return nil
 	}
 
-	var causedBy types.Int
 	if !created {
-		causedBy, err = i.processSeverityChangedEvent(ctx, tx, ev)
+		err := i.processSeverityChangedEvent(ctx, tx, ev)
 		if err != nil {
 			return err
 		}
@@ -163,7 +162,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 
 	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
 	// to be checked again, these rules already matched and stay effective for the ongoing incident.
-	causedBy, err = i.evaluateRules(ctx, tx, ev.ID, causedBy)
+	err = i.evaluateRules(ctx, tx, ev.ID)
 	if err != nil {
 		return err
 	}
@@ -174,11 +173,11 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 		return err
 	}
 
-	if err := i.triggerEscalations(ctx, tx, ev, causedBy, escalations); err != nil {
+	if err := i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
 		return err
 	}
 
-	notifications, err := i.addPendingNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time), causedBy)
+	notifications, err := i.addPendingNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
 	if err != nil {
 		return err
 	}
@@ -233,7 +232,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 			return fmt.Errorf("can't insert incident event to the database: %w", err)
 		}
 
-		if err = i.triggerEscalations(ctx, tx, ev, types.Int{}, escalations); err != nil {
+		if err = i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
 			return err
 		}
 
@@ -242,7 +241,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 			channels.loadEscalationRecipientsChannel(escalation, i, ev.Time)
 		}
 
-		notifications, err = i.addPendingNotifications(ctx, tx, ev, channels, types.Int{})
+		notifications, err = i.addPendingNotifications(ctx, tx, ev, channels)
 
 		return err
 	})
@@ -258,13 +257,12 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 	}
 }
 
-func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) (types.Int, error) {
-	var causedByHistoryId types.Int
+func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
 	oldSeverity := i.Severity
 	newSeverity := ev.Severity
 	if oldSeverity == newSeverity {
 		err := fmt.Errorf("%w: %s state event from source %d", ErrSuperfluousStateChange, ev.Severity.String(), ev.SourceId)
-		return causedByHistoryId, err
+		return err
 	}
 
 	i.logger.Infof("Incident severity changed from %s to %s", oldSeverity.String(), newSeverity.String())
@@ -278,14 +276,12 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		Message:     utils.ToDBString(ev.Message),
 	}
 
-	historyId, err := i.AddHistory(ctx, tx, history, true)
+	_, err := i.AddHistory(ctx, tx, history, false)
 	if err != nil {
 		i.logger.Errorw("Failed to insert incident severity changed history", zap.Error(err))
 
-		return causedByHistoryId, errors.New("failed to insert incident severity changed history")
+		return errors.New("failed to insert incident severity changed history")
 	}
-
-	causedByHistoryId = historyId
 
 	if newSeverity == event.SeverityOK {
 		i.RecoveredAt = time.Now()
@@ -303,7 +299,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		if err != nil {
 			i.logger.Errorw("Can't insert incident closed history to the database", zap.Error(err))
 
-			return types.Int{}, errors.New("can't insert incident closed history to the database")
+			return errors.New("can't insert incident closed history to the database")
 		}
 
 		if i.timer != nil {
@@ -315,10 +311,10 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 	if err := i.Sync(ctx, tx); err != nil {
 		i.logger.Errorw("Failed to update incident severity", zap.Error(err))
 
-		return causedByHistoryId, errors.New("failed to update incident severity")
+		return errors.New("failed to update incident severity")
 	}
 
-	return causedByHistoryId, nil
+	return nil
 }
 
 func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
@@ -352,7 +348,7 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 // evaluateRules evaluates all the configured rules for this *incident.Object and
 // generates history entries for each matched rule.
 // Returns error on database failure.
-func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64, causedBy types.Int) (types.Int, error) {
+func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64) error {
 	if i.Rules == nil {
 		i.Rules = make(map[int64]struct{})
 	}
@@ -381,30 +377,25 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 			if err != nil {
 				i.logger.Errorw("Failed to upsert incident rule", zap.String("rule", r.Name), zap.Error(err))
 
-				return types.Int{}, errors.New("failed to insert incident rule")
+				return errors.New("failed to insert incident rule")
 			}
 
 			history := &HistoryRow{
-				Time:                      types.UnixMilli(time.Now()),
-				EventID:                   utils.ToDBInt(eventID),
-				RuleID:                    utils.ToDBInt(r.ID),
-				Type:                      RuleMatched,
-				CausedByIncidentHistoryID: causedBy,
+				Time:    types.UnixMilli(time.Now()),
+				EventID: utils.ToDBInt(eventID),
+				RuleID:  utils.ToDBInt(r.ID),
+				Type:    RuleMatched,
 			}
-			insertedID, err := i.AddHistory(ctx, tx, history, true)
+			_, err = i.AddHistory(ctx, tx, history, false)
 			if err != nil {
 				i.logger.Errorw("Failed to insert rule matched incident history", zap.String("rule", r.Name), zap.Error(err))
 
-				return types.Int{}, errors.New("failed to insert rule matched incident history")
-			}
-
-			if insertedID.Valid && !causedBy.Valid {
-				causedBy = insertedID
+				return errors.New("failed to insert rule matched incident history")
 			}
 		}
 	}
 
-	return causedBy, nil
+	return nil
 }
 
 // evaluateEscalations evaluates this incidents rule escalations to be triggered if they aren't already.
@@ -488,7 +479,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 
 // triggerEscalations triggers the given escalations and generates incident history items for each of them.
 // Returns an error on database failure.
-func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, causedBy types.Int, escalations []*rule.Escalation) error {
+func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, escalations []*rule.Escalation) error {
 	for _, escalation := range escalations {
 		r := i.runtimeConfig.Rules[escalation.RuleID]
 		i.logger.Infof("Rule %q reached escalation %q", r.Name, escalation.DisplayName())
@@ -506,12 +497,11 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 		}
 
 		history := &HistoryRow{
-			Time:                      state.TriggeredAt,
-			EventID:                   utils.ToDBInt(ev.ID),
-			RuleEscalationID:          utils.ToDBInt(state.RuleEscalationID),
-			RuleID:                    utils.ToDBInt(r.ID),
-			Type:                      EscalationTriggered,
-			CausedByIncidentHistoryID: causedBy,
+			Time:             state.TriggeredAt,
+			EventID:          utils.ToDBInt(ev.ID),
+			RuleEscalationID: utils.ToDBInt(state.RuleEscalationID),
+			RuleID:           utils.ToDBInt(r.ID),
+			Type:             EscalationTriggered,
 		}
 
 		if _, err := i.AddHistory(ctx, tx, history, false); err != nil {

@@ -1,0 +1,1 @@
+ALTER TABLE incident_history DROP COLUMN caused_by_incident_history_id;
