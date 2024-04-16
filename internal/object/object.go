@@ -12,6 +12,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
+	"github.com/pkg/errors"
 	"regexp"
 	"sort"
 	"strings"
@@ -47,18 +48,59 @@ func New(db *icingadb.DB, ev *event.Event) *Object {
 	}
 }
 
-// Cache adds the given object to the global object cache store.
-// This is only used when loading the incident objects at daemon startup before the listener becomes ready.
-// Panics when the given object is already in the cache store.
-func Cache(obj *Object) {
+// GetFromCache fetches an object from the global object cache store matching the given ID.
+// Returns nil if it's not in the cache.
+func GetFromCache(id types.Binary) *Object {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 
-	if obj, ok := cache[obj.ID.String()]; ok {
-		panic(fmt.Sprintf("Object %q is already in cache", obj.DisplayName()))
+	return cache[id.String()]
+}
+
+// RestoreObjects restores all objects and their (extra)tags matching the given IDs from the database.
+// Returns error on any database failures and panics when trying to cache an object that's already in the cache store.
+func RestoreObjects(ctx context.Context, db *icingadb.DB, ids []any) error {
+	err := utils.ForEachRow[Object](ctx, db, "id", ids, func(o *Object) {
+		o.db = db
+		o.Tags = map[string]string{}
+		o.ExtraTags = map[string]string{}
+
+		cacheMu.Lock()
+		defer cacheMu.Unlock()
+
+		if obj, ok := cache[o.ID.String()]; ok {
+			panic(fmt.Sprintf("Object %q is already in the cache", obj.DisplayName()))
+		}
+
+		cache[o.ID.String()] = o
+	})
+	if err != nil {
+		return errors.Wrap(err, "cannot restore objects")
 	}
 
-	cache[obj.ID.String()] = obj
+	// Restore object ID tags matching the given object ids
+	err = utils.ForEachRow[IdTagRow](ctx, db, "object_id", ids, func(ir *IdTagRow) {
+		cacheMu.Lock()
+		defer cacheMu.Unlock()
+
+		cache[ir.ObjectId.String()].Tags[ir.Tag] = ir.Value
+	})
+	if err != nil {
+		return errors.Wrap(err, "cannot restore objects ID tags")
+	}
+
+	// Restore object extra tags matching the given object ids
+	err = utils.ForEachRow[ExtraTagRow](ctx, db, "object_id", ids, func(et *ExtraTagRow) {
+		cacheMu.Lock()
+		defer cacheMu.Unlock()
+
+		cache[et.ObjectId.String()].ExtraTags[et.Tag] = et.Value
+	})
+	if err != nil {
+		return errors.Wrap(err, "cannot restore objects extra tags")
+	}
+
+	return nil
 }
 
 // FromEvent creates an object from the provided event tags if it's not in the cache
