@@ -66,21 +66,20 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 		err    error
 	)
 
-	if ch.Encryption == EncryptionTLS {
+	switch ch.Encryption {
+	case EncryptionStartTLS:
+		client, err = smtp.DialStartTLS(ch.GetServer(), nil)
+	case EncryptionTLS:
 		client, err = smtp.DialTLS(ch.GetServer(), nil)
-	} else {
+	case EncryptionNone:
 		client, err = smtp.Dial(ch.GetServer())
+	default:
+		return fmt.Errorf("unsupported mail encryption type %q", ch.Encryption)
 	}
 	if err != nil {
 		return err
 	}
 	defer func() { _ = client.Close() }()
-
-	if ch.Encryption == EncryptionStartTLS {
-		if err = client.StartTLS(nil); err != nil {
-			return err
-		}
-	}
 
 	if ch.Password != "" {
 		if err = client.Auth(sasl.NewPlainClient("", ch.User, ch.Password)); err != nil {
