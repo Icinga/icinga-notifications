@@ -89,31 +89,12 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 					}
 
 					// Restore all incident objects matching the given object ids
-					err := utils.ForEachRow[object.Object](chCtx, db, "id", objectIds, func(o *object.Object) {
-						incidentsByObjId[o.ID.String()].Object = o
-					})
-					if err != nil {
-						return errors.Wrap(err, "cannot restore incidents object")
-					}
-
-					// Restore object ID tags matching the given object ids
-					err = utils.ForEachRow[object.IdTagRow](ctx, db, "object_id", objectIds, func(ir *object.IdTagRow) {
-						incidentsByObjId[ir.ObjectId.String()].Object.Tags[ir.Tag] = ir.Value
-					})
-					if err != nil {
-						return errors.Wrap(err, "cannot restore incident object ID tags")
-					}
-
-					// Restore object extra tags matching the given object ids
-					err = utils.ForEachRow[object.ExtraTagRow](ctx, db, "object_id", objectIds, func(et *object.ExtraTagRow) {
-						incidentsByObjId[et.ObjectId.String()].Object.ExtraTags[et.Tag] = et.Value
-					})
-					if err != nil {
-						return errors.Wrap(err, "cannot restore incident object extra tags")
+					if err := object.RestoreObjects(ctx, db, objectIds); err != nil {
+						return err
 					}
 
 					// Restore all escalation states and incident rules matching the given incident ids.
-					err = utils.ForEachRow[EscalationState](ctx, db, "incident_id", incidentIds, func(state *EscalationState) {
+					err := utils.ForEachRow[EscalationState](ctx, db, "incident_id", incidentIds, func(state *EscalationState) {
 						i := incidentsById[state.IncidentID]
 						i.EscalationState[state.RuleEscalationID] = state
 
@@ -139,10 +120,9 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 					}
 
 					for _, i := range incidentsById {
+						i.Object = object.GetFromCache(i.ObjectID)
 						i.logger = logger.With(zap.String("object", i.Object.DisplayName()),
 							zap.String("incident", i.String()))
-
-						object.Cache(i.Object)
 
 						currentIncidentsMu.Lock()
 						currentIncidents[i.Object] = i
