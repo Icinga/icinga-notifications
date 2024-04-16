@@ -59,20 +59,14 @@ func GetFromCache(id types.Binary) *Object {
 
 // RestoreObjects restores all objects and their (extra)tags matching the given IDs from the database.
 // Returns error on any database failures and panics when trying to cache an object that's already in the cache store.
-func RestoreObjects(ctx context.Context, db *icingadb.DB, ids []any) error {
+func RestoreObjects(ctx context.Context, db *icingadb.DB, ids []types.Binary) error {
+	objects := map[string]*Object{}
 	err := utils.ForEachRow[Object](ctx, db, "id", ids, func(o *Object) {
 		o.db = db
 		o.Tags = map[string]string{}
 		o.ExtraTags = map[string]string{}
 
-		cacheMu.Lock()
-		defer cacheMu.Unlock()
-
-		if obj, ok := cache[o.ID.String()]; ok {
-			panic(fmt.Sprintf("Object %q is already in the cache", obj.DisplayName()))
-		}
-
-		cache[o.ID.String()] = o
+		objects[o.ID.String()] = o
 	})
 	if err != nil {
 		return errors.Wrap(err, "cannot restore objects")
@@ -80,10 +74,7 @@ func RestoreObjects(ctx context.Context, db *icingadb.DB, ids []any) error {
 
 	// Restore object ID tags matching the given object ids
 	err = utils.ForEachRow[IdTagRow](ctx, db, "object_id", ids, func(ir *IdTagRow) {
-		cacheMu.Lock()
-		defer cacheMu.Unlock()
-
-		cache[ir.ObjectId.String()].Tags[ir.Tag] = ir.Value
+		objects[ir.ObjectId.String()].Tags[ir.Tag] = ir.Value
 	})
 	if err != nil {
 		return errors.Wrap(err, "cannot restore objects ID tags")
@@ -91,13 +82,21 @@ func RestoreObjects(ctx context.Context, db *icingadb.DB, ids []any) error {
 
 	// Restore object extra tags matching the given object ids
 	err = utils.ForEachRow[ExtraTagRow](ctx, db, "object_id", ids, func(et *ExtraTagRow) {
-		cacheMu.Lock()
-		defer cacheMu.Unlock()
-
-		cache[et.ObjectId.String()].ExtraTags[et.Tag] = et.Value
+		objects[et.ObjectId.String()].ExtraTags[et.Tag] = et.Value
 	})
 	if err != nil {
 		return errors.Wrap(err, "cannot restore objects extra tags")
+	}
+
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+
+	for _, o := range objects {
+		if obj, ok := cache[o.ID.String()]; ok {
+			panic(fmt.Sprintf("Object %q is already in the cache", obj.DisplayName()))
+		}
+
+		cache[o.ID.String()] = o
 	}
 
 	return nil

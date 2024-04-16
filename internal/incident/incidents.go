@@ -10,6 +10,7 @@ import (
 	"github.com/icinga/icingadb/pkg/com"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
+	"github.com/icinga/icingadb/pkg/types"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -75,8 +76,8 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 
 				g.Go(func() error {
 					chunkLen := len(bulk)
-					objectIds := make([]any, chunkLen)
-					incidentIds := make([]any, chunkLen)
+					objectIds := make([]types.Binary, chunkLen)
+					incidentIds := make([]int64, chunkLen)
 					incidentsById := make(map[int64]*Incident, chunkLen)
 					incidentsByObjId := make(map[string]*Incident, chunkLen)
 
