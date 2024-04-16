@@ -30,13 +30,13 @@ var (
 func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Logger, runtimeConfig *config.RuntimeConfig) error {
 	logger.Info("Loading all active incidents from database")
 
-	g, chCtx := errgroup.WithContext(ctx)
+	g, ctx := errgroup.WithContext(ctx)
 
 	incidents := make(chan *Incident)
 	g.Go(func() error {
 		defer close(incidents)
 
-		rows, err := db.QueryxContext(chCtx, db.BuildSelectStmt(new(Incident), new(Incident))+` WHERE "recovered_at" IS NULL`)
+		rows, err := db.QueryxContext(ctx, db.BuildSelectStmt(new(Incident), new(Incident))+` WHERE "recovered_at" IS NULL`)
 		if err != nil {
 			return err
 		}
@@ -53,8 +53,8 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 
 			select {
 			case incidents <- i:
-			case <-chCtx.Done():
-				return chCtx.Err()
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 		}
 
@@ -62,12 +62,12 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 	})
 
 	g.Go(func() error {
-		bulks := com.Bulk(chCtx, incidents, db.Options.MaxPlaceholdersPerStatement, com.NeverSplit[*Incident])
+		bulks := com.Bulk(ctx, incidents, db.Options.MaxPlaceholdersPerStatement, com.NeverSplit[*Incident])
 
 		for {
 			select {
-			case <-chCtx.Done():
-				return chCtx.Err()
+			case <-ctx.Done():
+				return ctx.Err()
 			case bulk, ok := <-bulks:
 				if !ok {
 					return nil
