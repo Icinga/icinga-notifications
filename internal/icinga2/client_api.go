@@ -211,8 +211,8 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ca
 	var stateChangeEvents, acknowledgementEvents int
 	defer func() {
 		client.Logger.Debugw("Querying API emitted events",
-			zap.String("object type", objType),
-			zap.Int("state changes", stateChangeEvents),
+			zap.String("object_type", objType),
+			zap.Int("state_changes", stateChangeEvents),
 			zap.Int("acknowledgements", acknowledgementEvents))
 	}()
 
