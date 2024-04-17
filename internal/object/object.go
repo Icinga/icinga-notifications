@@ -57,6 +57,15 @@ func GetFromCache(id types.Binary) *Object {
 	return cache[id.String()]
 }
 
+// ClearCache clears the global object cache store.
+// Note, this is only used for unit tests not to run into "can't cache already cached object" error.
+func ClearCache() {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+
+	cache = make(map[string]*Object)
+}
+
 // RestoreObjects restores all objects and their (extra)tags matching the given IDs from the database.
 // Returns error on any database failures and panics when trying to cache an object that's already in the cache store.
 func RestoreObjects(ctx context.Context, db *icingadb.DB, ids []types.Binary) error {
