@@ -77,8 +77,8 @@ func reduceFilter(left Filter, op string, right Filter) Filter {
 }
 
 %type <expr> filter_rule
+%type <expr> filter_chain_list
 %type <expr> filter_chain
-%type <expr> conditions_expr
 %type <expr> maybe_negated_condition_expr
 %type <expr> condition_expr
 %type <expr> exists_expr
@@ -102,7 +102,7 @@ func reduceFilter(left Filter, op string, right Filter) Filter {
 %type <text> "!"
 
 // This is just used for declaring explicit precedence and resolves shift/reduce conflicts
-// in `filter_chain` and `conditions_expr` rules.
+// in `filter_chain_list` and `filter_chain` rules.
 %nonassoc PREFER_SHIFTING_LOGICAL_OP
 
 %nonassoc T_EQUAL T_UNEQUAL T_LIKE T_UNLIKE
@@ -115,30 +115,30 @@ func reduceFilter(left Filter, op string, right Filter) Filter {
 
 %%
 
-filter_rule: filter_chain logical_op filter_chain
+filter_rule: filter_chain_list logical_op filter_chain_list
 	{
 		$$ = reduceFilter($1, $2, $3)
 		yylex.(*Lexer).rule = $$
+	}
+	| filter_chain_list %prec PREFER_SHIFTING_LOGICAL_OP
+	{
+		yylex.(*Lexer).rule = $$
+	}
+	| filter_rule logical_op filter_chain_list
+	{
+		$$ = reduceFilter($1, $2, $3)
+		yylex.(*Lexer).rule = $$
+	}
+	;
+
+filter_chain_list: filter_chain logical_op maybe_negated_condition_expr
+	{
+		$$ = reduceFilter($1, $2, $3)
 	}
 	| filter_chain %prec PREFER_SHIFTING_LOGICAL_OP
-	{
-		yylex.(*Lexer).rule = $$
-	}
-	| filter_rule logical_op filter_chain
-	{
-		$$ = reduceFilter($1, $2, $3)
-		yylex.(*Lexer).rule = $$
-	}
 	;
 
-filter_chain: conditions_expr logical_op maybe_negated_condition_expr
-	{
-		$$ = reduceFilter($1, $2, $3)
-	}
-	| conditions_expr %prec PREFER_SHIFTING_LOGICAL_OP
-	;
-
-conditions_expr: maybe_negated_condition_expr logical_op maybe_negated_condition_expr
+filter_chain: maybe_negated_condition_expr logical_op maybe_negated_condition_expr
 	{
 		$$ = reduceFilter($1, $2, $3)
 	}
