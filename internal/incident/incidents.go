@@ -76,17 +76,17 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 
 				g.Go(func() error {
 					chunkLen := len(bulk)
-					objectIds := make([]types.Binary, chunkLen)
-					incidentIds := make([]int64, chunkLen)
+					objectIds := make([]types.Binary, 0, chunkLen)
+					incidentIds := make([]int64, 0, chunkLen)
 					incidentsById := make(map[int64]*Incident, chunkLen)
 					incidentsByObjId := make(map[string]*Incident, chunkLen)
 
-					for k, i := range bulk {
+					for _, i := range bulk {
 						incidentsById[i.Id] = i
 						incidentsByObjId[i.ObjectID.String()] = i
 
-						objectIds[k] = i.ObjectID
-						incidentIds[k] = i.Id
+						objectIds = append(objectIds, i.ObjectID)
+						incidentIds = append(incidentIds, i.Id)
 					}
 
 					// Restore all incident objects matching the given object ids
