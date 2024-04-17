@@ -90,6 +90,7 @@ func ForEachRow[Row, Id any](ctx context.Context, db *icingadb.DB, idColumn stri
 	if err := sem.Acquire(ctx, 1); err != nil {
 		return errors.Wrapf(err, "cannot acquire semaphore for table %q", table)
 	}
+	defer sem.Release(1)
 
 	query := fmt.Sprintf("%s WHERE %q IN (?)", db.BuildSelectStmt(subject, subject), idColumn)
 	stmt, args, err := sqlx.In(query, ids)
