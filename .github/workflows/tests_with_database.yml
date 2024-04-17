@@ -1,0 +1,62 @@
+name: Tests with database
+
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+
+jobs:
+  postgresql:
+    name: PostgreSQL ${{ matrix.version }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["9.6", "10", "11", "12", "13", "14", "15", "latest"]
+
+    env:
+      NOTIFICATIONS_TESTS_DB_TYPE: pgsql
+      NOTIFICATIONS_TESTS_DB: notifications
+      NOTIFICATIONS_TESTS_DB_USER: postgres
+      NOTIFICATIONS_TESTS_DB_PASSWORD: notifications
+      NOTIFICATIONS_TESTS_DB_HOST: 127.0.0.1
+      NOTIFICATIONS_TESTS_DB_PORT: 5432
+
+    services:
+      postgres:
+        image: postgres:${{ matrix.version }}
+        env:
+          POSTGRES_PASSWORD: ${{ env.NOTIFICATIONS_TESTS_DB_PASSWORD }}
+          POSTGRES_DB: ${{ env.NOTIFICATIONS_TESTS_DB }}
+        # Wait until postgres becomes ready
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: stable
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Importing Schema
+        env:
+          PGPASSWORD: ${{ env.NOTIFICATIONS_TESTS_DB_PASSWORD }}
+        run: |
+          psql -U postgres -w -h 127.0.0.1 -d ${{ env.NOTIFICATIONS_TESTS_DB }} < ${{ github.workspace }}/schema/pgsql/schema.sql
+
+      - name: Download dependencies
+        run: go get -v -t -d ./...
+
+      - name: Run tests
+        timeout-minutes: 10
+        run: go test -v -timeout 5m ./...
