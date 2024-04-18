@@ -5,7 +5,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"golang.org/x/exp/slices"
+	"slices"
 )
 
 func (r *RuntimeConfig) fetchContactAddresses(ctx context.Context, tx *sqlx.Tx) error {
