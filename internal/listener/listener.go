@@ -116,35 +116,15 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if len(ev.Tags) == 0 {
-		abort(http.StatusBadRequest, &ev, "ignoring invalid event: tags cannot be empty")
-		return
-	}
-
 	ev.Time = time.Now()
 	ev.SourceId = source.ID
+	if ev.Type == "" {
+		ev.Type = event.TypeState
+	}
 
-	if ev.Severity == event.SeverityNone && ev.Type == "" {
-		abort(http.StatusBadRequest, &ev, "ignoring invalid event: must set 'type' or 'severity'")
+	if err := ev.Validate(); err != nil {
+		abort(http.StatusBadRequest, &ev, err.Error())
 		return
-	}
-
-	if ev.Severity != event.SeverityNone {
-		if ev.Type == "" {
-			ev.Type = event.TypeState
-		} else if ev.Type != event.TypeState {
-			abort(http.StatusBadRequest, &ev,
-				"ignoring invalid event: if 'severity' is set, 'type' must not be set or set to %q", event.TypeState)
-			return
-		}
-	}
-
-	if ev.Severity == event.SeverityNone {
-		if ev.Type != event.TypeAcknowledgement {
-			// It's neither a state nor an acknowledgement event.
-			abort(http.StatusBadRequest, &ev, "received not a state/acknowledgement event, ignoring")
-			return
-		}
 	}
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
@@ -153,6 +133,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		abort(http.StatusInternalServerError, &ev, err.Error())
 		return
 	}
+
+	l.logger.Infow("Successfully processed event", zap.String("event", ev.String()))
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintln(w, "event processed successfully")
