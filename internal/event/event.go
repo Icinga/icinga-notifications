@@ -34,10 +34,51 @@ type Event struct {
 }
 
 const (
-	TypeState           = "state"
-	TypeAcknowledgement = "acknowledgement"
-	TypeInternal        = "internal"
+	TypeState                  = "state"
+	TypeAcknowledgement        = "acknowledgement"
+	TypeAcknowledgementCleared = "acknowledgement-cleared"
+	TypeInternal               = "internal"
+	TypeDowntimeRemoved        = "downtime-removed"
+	TypeDowntimeStart          = "downtime-start"
+	TypeDowntimeEnd            = "downtime-end"
+	TypeCustom                 = "custom"
+	TypeFlappingStart          = "flapping-start"
+	TypeFlappingEnd            = "flapping-end"
 )
+
+// Validate validates the current event state.
+// Returns an error if it detects a misconfigured field.
+func (e *Event) Validate() error {
+	if len(e.Tags) == 0 {
+		return fmt.Errorf("invalid event: tags must not be empty")
+	}
+
+	if e.SourceId == 0 {
+		return fmt.Errorf("invalid event: source ID must not be empty")
+	}
+
+	if e.Severity != SeverityNone && e.Type != TypeState {
+		return fmt.Errorf("invalid event: if 'severity' is set, 'type' must be set to %q", TypeState)
+	}
+
+	switch e.Type {
+	case "":
+		return fmt.Errorf("invalid event: 'type' must not be empty")
+	case TypeState,
+		TypeAcknowledgement,
+		TypeAcknowledgementCleared,
+		TypeInternal,
+		TypeDowntimeRemoved,
+		TypeDowntimeStart,
+		TypeDowntimeEnd,
+		TypeCustom,
+		TypeFlappingStart,
+		TypeFlappingEnd:
+		return nil
+	default:
+		return fmt.Errorf("invalid event: unsupported event type %q", e.Type)
+	}
+}
 
 func (e *Event) String() string {
 	return fmt.Sprintf("[time=%s type=%q severity=%s]", e.Time, e.Type, e.Severity.String())
