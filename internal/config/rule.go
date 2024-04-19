@@ -32,7 +32,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 		if ru.ObjectFilterExpr.Valid {
 			f, err := filter.Parse(ru.ObjectFilterExpr.String)
 			if err != nil {
-				ruleLogger.Warnw("ignoring rule as parsing object_filter failed", zap.Error(err))
+				ruleLogger.Warnw("Ignoring rule as parsing object_filter failed", zap.Error(err))
 				continue
 			}
 
@@ -42,7 +42,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 		ru.Escalations = make(map[int64]*rule.Escalation)
 
 		rulesByID[ru.ID] = ru
-		ruleLogger.Debugw("loaded rule config")
+		ruleLogger.Debugw("Successfully loaded rule config")
 	}
 
 	var escalationPtr *rule.Escalation
@@ -67,14 +67,14 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 
 		rule := rulesByID[escalation.RuleID]
 		if rule == nil {
-			escalationLogger.Warnw("ignoring escalation for unknown rule_id")
+			escalationLogger.Warnw("Ignoring escalation for unknown rule_id")
 			continue
 		}
 
 		if escalation.ConditionExpr.Valid {
 			cond, err := filter.Parse(escalation.ConditionExpr.String)
 			if err != nil {
-				escalationLogger.Warnw("ignoring escalation, failed to parse condition", zap.Error(err))
+				escalationLogger.Warnw("Ignoring escalation, failed to parse condition", zap.Error(err))
 				continue
 			}
 
@@ -83,7 +83,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 
 		if escalation.FallbackForID.Valid {
 			// TODO: implement fallbacks (needs extra validation: mismatching rule_id, cycles)
-			escalationLogger.Warnw("ignoring fallback escalation (not yet implemented)")
+			escalationLogger.Warnw("Ignoring fallback escalation (not yet implemented)")
 			continue
 		}
 
@@ -93,7 +93,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 
 		rule.Escalations[escalation.ID] = escalation
 		escalationsByID[escalation.ID] = escalation
-		escalationLogger.Debugw("loaded escalation config")
+		escalationLogger.Debugw("Successfully loaded escalation config")
 	}
 
 	var recipientPtr *rule.EscalationRecipient
@@ -114,10 +114,10 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 
 		escalation := escalationsByID[recipient.EscalationID]
 		if escalation == nil {
-			recipientLogger.Warnw("ignoring recipient for unknown escalation")
+			recipientLogger.Warnw("Ignoring recipient for unknown escalation")
 		} else {
 			escalation.Recipients = append(escalation.Recipients, recipient)
-			recipientLogger.Debugw("loaded escalation recipient config")
+			recipientLogger.Debugw("Successfully loaded escalation recipient config")
 		}
 	}
 
@@ -153,7 +153,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 
 			if pendingRule.TimePeriodID.Valid {
 				if p := r.TimePeriods[pendingRule.TimePeriodID.Int64]; p == nil {
-					ruleLogger.Warnw("ignoring rule with unknown timeperiod_id")
+					ruleLogger.Warnw("Ignoring rule with unknown timeperiod_id")
 					continue
 				} else {
 					pendingRule.TimePeriod = p
@@ -173,7 +173,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 						if c := r.Contacts[id]; c != nil {
 							recipient.Recipient = c
 						} else {
-							recipientLogger.Warnw("ignoring unknown escalation recipient")
+							recipientLogger.Warnw("Ignoring unknown escalation recipient")
 							escalation.Recipients[i] = nil
 						}
 					} else if recipient.GroupID.Valid {
@@ -182,7 +182,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 						if g := r.Groups[id]; g != nil {
 							recipient.Recipient = g
 						} else {
-							recipientLogger.Warnw("ignoring unknown escalation recipient")
+							recipientLogger.Warnw("Ignoring unknown escalation recipient")
 							escalation.Recipients[i] = nil
 						}
 					} else if recipient.ScheduleID.Valid {
@@ -191,11 +191,11 @@ func (r *RuntimeConfig) applyPendingRules() {
 						if s := r.Schedules[id]; s != nil {
 							recipient.Recipient = s
 						} else {
-							recipientLogger.Warnw("ignoring unknown escalation recipient")
+							recipientLogger.Warnw("Ignoring unknown escalation recipient")
 							escalation.Recipients[i] = nil
 						}
 					} else {
-						recipientLogger.Warnw("ignoring unknown escalation recipient")
+						recipientLogger.Warnw("Ignoring unknown escalation recipient")
 						escalation.Recipients[i] = nil
 					}
 				}

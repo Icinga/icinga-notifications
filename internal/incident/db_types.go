@@ -40,7 +40,7 @@ func (i *IncidentRow) Sync(ctx context.Context, tx *sqlx.Tx, db *icingadb.DB, up
 		stmt, _ := db.BuildUpsertStmt(i)
 		_, err := tx.NamedExecContext(ctx, stmt, i)
 		if err != nil {
-			return fmt.Errorf("failed to upsert incident: %s", err)
+			return fmt.Errorf("failed to upsert incident: %w", err)
 		}
 	} else {
 		incidentId, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, i, "id"), i)

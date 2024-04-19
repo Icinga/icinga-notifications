@@ -49,7 +49,7 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, tx *sqlx.Tx) error
 	for _, row := range entries {
 		p := timePeriodsById[row.TimePeriodID]
 		if p == nil {
-			r.logger.Warnw("ignoring entry for unknown timeperiod_id",
+			r.logger.Warnw("Ignoring entry for unknown timeperiod_id",
 				zap.Int64("timeperiod_entry_id", row.ID),
 				zap.Int64("timeperiod_id", row.TimePeriodID))
 			continue
@@ -64,7 +64,7 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, tx *sqlx.Tx) error
 
 		loc, err := time.LoadLocation(row.Timezone)
 		if err != nil {
-			r.logger.Warnw("ignoring time period entry with unknown timezone",
+			r.logger.Warnw("Ignoring time period entry with unknown timezone",
 				zap.Int64("timeperiod_entry_id", row.ID),
 				zap.String("timezone", row.Timezone),
 				zap.Error(err))
@@ -83,7 +83,7 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, tx *sqlx.Tx) error
 
 		err = entry.Init()
 		if err != nil {
-			r.logger.Warnw("ignoring time period entry",
+			r.logger.Warnw("Ignoring time period entry",
 				zap.Int64("timeperiod_entry_id", row.ID),
 				zap.String("rrule", entry.RecurrenceRule),
 				zap.Error(err))
@@ -92,7 +92,7 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, tx *sqlx.Tx) error
 
 		p.Entries = append(p.Entries, entry)
 
-		r.logger.Debugw("loaded time period entry",
+		r.logger.Debugw("Successfully loaded time period entry",
 			zap.String("timeperiod", p.Name),
 			zap.Time("start", entry.Start),
 			zap.Time("end", entry.End),

@@ -45,7 +45,7 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 	}
 
 	if len(to) == 0 {
-		return fmt.Errorf("contact user %s doesn't have an e-mail address", req.Contact.FullName)
+		return fmt.Errorf("contact user %s does not have an e-mail address", req.Contact.FullName)
 	}
 
 	var msg bytes.Buffer

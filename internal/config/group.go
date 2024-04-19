@@ -22,7 +22,7 @@ func (r *RuntimeConfig) fetchGroups(ctx context.Context, tx *sqlx.Tx) error {
 	for _, g := range groups {
 		groupsById[g.ID] = g
 
-		r.logger.Debugw("loaded group config",
+		r.logger.Debugw("Successfully loaded group config",
 			zap.Int64("id", g.ID),
 			zap.String("name", g.Name))
 	}
@@ -49,11 +49,11 @@ func (r *RuntimeConfig) fetchGroups(ctx context.Context, tx *sqlx.Tx) error {
 		)
 
 		if g := groupsById[m.GroupId]; g == nil {
-			memberLogger.Warnw("ignoring member for unknown contactgroup_id")
+			memberLogger.Warnw("Ignoring member for unknown contactgroup_id")
 		} else {
 			g.MemberIDs = append(g.MemberIDs, m.ContactId)
 
-			memberLogger.Debugw("loaded contact group member",
+			memberLogger.Debugw("Successfully loaded contact group member",
 				zap.String("contactgroup_name", g.Name))
 		}
 	}

@@ -88,10 +88,10 @@ func (r *RuntimeConfig) PeriodicUpdates(ctx context.Context, interval time.Durat
 	for {
 		select {
 		case <-ticker.C:
-			r.logger.Debug("periodically updating config")
+			r.logger.Debug("Periodically updating config")
 			err := r.UpdateFromDatabase(ctx)
 			if err != nil {
-				r.logger.Errorw("periodic config update failed, continuing with previous config", zap.Error(err))
+				r.logger.Errorw("Failed periodic config update, continuing with previous config", zap.Error(err))
 			}
 		case <-ctx.Done():
 			return
@@ -166,12 +166,12 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 
 	sourceIdRaw, sourceIdOk := strings.CutPrefix(user, "source-")
 	if !sourceIdOk {
-		logger.Debugw("Cannot extract source ID from HTTP basic auth username", zap.String("user-input", user))
+		logger.Debugw("Cannot extract source ID from HTTP basic auth username", zap.String("user_input", user))
 		return nil
 	}
 	sourceId, err := strconv.ParseInt(sourceIdRaw, 10, 64)
 	if err != nil {
-		logger.Debugw("Cannot convert extracted source Id to int", zap.String("user-input", user), zap.Error(err))
+		logger.Debugw("Cannot convert extracted source Id to int", zap.String("user_input", user), zap.Error(err))
 		return nil
 	}
 
@@ -201,7 +201,7 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 }
 
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
-	r.logger.Debug("fetching configuration from database")
+	r.logger.Debug("Fetching configuration from database")
 	start := time.Now()
 
 	// Reset all pending state to start from a clean state.
@@ -233,7 +233,7 @@ func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
 		}
 	}
 
-	r.logger.Debugw("fetched configuration from database", zap.Duration("took", time.Since(start)))
+	r.logger.Debugw("Fetched configuration from database", zap.Duration("took", time.Since(start)))
 
 	return nil
 }
@@ -242,7 +242,7 @@ func (r *RuntimeConfig) applyPending() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.logger.Debug("applying pending configuration")
+	r.logger.Debug("Applying pending configuration")
 	start := time.Now()
 
 	r.applyPendingChannels()
@@ -254,5 +254,5 @@ func (r *RuntimeConfig) applyPending() {
 	r.applyPendingRules()
 	r.applyPendingSources()
 
-	r.logger.Debugw("applied pending configuration", zap.Duration("took", time.Since(start)))
+	r.logger.Debugw("Successfully applied pending configuration", zap.Duration("took", time.Since(start)))
 }

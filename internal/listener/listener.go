@@ -85,7 +85,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 			msg = fmt.Sprintf(format, a...)
 		}
 
-		logger := l.logger.With(zap.Int("status-code", statusCode), zap.String("msg", msg))
+		logger := l.logger.With(zap.Int("status_code", statusCode), zap.String("msg", msg))
 		if ev != nil {
 			logger = logger.With(zap.Stringer("event", ev))
 		}
@@ -155,7 +155,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprintln(w, "event processed successfully")
+	_, _ = fmt.Fprintln(w, "Successfully processed event")
 	_, _ = fmt.Fprintln(w)
 }
 
