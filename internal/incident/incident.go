@@ -110,7 +110,7 @@ func (i *Incident) IsNotifiable(role ContactRole) bool {
 }
 
 // ProcessEvent processes the given event for the current incident in an own transaction.
-func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bool) error {
+func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	i.Lock()
 	defer i.Unlock()
 
@@ -131,7 +131,8 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 		return errors.New("can't insert event and fetch its ID")
 	}
 
-	if created {
+	isNew := i.StartedAt.Time().IsZero()
+	if isNew {
 		err = i.processIncidentOpenedEvent(ctx, tx, ev)
 		if err != nil {
 			return err
@@ -148,7 +149,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 
 	switch ev.Type {
 	case event.TypeState:
-		if !created {
+		if !isNew {
 			if err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
 				return err
 			}
