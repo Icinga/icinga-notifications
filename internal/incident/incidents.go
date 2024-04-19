@@ -145,32 +145,31 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 func GetCurrent(
 	ctx context.Context, db *icingadb.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
 	create bool,
-) (*Incident, bool, error) {
+) (*Incident, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
 
-	created := false
 	currentIncident := currentIncidents[obj]
 
 	if currentIncident == nil && create {
-		created = true
-
 		incidentLogger := logger.With(zap.String("object", obj.DisplayName()))
 		currentIncident = NewIncident(db, obj, runtimeConfig, incidentLogger)
 
 		currentIncidents[obj] = currentIncident
 	}
 
-	if !created && currentIncident != nil {
+	if currentIncident != nil {
 		currentIncident.Lock()
 		defer currentIncident.Unlock()
 
-		if err := currentIncident.restoreRecipients(ctx); err != nil {
-			return nil, false, err
+		if !currentIncident.StartedAt.Time().IsZero() {
+			if err := currentIncident.restoreRecipients(ctx); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	return currentIncident, created, nil
+	return currentIncident, nil
 }
 
 func RemoveCurrent(obj *object.Object) {
@@ -215,7 +214,7 @@ func ProcessEvent(
 	}
 
 	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
-	currentIncident, created, err := GetCurrent(
+	currentIncident, err := GetCurrent(
 		ctx,
 		db,
 		obj,
@@ -239,5 +238,5 @@ func ProcessEvent(
 		}
 	}
 
-	return currentIncident.ProcessEvent(ctx, ev, created)
+	return currentIncident.ProcessEvent(ctx, ev)
 }
