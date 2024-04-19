@@ -31,4 +31,4 @@ jobs:
         # and this very icinga-notifications are licensed under GPL-2.0.
         # https://github.com/Icinga/icingadb/blob/v1.1.1/.github/workflows/compliance/check-licenses.sh
         go-licenses check github.com/icinga/icinga-notifications/... \
-          --allowed_licenses BSD-2-Clause,BSD-3-Clause,GPL-2.0,MIT,MPL-2.0
+          --allowed_licenses BSD-2-Clause,BSD-3-Clause,GPL-2.0,ISC,MIT,MPL-2.0
