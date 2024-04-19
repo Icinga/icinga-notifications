@@ -9,21 +9,22 @@ type HistoryEventType int
 
 const (
 	HistoryEventTypeNull HistoryEventType = iota
-	SeverityChanged
-	RecipientRoleChanged
-	EscalationTriggered
-	RuleMatched
+
 	Opened
+	IncidentSeverityChanged
+	RuleMatched
+	EscalationTriggered
+	RecipientRoleChanged
 	Closed
 	Notified
 )
 
 var historyTypeByName = map[string]HistoryEventType{
-	"incident_severity_changed": SeverityChanged,
-	"recipient_role_changed":    RecipientRoleChanged,
-	"escalation_triggered":      EscalationTriggered,
-	"rule_matched":              RuleMatched,
 	"opened":                    Opened,
+	"incident_severity_changed": IncidentSeverityChanged,
+	"rule_matched":              RuleMatched,
+	"escalation_triggered":      EscalationTriggered,
+	"recipient_role_changed":    RecipientRoleChanged,
 	"closed":                    Closed,
 	"notified":                  Notified,
 }

@@ -1,5 +1,14 @@
 CREATE TYPE boolenum AS ENUM ( 'n', 'y' );
-CREATE TYPE incident_history_event_type AS ENUM ( 'incident_severity_changed', 'recipient_role_changed', 'escalation_triggered', 'rule_matched', 'opened', 'closed', 'notified' );
+CREATE TYPE incident_history_event_type AS ENUM (
+    -- Order to be honored for events with identical microsecond timestamps.
+    'opened',
+    'incident_severity_changed',
+    'rule_matched',
+    'escalation_triggered',
+    'recipient_role_changed',
+    'closed',
+    'notified'
+);
 CREATE TYPE frequency_type AS ENUM ( 'MINUTELY', 'HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY' );
 CREATE TYPE notification_state_type AS ENUM ( 'pending', 'sent', 'failed' );
 
@@ -305,3 +314,6 @@ CREATE TABLE incident_history (
     CONSTRAINT pk_incident_history PRIMARY KEY (id),
     FOREIGN KEY (incident_id, rule_escalation_id) REFERENCES incident_rule_escalation_state(incident_id, rule_escalation_id)
 );
+
+CREATE INDEX idx_incident_history_time_type ON incident_history(time, type);
+COMMENT ON INDEX idx_incident_history_time_type IS 'Incident History ordered by time/type';
