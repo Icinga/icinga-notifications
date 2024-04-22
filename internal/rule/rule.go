@@ -2,8 +2,10 @@ package rule
 
 import (
 	"github.com/icinga/icinga-notifications/internal/filter"
+	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"github.com/icinga/icingadb/pkg/types"
+	"time"
 )
 
 type Rule struct {
@@ -15,4 +17,41 @@ type Rule struct {
 	ObjectFilter     filter.Filter `db:"-"`
 	ObjectFilterExpr types.String  `db:"object_filter"`
 	Escalations      map[int64]*Escalation
+}
+
+// ContactChannels stores a set of channel IDs for each set of individual contacts.
+type ContactChannels map[*recipient.Contact]map[int64]bool
+
+// LoadFromEscalationRecipients loads recipients channel of the specified escalation to the current map.
+// You can provide this method a callback to control whether the channel of a specific contact should
+// be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
+func (ch ContactChannels) LoadFromEscalationRecipients(escalation *Escalation, t time.Time, isNotifiable func(recipient.Key) bool) {
+	for _, escalationRecipient := range escalation.Recipients {
+		ch.LoadRecipientChannel(escalationRecipient, t, isNotifiable)
+	}
+}
+
+// LoadRecipientChannel loads recipient channel to the current map.
+// You can provide this method a callback to control whether the channel of a specific contact should
+// be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
+func (ch ContactChannels) LoadRecipientChannel(er *EscalationRecipient, t time.Time, isNotifiable func(recipient.Key) bool) {
+	if isNotifiable(er.Key) {
+		for _, c := range er.Recipient.GetContactsAt(t) {
+			if ch[c] == nil {
+				ch[c] = make(map[int64]bool)
+			}
+			if er.ChannelID.Valid {
+				ch[c][er.ChannelID.Int64] = true
+			} else {
+				ch[c][c.DefaultChannelID] = true
+			}
+		}
+	}
+}
+
+// AlwaysNotifiable (checks) whether the given recipient is notifiable and returns always true.
+// This function is usually passed as an argument to ContactChannels.LoadFromEscalationRecipients whenever you do
+// not want to perform any custom actions.
+func AlwaysNotifiable(_ recipient.Key) bool {
+	return true
 }
