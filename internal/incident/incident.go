@@ -146,42 +146,34 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event, created bo
 		return errors.New("can't insert incident event to the database")
 	}
 
-	if ev.Type == event.TypeAcknowledgementSet {
-		if err = i.processAcknowledgementEvent(ctx, tx, ev); err != nil {
-			return err
+	switch ev.Type {
+	case event.TypeState:
+		if !created {
+			if err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
+				return err
+			}
 		}
 
-		if err = tx.Commit(); err != nil {
-			i.logger.Errorw("Can't commit db transaction", zap.Error(err))
-
-			return errors.New("can't commit db transaction")
-		}
-
-		return nil
-	}
-
-	if !created {
-		err := i.processSeverityChangedEvent(ctx, tx, ev)
+		// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
+		// to be checked again, these rules already matched and stay effective for the ongoing incident.
+		err = i.evaluateRules(ctx, tx, ev.ID)
 		if err != nil {
 			return err
 		}
-	}
 
-	// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
-	// to be checked again, these rules already matched and stay effective for the ongoing incident.
-	err = i.evaluateRules(ctx, tx, ev.ID)
-	if err != nil {
-		return err
-	}
+		// Re-evaluate escalations based on the newly evaluated rules.
+		escalations, err := i.evaluateEscalations(ev.Time)
+		if err != nil {
+			return err
+		}
 
-	// Re-evaluate escalations based on the newly evaluated rules.
-	escalations, err := i.evaluateEscalations(ev.Time)
-	if err != nil {
-		return err
-	}
-
-	if err := i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
-		return err
+		if err := i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
+			return err
+		}
+	case event.TypeAcknowledgementSet:
+		if err := i.processAcknowledgementEvent(ctx, tx, ev); err != nil {
+			return err
+		}
 	}
 
 	notifications, err := i.addPendingNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
@@ -566,7 +558,8 @@ func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, ch
 		return fmt.Errorf("could not find config for channel ID: %d", chID)
 	}
 
-	i.logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type), zap.Int64("channel_id", chID))
+	i.logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type),
+		zap.Int64("channel_id", chID), zap.String("event_type", ev.Type))
 
 	err := ch.Notify(contact, i, ev, daemon.Config().Icingaweb2URL)
 	if err != nil {
@@ -574,9 +567,8 @@ func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, ch
 		return err
 	}
 
-	i.logger.Infow(
-		"Successfully sent a notification via channel plugin", zap.String("type", ch.Type), zap.String("contact", contact.FullName),
-	)
+	i.logger.Infow("Successfully sent a notification via channel plugin", zap.String("type", ch.Type),
+		zap.String("contact", contact.FullName), zap.String("event_type", ev.Type))
 
 	return nil
 }
