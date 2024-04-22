@@ -235,9 +235,9 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 			return err
 		}
 
-		channels := make(contactChannels)
+		channels := make(rule.ContactChannels)
 		for _, escalation := range escalations {
-			channels.loadEscalationRecipientsChannel(escalation, i, ev.Time)
+			channels.LoadFromEscalationRecipients(escalation, ev.Time, i.isRecipientNotifiable)
 		}
 
 		notifications, err = i.addPendingNotifications(ctx, tx, ev, channels)
@@ -636,8 +636,8 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 }
 
 // getRecipientsChannel returns all the configured channels of the current incident and escalation recipients.
-func (i *Incident) getRecipientsChannel(t time.Time) contactChannels {
-	contactChs := make(contactChannels)
+func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
+	contactChs := make(rule.ContactChannels)
 	// Load all escalations recipients channels
 	for escalationID := range i.EscalationState {
 		escalation := i.runtimeConfig.GetRuleEscalation(escalationID)
@@ -645,7 +645,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) contactChannels {
 			continue
 		}
 
-		contactChs.loadEscalationRecipientsChannel(escalation, i, t)
+		contactChs.LoadFromEscalationRecipients(escalation, t, i.isRecipientNotifiable)
 	}
 
 	// Check whether all the incident recipients do have an appropriate contact channel configured.
@@ -695,6 +695,18 @@ func (i *Incident) restoreRecipients(ctx context.Context) error {
 	return nil
 }
 
+// isRecipientNotifiable checks whether the given recipient should be notified about the current incident.
+// If the specified recipient has not yet been notified of this incident, it always returns false.
+// Otherwise, the recipient role is forwarded to IsNotifiable and may or may not return true.
+func (i *Incident) isRecipientNotifiable(key recipient.Key) bool {
+	state := i.Recipients[key]
+	if state == nil {
+		return false
+	}
+
+	return i.IsNotifiable(state.Role)
+}
+
 type EscalationState struct {
 	IncidentID       int64           `db:"incident_id"`
 	RuleEscalationID int64           `db:"rule_escalation_id"`
@@ -708,32 +720,6 @@ func (e *EscalationState) TableName() string {
 
 type RecipientState struct {
 	Role ContactRole
-}
-
-// contactChannels stores a set of channel IDs for each set of individual contacts.
-type contactChannels map[*recipient.Contact]map[int64]bool
-
-// loadEscalationRecipientsChannel loads all the configured channel of all the provided escalation recipients.
-func (rct contactChannels) loadEscalationRecipientsChannel(escalation *rule.Escalation, i *Incident, t time.Time) {
-	for _, escalationRecipient := range escalation.Recipients {
-		state := i.Recipients[escalationRecipient.Key]
-		if state == nil {
-			continue
-		}
-
-		if i.IsNotifiable(state.Role) {
-			for _, c := range escalationRecipient.Recipient.GetContactsAt(t) {
-				if rct[c] == nil {
-					rct[c] = make(map[int64]bool)
-				}
-				if escalationRecipient.ChannelID.Valid {
-					rct[c][escalationRecipient.ChannelID.Int64] = true
-				} else {
-					rct[c][c.DefaultChannelID] = true
-				}
-			}
-		}
-	}
 }
 
 var (
