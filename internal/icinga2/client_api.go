@@ -455,7 +455,7 @@ func (client *Client) listenEventStream() error {
 			ev, err = client.buildDowntimeEvent(client.Ctx, respT.Downtime, true)
 			evTime = respT.Timestamp.Time()
 		case *Flapping:
-			ev, err = client.buildFlappingEvent(client.Ctx, respT.Host, respT.Service, respT.State, respT.StateType, respT.IsFlapping)
+			ev, err = client.buildFlappingEvent(client.Ctx, respT.Host, respT.Service, respT.IsFlapping)
 			evTime = respT.Timestamp.Time()
 		default:
 			err = fmt.Errorf("unsupported type %T", resp)
