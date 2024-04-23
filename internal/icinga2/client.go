@@ -218,7 +218,7 @@ func (client *Client) buildDowntimeEvent(ctx context.Context, d Downtime, startE
 }
 
 // buildFlappingEvent from the given fields.
-func (client *Client) buildFlappingEvent(ctx context.Context, host, service string, state, stateType int, isFlapping bool) (*event.Event, error) {
+func (client *Client) buildFlappingEvent(ctx context.Context, host, service string, isFlapping bool) (*event.Event, error) {
 	ev, err := client.buildCommonEvent(ctx, host, service)
 	if err != nil {
 		return nil, err

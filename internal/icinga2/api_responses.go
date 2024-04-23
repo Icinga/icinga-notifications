@@ -259,8 +259,6 @@ type Flapping struct {
 	Timestamp  UnixFloat `json:"timestamp"`
 	Host       string    `json:"host"`
 	Service    string    `json:"service"`
-	State      int       `json:"state"`
-	StateType  int       `json:"state_type"`
 	IsFlapping bool      `json:"is_flapping"`
 }
 
