@@ -33,7 +33,7 @@ func TestUnixFloat_UnmarshalJSON(t *testing.T) {
 		{
 			name:     "epoch-time",
 			jsonData: "0.0",
-			expected: UnixFloat(time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC)),
+			expected: UnixFloat(time.Time{}),
 		},
 		{
 			name:     "example-time",
@@ -173,7 +173,7 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 					LastStateChange:           UnixFloat(time.UnixMicro(1697099900637215)),
 					DowntimeDepth:             0,
 					Acknowledgement:           AcknowledgementNone,
-					AcknowledgementLastChange: UnixFloat(time.UnixMicro(0)),
+					AcknowledgementLastChange: UnixFloat(time.Time{}),
 				},
 			},
 		},
@@ -229,7 +229,7 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 					LastStateChange:           UnixFloat(time.UnixMicro(1697704135756310)),
 					DowntimeDepth:             0,
 					Acknowledgement:           AcknowledgementNone,
-					AcknowledgementLastChange: UnixFloat(time.UnixMicro(0)),
+					AcknowledgementLastChange: UnixFloat(time.Time{}),
 				},
 			},
 		},
@@ -486,14 +486,28 @@ func TestApiResponseUnmarshal(t *testing.T) {
 			},
 		},
 		{
+			name:     "downtimeended-host",
+			jsonData: `{"downtime":{"__name":"dummy-157!e5d4d4ac-615a-4995-ab8f-09d9cd9503b1","author":"icingaadmin","authoritative_zone":"","comment":"updates","config_owner":"","config_owner_hash":"","duration":0,"end_time":1697210639,"entry_time":1697207050.509957,"fixed":true,"host_name":"dummy-157","legacy_id":3,"name":"e5d4d4ac-615a-4995-ab8f-09d9cd9503b1","package":"_api","parent":"","remove_time":0.0,"scheduled_by":"","service_name":"","source_location":{"first_column":0,"first_line":1,"last_column":69,"last_line":1,"path":"/var/lib/icinga2/api/packages/_api/997346d3-374d-443f-b734-80789fd59b31/conf.d/downtimes/dummy-157!e5d4d4ac-615a-4995-ab8f-09d9cd9503b1.conf"},"start_time":1697207039,"templates":["e5d4d4ac-615a-4995-ab8f-09d9cd9503b1"],"trigger_time":1697207050.509957,"triggered_by":"","triggers":[],"type":"Downtime","version":1697207050.509971,"zone":"master"},"timestamp":1697207096.187866,"type":"DowntimeRemoved"}`,
+			expected: &DowntimeRemoved{
+				Timestamp: UnixFloat(time.UnixMicro(1697207096187866)),
+				Downtime: Downtime{
+					Host:       "dummy-157",
+					Author:     "icingaadmin",
+					Comment:    "updates",
+					RemoveTime: UnixFloat(time.Time{}),
+				},
+			},
+		},
+		{
 			name:     "downtimeremoved-host",
 			jsonData: `{"downtime":{"__name":"dummy-157!e5d4d4ac-615a-4995-ab8f-09d9cd9503b1","author":"icingaadmin","authoritative_zone":"","comment":"updates","config_owner":"","config_owner_hash":"","duration":0,"end_time":1697210639,"entry_time":1697207050.509957,"fixed":true,"host_name":"dummy-157","legacy_id":3,"name":"e5d4d4ac-615a-4995-ab8f-09d9cd9503b1","package":"_api","parent":"","remove_time":1697207096.187718,"scheduled_by":"","service_name":"","source_location":{"first_column":0,"first_line":1,"last_column":69,"last_line":1,"path":"/var/lib/icinga2/api/packages/_api/997346d3-374d-443f-b734-80789fd59b31/conf.d/downtimes/dummy-157!e5d4d4ac-615a-4995-ab8f-09d9cd9503b1.conf"},"start_time":1697207039,"templates":["e5d4d4ac-615a-4995-ab8f-09d9cd9503b1"],"trigger_time":1697207050.509957,"triggered_by":"","triggers":[],"type":"Downtime","version":1697207050.509971,"zone":"master"},"timestamp":1697207096.187866,"type":"DowntimeRemoved"}`,
 			expected: &DowntimeRemoved{
 				Timestamp: UnixFloat(time.UnixMicro(1697207096187866)),
 				Downtime: Downtime{
-					Host:    "dummy-157",
-					Author:  "icingaadmin",
-					Comment: "updates",
+					Host:       "dummy-157",
+					Author:     "icingaadmin",
+					Comment:    "updates",
+					RemoveTime: UnixFloat(time.UnixMicro(1697207096187718)),
 				},
 			},
 		},
@@ -503,10 +517,11 @@ func TestApiResponseUnmarshal(t *testing.T) {
 			expected: &DowntimeRemoved{
 				Timestamp: UnixFloat(time.UnixMicro(1697207144746333)),
 				Downtime: Downtime{
-					Host:    "docker-master",
-					Service: "http",
-					Author:  "icingaadmin",
-					Comment: "broken until Monday",
+					Host:       "docker-master",
+					Service:    "http",
+					Author:     "icingaadmin",
+					Comment:    "broken until Monday",
+					RemoveTime: UnixFloat(time.UnixMicro(1697207144746117)),
 				},
 			},
 		},
