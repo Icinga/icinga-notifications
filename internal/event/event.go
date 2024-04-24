@@ -3,6 +3,7 @@ package event
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/icingadb"
@@ -10,6 +11,9 @@ import (
 	"github.com/jmoiron/sqlx"
 	"time"
 )
+
+// ErrSuperfluousStateChange indicates a superfluous state change being ignored and stopping further processing.
+var ErrSuperfluousStateChange = errors.New("ignoring superfluous state change")
 
 // Event received of a specified Type for internal processing.
 //
