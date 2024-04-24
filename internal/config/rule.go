@@ -57,13 +57,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 
 	escalationsByID := make(map[int64]*rule.Escalation)
 	for _, escalation := range escalations {
-		escalationLogger := r.logger.With(
-			zap.Int64("id", escalation.ID),
-			zap.Int64("rule_id", escalation.RuleID),
-			zap.String("condition", escalation.ConditionExpr.String),
-			zap.String("name", escalation.NameRaw.String),
-			zap.Int64("fallback_for", escalation.FallbackForID.Int64),
-		)
+		escalationLogger := r.logger.With(zap.Inline(escalation))
 
 		rule := rulesByID[escalation.RuleID]
 		if rule == nil {
@@ -85,10 +79,6 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 			// TODO: implement fallbacks (needs extra validation: mismatching rule_id, cycles)
 			escalationLogger.Warnw("ignoring fallback escalation (not yet implemented)")
 			continue
-		}
-
-		if escalation.NameRaw.Valid {
-			escalation.Name = escalation.NameRaw.String
 		}
 
 		rule.Escalations[escalation.ID] = escalation
@@ -165,11 +155,11 @@ func (r *RuntimeConfig) applyPendingRules() {
 					recipientLogger := r.logger.With(
 						zap.Int64("id", recipient.ID),
 						zap.Int64("escalation_id", recipient.EscalationID),
-						zap.Int64("channel_id", recipient.ChannelID.Int64))
+						zap.Int64("channel_id", recipient.ChannelID.Int64),
+						zap.Inline(recipient.Key))
 
 					if recipient.ContactID.Valid {
 						id := recipient.ContactID.Int64
-						recipientLogger = recipientLogger.With(zap.Int64("contact_id", id))
 						if c := r.Contacts[id]; c != nil {
 							recipient.Recipient = c
 						} else {
@@ -178,7 +168,6 @@ func (r *RuntimeConfig) applyPendingRules() {
 						}
 					} else if recipient.GroupID.Valid {
 						id := recipient.GroupID.Int64
-						recipientLogger = recipientLogger.With(zap.Int64("contactgroup_id", id))
 						if g := r.Groups[id]; g != nil {
 							recipient.Recipient = g
 						} else {
@@ -187,7 +176,6 @@ func (r *RuntimeConfig) applyPendingRules() {
 						}
 					} else if recipient.ScheduleID.Valid {
 						id := recipient.ScheduleID.Int64
-						recipientLogger = recipientLogger.With(zap.Int64("schedule_id", id))
 						if s := r.Schedules[id]; s != nil {
 							recipient.Recipient = s
 						} else {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icingadb/pkg/types"
+	"go.uber.org/zap/zapcore"
 	"time"
 )
 
@@ -18,6 +19,23 @@ type Key struct {
 	ContactID  types.Int `db:"contact_id"`
 	GroupID    types.Int `db:"contactgroup_id"`
 	ScheduleID types.Int `db:"schedule_id"`
+}
+
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+//
+// This allows us to use `zap.Inline(Key)` or `zap.Object("recipient", Key)` wherever fine-grained
+// logging context is needed, without having to add all the individual fields ourselves each time.
+// https://pkg.go.dev/go.uber.org/zap/zapcore#ObjectMarshaler
+func (r Key) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	if r.ContactID.Valid {
+		encoder.AddInt64("contact_id", r.ContactID.Int64)
+	} else if r.GroupID.Valid {
+		encoder.AddInt64("group_id", r.GroupID.Int64)
+	} else if r.ScheduleID.Valid {
+		encoder.AddInt64("schedule_id", r.ScheduleID.Int64)
+	}
+
+	return nil
 }
 
 // MarshalText implements the encoding.TextMarshaler interface to allow JSON marshaling of map[Key]T.

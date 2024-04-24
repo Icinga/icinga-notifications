@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"go.uber.org/zap/zapcore"
 	"strings"
 	"time"
 )
@@ -11,7 +12,6 @@ import (
 type Escalation struct {
 	ID            int64          `db:"id"`
 	RuleID        int64          `db:"rule_id"`
-	Name          string         `db:"-"`
 	NameRaw       sql.NullString `db:"name"`
 	Condition     filter.Filter  `db:"-"`
 	ConditionExpr sql.NullString `db:"condition"`
@@ -21,9 +21,29 @@ type Escalation struct {
 	Recipients []*EscalationRecipient
 }
 
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+//
+// This allows us to use `zap.Inline(escalation)` or `zap.Object("rule_escalation", escalation)` wherever
+// fine-grained logging context is needed, without having to add all the individual fields ourselves each time.
+// https://pkg.go.dev/go.uber.org/zap/zapcore#ObjectMarshaler
+func (e *Escalation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddInt64("id", e.ID)
+	encoder.AddInt64("rule_id", e.RuleID)
+	encoder.AddString("name", e.DisplayName())
+
+	if e.ConditionExpr.Valid && e.ConditionExpr.String != "" {
+		encoder.AddString("condition", e.ConditionExpr.String)
+	}
+	if e.FallbackForID.Valid && e.FallbackForID.Int64 != 0 {
+		encoder.AddInt64("fallback_for", e.FallbackForID.Int64)
+	}
+
+	return nil
+}
+
 func (e *Escalation) DisplayName() string {
-	if e.Name != "" {
-		return e.Name
+	if e.NameRaw.Valid && e.NameRaw.String != "" {
+		return e.NameRaw.String
 	}
 
 	var recipients []string

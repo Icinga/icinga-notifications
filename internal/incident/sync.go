@@ -122,7 +122,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 				_, err := i.AddHistory(ctx, tx, hr, false)
 				if err != nil {
 					i.logger.Errorw(
-						"Failed to insert recipient role changed incident history", zap.String("escalation", escalation.DisplayName()),
+						"Failed to insert recipient role changed incident history", zap.Object("escalation", escalation),
 						zap.String("recipients", r.String()), zap.Error(err),
 					)
 
@@ -136,7 +136,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 		_, err := tx.NamedExecContext(ctx, stmt, cr)
 		if err != nil {
 			i.logger.Errorw(
-				"Failed to upsert incident recipient", zap.String("escalation", escalation.DisplayName()),
+				"Failed to upsert incident recipient", zap.Object("escalation", escalation),
 				zap.String("recipient", r.String()), zap.Error(err),
 			)
 
