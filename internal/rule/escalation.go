@@ -3,6 +3,7 @@ package rule
 import (
 	"database/sql"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"go.uber.org/zap/zapcore"
 	"strings"
 	"time"
 )
@@ -13,6 +14,15 @@ type Escalation struct {
 	Fallbacks     []*Escalation
 
 	Recipients []*EscalationRecipient
+}
+
+func (e *Escalation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	if err := e.Meta.MarshalLogObject(encoder); err != nil {
+		return err
+	}
+
+	encoder.AddInt64("fallback_for", e.FallbackForID.Int64)
+	return nil
 }
 
 func (e *Escalation) DisplayName() string {

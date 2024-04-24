@@ -6,6 +6,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"github.com/icinga/icingadb/pkg/types"
+	"go.uber.org/zap/zapcore"
 	"time"
 )
 
@@ -28,6 +29,19 @@ type Meta struct {
 	NameRaw       sql.NullString `db:"name"`
 	Condition     filter.Filter  `db:"-"`
 	ConditionExpr sql.NullString `db:"condition"`
+}
+
+// MarshalLogObject implements zapcore.ObjectMarshaler interface.
+//
+// This allows us to use `zap.Inline(meta)` or `zap.Object("rule_escalation", meta)` wherever fine-grained
+// logging context is needed, without having to add all the individual fields ourselves each time.
+func (m *Meta) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddInt64("id", m.ID)
+	encoder.AddInt64("rule_id", m.RuleID)
+	encoder.AddString("condition", m.ConditionExpr.String)
+	encoder.AddString("name", m.NameRaw.String)
+
+	return nil
 }
 
 // RecipientMeta provides a set of common metadata for the rule EscalationRecipient.
