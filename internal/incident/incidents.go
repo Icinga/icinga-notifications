@@ -18,9 +18,6 @@ import (
 	"time"
 )
 
-// ErrSuperfluousStateChange indicates a superfluous state change being ignored and stopping further processing.
-var ErrSuperfluousStateChange = errors.New("ignoring superfluous state change")
-
 var (
 	currentIncidents   = make(map[*object.Object]*Incident)
 	currentIncidentsMu sync.Mutex
@@ -204,7 +201,7 @@ func GetCurrentIncidents() map[int64]*Incident {
 // This function first gets this Event's object.Object and its incident.Incident. Then, after performing some safety
 // checks, it calls the Incident.ProcessEvent method.
 //
-// The returned error might be wrapped around ErrSuperfluousStateChange.
+// The returned error might be wrapped around event.ErrSuperfluousStateChange.
 func ProcessEvent(
 	ctx context.Context,
 	db *icingadb.DB,
@@ -238,7 +235,7 @@ func ProcessEvent(
 		case ev.Severity != event.SeverityOK:
 			panic(fmt.Sprintf("cannot process event %v with a non-OK state %v without a known incident", ev, ev.Severity))
 		default:
-			return fmt.Errorf("%w: ok state event from source %d", ErrSuperfluousStateChange, ev.SourceId)
+			return fmt.Errorf("%w: ok state event from source %d", event.ErrSuperfluousStateChange, ev.SourceId)
 		}
 	}
 
