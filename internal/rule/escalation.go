@@ -63,11 +63,8 @@ func (e *Escalation) TableName() string {
 }
 
 type EscalationRecipient struct {
-	ID            int64         `db:"id"`
-	EscalationID  int64         `db:"rule_escalation_id"`
-	ChannelID     sql.NullInt64 `db:"channel_id"`
-	recipient.Key `db:",inline"`
-	Recipient     recipient.Recipient
+	RecipientMeta `db:",inline"`
+	EscalationID  int64 `db:"rule_escalation_id"`
 }
 
 func (r *EscalationRecipient) TableName() string {

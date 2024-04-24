@@ -1,6 +1,7 @@
 package rule
 
 import (
+	"database/sql"
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
@@ -17,6 +18,14 @@ type Rule struct {
 	ObjectFilter     filter.Filter `db:"-"`
 	ObjectFilterExpr types.String  `db:"object_filter"`
 	Escalations      map[int64]*Escalation
+}
+
+// RecipientMeta provides a set of common metadata for the rule EscalationRecipient.
+type RecipientMeta struct {
+	ID            int64         `db:"id"`
+	ChannelID     sql.NullInt64 `db:"channel_id"`
+	recipient.Key `db:",inline"`
+	Recipient     recipient.Recipient `db:"-"`
 }
 
 // ContactChannels stores a set of channel IDs for each set of individual contacts.
