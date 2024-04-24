@@ -19,9 +19,10 @@ type Rule struct {
 	ObjectFilter     filter.Filter `db:"-"`
 	ObjectFilterExpr types.String  `db:"object_filter"`
 	Escalations      map[int64]*Escalation
+	Routes           map[int64]*Routing
 }
 
-// Meta provides a set of common metadata for the rule Escalation type.
+// Meta provides a set of common metadata for the rule Routing and Escalation types.
 type Meta struct {
 	ID            int64          `db:"id"`
 	RuleID        int64          `db:"rule_id"`
@@ -44,7 +45,7 @@ func (m *Meta) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	return nil
 }
 
-// RecipientMeta provides a set of common metadata for the rule EscalationRecipient.
+// RecipientMeta provides a set of common metadata for the rule EscalationRecipient or RoutingRecipient.
 type RecipientMeta struct {
 	ID            int64         `db:"id"`
 	ChannelID     sql.NullInt64 `db:"channel_id"`
@@ -61,6 +62,15 @@ type ContactChannels map[*recipient.Contact]map[int64]bool
 func (ch ContactChannels) LoadFromEscalationRecipients(escalation *Escalation, t time.Time, isNotifiable func(recipient.Key) bool) {
 	for _, escalationRecipient := range escalation.Recipients {
 		ch.LoadRecipientChannel(escalationRecipient.RecipientMeta, t, isNotifiable)
+	}
+}
+
+// LoadFromRoutingRecipients loads recipients channel of the specified rule routing to the current map.
+// You can provide this method a callback to control whether the channel of a specific contact should
+// be loaded, and it will skip those for whom the callback returns false. Pass IsNotifiable for default actions.
+func (ch ContactChannels) LoadFromRoutingRecipients(routing *Routing, t time.Time, isNotifiable func(recipient.Key) bool) {
+	for _, routingRecipient := range routing.Recipients {
+		ch.LoadRecipientChannel(routingRecipient.RecipientMeta, t, isNotifiable)
 	}
 }
 
