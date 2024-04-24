@@ -20,6 +20,16 @@ type Rule struct {
 	Escalations      map[int64]*Escalation
 }
 
+// Meta provides a set of common metadata for the rule Escalation type.
+type Meta struct {
+	ID            int64          `db:"id"`
+	RuleID        int64          `db:"rule_id"`
+	Name          string         `db:"-"`
+	NameRaw       sql.NullString `db:"name"`
+	Condition     filter.Filter  `db:"-"`
+	ConditionExpr sql.NullString `db:"condition"`
+}
+
 // RecipientMeta provides a set of common metadata for the rule EscalationRecipient.
 type RecipientMeta struct {
 	ID            int64         `db:"id"`

@@ -2,20 +2,14 @@ package rule
 
 import (
 	"database/sql"
-	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"strings"
 	"time"
 )
 
 type Escalation struct {
-	ID            int64          `db:"id"`
-	RuleID        int64          `db:"rule_id"`
-	Name          string         `db:"-"`
-	NameRaw       sql.NullString `db:"name"`
-	Condition     filter.Filter  `db:"-"`
-	ConditionExpr sql.NullString `db:"condition"`
-	FallbackForID sql.NullInt64  `db:"fallback_for"`
+	Meta          `db:",inline"`
+	FallbackForID sql.NullInt64 `db:"fallback_for"`
 	Fallbacks     []*Escalation
 
 	Recipients []*EscalationRecipient
