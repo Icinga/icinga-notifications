@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/icinga/icinga-notifications/pkg/rpc"
 	"github.com/icinga/icingadb/pkg/types"
 	"io"
@@ -201,15 +202,17 @@ func FormatMessage(writer io.Writer, req *NotificationRequest) {
 	}
 	_, _ = fmt.Fprintf(writer, "Object: %s\n\n", req.Object.Url)
 	_, _ = writer.Write([]byte("Tags:\n"))
-	for k, v := range req.Object.Tags {
+	utils.IterateOrderedMap(req.Object.Tags)(func(k, v string) bool {
 		_, _ = fmt.Fprintf(writer, "%s: %s\n", k, v)
-	}
+		return true
+	})
 
 	if len(req.Object.ExtraTags) > 0 {
 		_, _ = writer.Write([]byte("\nExtra Tags:\n"))
-		for k, v := range req.Object.ExtraTags {
+		utils.IterateOrderedMap(req.Object.ExtraTags)(func(k, v string) bool {
 			_, _ = fmt.Fprintf(writer, "%s: %s\n", k, v)
-		}
+			return true
+		})
 	}
 
 	_, _ = fmt.Fprintf(writer, "\nIncident: %s", req.Incident.Url)
