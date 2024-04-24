@@ -3,6 +3,7 @@ package rule
 import (
 	"database/sql"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/pkg/errors"
 	"go.uber.org/zap/zapcore"
 	"strings"
 	"time"
@@ -22,6 +23,19 @@ func (e *Escalation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	}
 
 	encoder.AddInt64("fallback_for", e.FallbackForID.Int64)
+	return nil
+}
+
+func (e *Escalation) Load() error {
+	if err := e.Meta.Load(); err != nil {
+		return err
+	}
+
+	if e.FallbackForID.Valid {
+		// TODO: implement fallbacks (needs extra validation: mismatching rule_id, cycles)
+		return errors.Errorf("fallback escalation is not yet impelemented")
+	}
+
 	return nil
 }
 

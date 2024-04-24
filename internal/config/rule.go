@@ -5,18 +5,15 @@ import (
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/utils"
+	"github.com/icinga/icingadb/pkg/icingadb"
+	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )
 
 func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
-	var rulePtr *rule.Rule
-	stmt := r.db.BuildSelectStmt(rulePtr, rulePtr)
-	r.logger.Debugf("Executing query %q", stmt)
-
-	var rules []*rule.Rule
-	if err := tx.SelectContext(ctx, &rules, stmt); err != nil {
-		r.logger.Errorln(err)
+	rules, err := fetchRows[rule.Rule](ctx, r.db, tx, r.logger)
+	if err != nil {
 		return err
 	}
 
@@ -40,55 +37,29 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 		}
 
 		ru.Escalations = make(map[int64]*rule.Escalation)
+		ru.Routes = make(map[int64]*rule.Routing)
 
 		rulesByID[ru.ID] = ru
 		ruleLogger.Debugw("loaded rule config")
 	}
 
-	var escalationPtr *rule.Escalation
-	stmt = r.db.BuildSelectStmt(escalationPtr, escalationPtr)
-	r.logger.Debugf("Executing query %q", stmt)
-
-	var escalations []*rule.Escalation
-	if err := tx.SelectContext(ctx, &escalations, stmt); err != nil {
-		r.logger.Errorln(err)
+	escalations, err := fetchRows[rule.Escalation](ctx, r.db, tx, r.logger)
+	if err != nil {
 		return err
 	}
 
 	escalationsByID := make(map[int64]*rule.Escalation)
 	for _, escalation := range escalations {
-		escalationLogger := r.logger.With(
-			zap.Int64("id", escalation.ID),
-			zap.Int64("rule_id", escalation.RuleID),
-			zap.String("condition", escalation.ConditionExpr.String),
-			zap.String("name", escalation.NameRaw.String),
-			zap.Int64("fallback_for", escalation.FallbackForID.Int64),
-		)
-
+		escalationLogger := r.logger.With(zap.Inline(escalation))
 		rule := rulesByID[escalation.RuleID]
 		if rule == nil {
 			escalationLogger.Warnw("ignoring escalation for unknown rule_id")
 			continue
 		}
 
-		if escalation.ConditionExpr.Valid {
-			cond, err := filter.Parse(escalation.ConditionExpr.String)
-			if err != nil {
-				escalationLogger.Warnw("ignoring escalation, failed to parse condition", zap.Error(err))
-				continue
-			}
-
-			escalation.Condition = cond
-		}
-
-		if escalation.FallbackForID.Valid {
-			// TODO: implement fallbacks (needs extra validation: mismatching rule_id, cycles)
-			escalationLogger.Warnw("ignoring fallback escalation (not yet implemented)")
+		if err := escalation.Load(); err != nil {
+			escalationLogger.Warnw("Ignoring escalation", zap.Error(err))
 			continue
-		}
-
-		if escalation.NameRaw.Valid {
-			escalation.Name = escalation.NameRaw.String
 		}
 
 		rule.Escalations[escalation.ID] = escalation
@@ -96,13 +67,8 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 		escalationLogger.Debugw("loaded escalation config")
 	}
 
-	var recipientPtr *rule.EscalationRecipient
-	stmt = r.db.BuildSelectStmt(recipientPtr, recipientPtr)
-	r.logger.Debugf("Executing query %q", stmt)
-
-	var recipients []*rule.EscalationRecipient
-	if err := tx.SelectContext(ctx, &recipients, stmt); err != nil {
-		r.logger.Errorln(err)
+	recipients, err := fetchRows[rule.EscalationRecipient](ctx, r.db, tx, r.logger)
+	if err != nil {
 		return err
 	}
 
@@ -118,6 +84,48 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 		} else {
 			escalation.Recipients = append(escalation.Recipients, recipient)
 			recipientLogger.Debugw("loaded escalation recipient config")
+		}
+	}
+
+	routes, err := fetchRows[rule.Routing](ctx, r.db, tx, r.logger)
+	if err != nil {
+		return err
+	}
+
+	routesByID := make(map[int64]*rule.Routing)
+	for _, route := range routes {
+		routeLogger := r.logger.With(zap.Inline(route))
+		ru := rulesByID[route.RuleID]
+		if ru == nil {
+			routeLogger.Warnw("ignoring routing for unknown rule_id")
+			continue
+		}
+
+		if err := route.Load(); err != nil {
+			routeLogger.Warnw("Ignoring routing", zap.Error(err))
+			continue
+		}
+
+		ru.Routes[route.ID] = route
+		routesByID[route.ID] = route
+		routeLogger.Debugw("Successfully loaded routing config")
+	}
+
+	routingRecipients, err := fetchRows[rule.RoutingRecipient](ctx, r.db, tx, r.logger)
+	if err != nil {
+		return err
+	}
+
+	for _, recipient := range routingRecipients {
+		recipientLogger := r.logger.With(zap.Int64("id", recipient.ID), zap.Int64("routing_id", recipient.RoutingID),
+			zap.Int64("channel_id", recipient.ChannelID.Int64))
+
+		route := routesByID[recipient.RoutingID]
+		if route == nil {
+			recipientLogger.Warnw("ignoring recipient for unknown rule routing")
+		} else {
+			route.Recipients = append(route.Recipients, recipient)
+			recipientLogger.Debugw("loaded routing recipient config")
 		}
 	}
 
@@ -138,6 +146,27 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 func (r *RuntimeConfig) applyPendingRules() {
 	if r.Rules == nil {
 		r.Rules = make(map[int64]*rule.Rule)
+	}
+
+	validateRecipientKey := func(recipient *rule.RecipientMeta) bool {
+		if recipient.ContactID.Valid {
+			if c := r.Contacts[recipient.ContactID.Int64]; c != nil {
+				recipient.Recipient = c
+				return true
+			}
+		} else if recipient.GroupID.Valid {
+			if g := r.Groups[recipient.GroupID.Int64]; g != nil {
+				recipient.Recipient = g
+				return true
+			}
+		} else if recipient.ScheduleID.Valid {
+			if s := r.Schedules[recipient.ScheduleID.Int64]; s != nil {
+				recipient.Recipient = s
+				return true
+			}
+		}
+
+		return false
 	}
 
 	for id, pendingRule := range r.pending.Rules {
@@ -161,46 +190,31 @@ func (r *RuntimeConfig) applyPendingRules() {
 			}
 
 			for _, escalation := range pendingRule.Escalations {
-				for i, recipient := range escalation.Recipients {
+				for i, escalationRecipient := range escalation.Recipients {
 					recipientLogger := r.logger.With(
-						zap.Int64("id", recipient.ID),
-						zap.Int64("escalation_id", recipient.EscalationID),
-						zap.Int64("channel_id", recipient.ChannelID.Int64))
+						zap.Int64("id", escalationRecipient.ID),
+						zap.Int64("escalation_id", escalationRecipient.EscalationID),
+						zap.Int64("channel_id", escalationRecipient.ChannelID.Int64))
 
-					if recipient.ContactID.Valid {
-						id := recipient.ContactID.Int64
-						recipientLogger = recipientLogger.With(zap.Int64("contact_id", id))
-						if c := r.Contacts[id]; c != nil {
-							recipient.Recipient = c
-						} else {
-							recipientLogger.Warnw("ignoring unknown escalation recipient")
-							escalation.Recipients[i] = nil
-						}
-					} else if recipient.GroupID.Valid {
-						id := recipient.GroupID.Int64
-						recipientLogger = recipientLogger.With(zap.Int64("contactgroup_id", id))
-						if g := r.Groups[id]; g != nil {
-							recipient.Recipient = g
-						} else {
-							recipientLogger.Warnw("ignoring unknown escalation recipient")
-							escalation.Recipients[i] = nil
-						}
-					} else if recipient.ScheduleID.Valid {
-						id := recipient.ScheduleID.Int64
-						recipientLogger = recipientLogger.With(zap.Int64("schedule_id", id))
-						if s := r.Schedules[id]; s != nil {
-							recipient.Recipient = s
-						} else {
-							recipientLogger.Warnw("ignoring unknown escalation recipient")
-							escalation.Recipients[i] = nil
-						}
-					} else {
-						recipientLogger.Warnw("ignoring unknown escalation recipient")
+					if !validateRecipientKey(&escalationRecipient.RecipientMeta) {
+						recipientLogger.With(zap.Inline(escalationRecipient.Key)).Warnw("ignoring unknown escalation recipient")
 						escalation.Recipients[i] = nil
 					}
 				}
 
 				escalation.Recipients = utils.RemoveNils(escalation.Recipients)
+			}
+
+			for _, routing := range pendingRule.Routes {
+				for i, rRecipient := range routing.Recipients {
+					if !validateRecipientKey(&rRecipient.RecipientMeta) {
+						routing.Recipients[i] = nil
+						r.logger.With(zap.Int64("id", rRecipient.ID), zap.Int64("channel_id", rRecipient.ChannelID.Int64)).
+							With(zap.Inline(rRecipient.Key)).Warnw("ignoring unknown escalation recipient")
+					}
+				}
+
+				routing.Recipients = utils.RemoveNils(routing.Recipients)
 			}
 
 			if currentRule := r.Rules[id]; currentRule != nil {
@@ -212,4 +226,17 @@ func (r *RuntimeConfig) applyPendingRules() {
 	}
 
 	r.pending.Rules = nil
+}
+
+func fetchRows[Row any](ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, logger *logging.Logger) ([]*Row, error) {
+	stmt := db.BuildSelectStmt(new(Row), new(Row))
+	logger.Debugf("Executing query %q", stmt)
+
+	var rows []*Row
+	if err := tx.SelectContext(ctx, &rows, db.Rebind(stmt)); err != nil {
+		logger.Errorln(err)
+		return nil, err
+	}
+
+	return rows, nil
 }

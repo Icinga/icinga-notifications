@@ -6,6 +6,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"github.com/icinga/icingadb/pkg/types"
+	"github.com/pkg/errors"
 	"go.uber.org/zap/zapcore"
 	"time"
 )
@@ -41,6 +42,23 @@ func (m *Meta) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("rule_id", m.RuleID)
 	encoder.AddString("condition", m.ConditionExpr.String)
 	encoder.AddString("name", m.NameRaw.String)
+
+	return nil
+}
+
+func (m *Meta) Load() error {
+	if m.ConditionExpr.Valid {
+		cond, err := filter.Parse(m.ConditionExpr.String)
+		if err != nil {
+			return errors.Wrap(err, "cannot parse filter condition")
+		}
+
+		m.Condition = cond
+	}
+
+	if m.NameRaw.Valid {
+		m.Name = m.NameRaw.String
+	}
 
 	return nil
 }
