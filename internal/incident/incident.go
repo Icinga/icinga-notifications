@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/contracts"
-	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/history"
+	"github.com/icinga/icinga-notifications/internal/notifyutils"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
@@ -538,13 +538,15 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifications history.PendingNotifications) error {
 	for contact, entries := range notifications {
 		for _, notification := range entries {
-			if i.notifyContact(contact, ev, notification.ChannelID) != nil {
+			if notifyutils.NotifyContact(contact, i, i.runtimeConfig, ev, notification) != nil {
 				notification.State = history.NotificationStateFailed
 			} else {
 				notification.State = history.NotificationStateSent
 			}
 
 			notification.SentAt = types.UnixMilli(time.Now())
+			notification.Message = utils.ToDBString(ev.Message)
+
 			stmt, _ := i.db.BuildUpdateStmt(notification)
 			if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
 				i.logger.Errorw(
@@ -558,30 +560,6 @@ func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifica
 			return err
 		}
 	}
-
-	return nil
-}
-
-// notifyContact notifies the given recipient via a channel matching the given ID.
-func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, chID int64) error {
-	ch := i.runtimeConfig.Channels[chID]
-	if ch == nil {
-		i.logger.Errorw("Could not find config for channel", zap.Int64("channel_id", chID))
-
-		return fmt.Errorf("could not find config for channel ID: %d", chID)
-	}
-
-	i.logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type),
-		zap.Int64("channel_id", chID), zap.String("event_type", ev.Type))
-
-	err := ch.Notify(contact, i, ev, daemon.Config().Icingaweb2URL)
-	if err != nil {
-		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
-		return err
-	}
-
-	i.logger.Infow("Successfully sent a notification via channel plugin", zap.String("type", ch.Type),
-		zap.String("contact", contact.FullName), zap.String("event_type", ev.Type))
 
 	return nil
 }
