@@ -2,12 +2,12 @@ package channel
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"net/url"
 )
@@ -143,7 +143,7 @@ func (c *Channel) Restart() {
 }
 
 // Notify prepares and sends the notification request, returns a non-error on fails, nil on success
-func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *event.Event, icingaweb2Url string) error {
+func (c *Channel) Notify(contact *recipient.Contact, notifyCtx contracts.NotifyContext, ev *event.Event, icingaweb2Url string) error {
 	p := c.getPlugin()
 	if p == nil {
 		return errors.New("plugin could not be started")
@@ -154,10 +154,7 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
 	}
 
-	baseUrl, _ := url.Parse(icingaweb2Url)
-	incidentUrl := baseUrl.JoinPath("/notifications/incident")
-	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID())
-	object := i.IncidentObject()
+	object := notifyCtx.GetObject()
 
 	req := &plugin.NotificationRequest{
 		Contact: contactStruct,
@@ -167,17 +164,29 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 			Tags:      object.Tags,
 			ExtraTags: object.ExtraTags,
 		},
-		Incident: &plugin.Incident{
-			Id:       i.ID(),
-			Url:      incidentUrl.String(),
-			Severity: i.SeverityString(),
-		},
 		Event: &plugin.Event{
 			Time:     ev.Time,
 			Type:     ev.Type,
 			Username: ev.Username,
 			Message:  ev.Message,
 		},
+	}
+
+	i, ok := notifyCtx.(contracts.Incident)
+	if !ok && ev.Type == event.TypeState {
+		return errors.New("cannot send state notification without an incident")
+	}
+
+	if ok {
+		baseUrl, _ := url.Parse(icingaweb2Url)
+		incidentUrl := baseUrl.JoinPath("/notifications/incident")
+		incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID())
+
+		req.Incident = &plugin.Incident{
+			Id:       i.ID(),
+			Url:      incidentUrl.String(),
+			Severity: i.SeverityString(),
+		}
 	}
 
 	return p.SendNotification(req)
