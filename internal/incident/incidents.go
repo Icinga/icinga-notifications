@@ -100,7 +100,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, runtimeConfig *conf
 						i.RuntimeConfig.RLock()
 						defer i.RuntimeConfig.RUnlock()
 
-						escalation := i.RuntimeConfig.GetRuleEscalation(state.RuleEscalationID)
+						escalation := i.RuntimeConfig.GetRuleEntry(state.RuleEscalationID)
 						if escalation != nil {
 							i.Rules[escalation.RuleID] = struct{}{}
 						}
