@@ -8,6 +8,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/history"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
@@ -224,7 +225,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		return
 	}
 
-	var notifications []*NotificationEntry
+	notifications := make(history.PendingNotifications)
 	ctx := context.Background()
 	err = utils.RunInTx(ctx, i.db, func(tx *sqlx.Tx) error {
 		err := ev.Sync(ctx, tx, i.db, i.Object.ID)
@@ -285,7 +286,6 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		Type:        IncidentSeverityChanged,
 		NewSeverity: newSeverity,
 		OldSeverity: oldSeverity,
-		Message:     utils.ToDBString(ev.Message),
 	}
 
 	if err := hr.Persist(ctx, i.db, tx, false); err != nil {
@@ -345,7 +345,6 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 		Time:        types.UnixMilli(ev.Time),
 		EventID:     utils.ToDBInt(ev.ID),
 		NewSeverity: i.Severity,
-		Message:     utils.ToDBString(ev.Message),
 	}
 
 	if err := hr.Persist(ctx, i.db, tx, false); err != nil {
@@ -536,23 +535,23 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 
 // notifyContacts executes all the given pending notifications of the current incident.
 // Returns error on database failure or if the provided context is cancelled.
-func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifications []*NotificationEntry) error {
-	for _, notification := range notifications {
-		contact := i.runtimeConfig.Contacts[notification.ContactID]
+func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifications history.PendingNotifications) error {
+	for contact, entries := range notifications {
+		for _, notification := range entries {
+			if i.notifyContact(contact, ev, notification.ChannelID) != nil {
+				notification.State = history.NotificationStateFailed
+			} else {
+				notification.State = history.NotificationStateSent
+			}
 
-		if i.notifyContact(contact, ev, notification.ChannelID) != nil {
-			notification.State = NotificationStateFailed
-		} else {
-			notification.State = NotificationStateSent
-		}
-
-		notification.SentAt = types.UnixMilli(time.Now())
-		stmt, _ := i.db.BuildUpdateStmt(notification)
-		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
-			i.logger.Errorw(
-				"Failed to update contact notified incident history", zap.String("contact", contact.String()),
-				zap.Error(err),
-			)
+			notification.SentAt = types.UnixMilli(time.Now())
+			stmt, _ := i.db.BuildUpdateStmt(notification)
+			if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
+				i.logger.Errorw(
+					"Failed to update contact notified incident history", zap.String("contact", contact.String()),
+					zap.Error(err),
+				)
+			}
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -623,7 +622,6 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 		Time:             types.UnixMilli(time.Now()),
 		NewRecipientRole: newRole,
 		OldRecipientRole: oldRole,
-		Message:          utils.ToDBString(ev.Message),
 	}
 
 	if err := hr.Persist(ctx, i.db, tx, false); err != nil {

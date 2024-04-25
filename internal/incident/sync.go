@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/history"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/utils"
@@ -138,35 +139,32 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 // addPendingNotifications inserts pending notification incident history of the given recipients.
 func (i *Incident) addPendingNotifications(
 	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
-) ([]*NotificationEntry, error) {
-	var notifications []*NotificationEntry
-	for contact, channels := range contactChannels {
-		for chID := range channels {
-			hr := &HistoryRow{
-				IncidentID:        i.Id,
-				Key:               recipient.ToKey(contact),
-				EventID:           utils.ToDBInt(ev.ID),
-				Time:              types.UnixMilli(time.Now()),
-				Type:              Notified,
-				ChannelID:         utils.ToDBInt(chID),
-				NotificationState: NotificationStatePending,
-			}
+) (history.PendingNotifications, error) {
+	notifications, err := history.AddPendingNotifications(ctx, i.db, tx, contactChannels, func(n *history.NotificationHistory) {
+		n.IncidentID = utils.ToDBInt(i.Id)
+	})
+	if err != nil {
+		i.logger.Errorw("Failed to insert pending notification histories", zap.Error(err))
+		return nil, err
+	}
 
-			if err := hr.Persist(ctx, i.db, tx, true); err != nil {
+	for contact, entries := range notifications {
+		for _, notification := range entries {
+			hr := &HistoryRow{
+				IncidentID:            i.Id,
+				Key:                   recipient.ToKey(contact),
+				EventID:               utils.ToDBInt(ev.ID),
+				Time:                  types.UnixMilli(time.Now()),
+				Type:                  Notified,
+				NotificationHistoryID: utils.ToDBInt(notification.HistoryRowID),
+			}
+			if err := hr.Persist(ctx, i.db, tx, false); err != nil {
 				i.logger.Errorw(
 					"Failed to insert contact pending notification incident history",
-					zap.String("contact", contact.String()), zap.Error(err),
-				)
+					zap.String("contact", contact.String()), zap.Error(err))
 
 				return nil, errors.New("can't insert contact pending notification incident history")
 			}
-
-			notifications = append(notifications, &NotificationEntry{
-				HistoryRowID: hr.ID,
-				ContactID:    contact.ID,
-				State:        NotificationStatePending,
-				ChannelID:    chID,
-			})
 		}
 	}
 
