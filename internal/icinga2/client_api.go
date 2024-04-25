@@ -449,9 +449,23 @@ func (client *Client) listenEventStream() error {
 			ev, err = client.buildDowntimeEvent(client.Ctx, respT.Downtime, false)
 			evTime = respT.Timestamp.Time()
 		case *DowntimeStarted:
+			if !respT.Downtime.IsFixed {
+				// This may never happen, but Icinga 2 does the same thing, and we need to ignore the start
+				// event for flexible downtime, as there will definitely be a triggered event for it.
+				client.Logger.Debugf("Skipping flexible downtime start event, %#v", respT)
+				continue
+			}
+
 			ev, err = client.buildDowntimeEvent(client.Ctx, respT.Downtime, true)
 			evTime = respT.Timestamp.Time()
 		case *DowntimeTriggered:
+			if respT.Downtime.IsFixed {
+				// Fixed downtimes generate two events (start, triggered), the latter applies here and must
+				// be ignored, since we're going to process its start event to avoid duplicated notifications.
+				client.Logger.Debugf("Skipping fixed downtime triggered event, %#v", respT)
+				continue
+			}
+
 			ev, err = client.buildDowntimeEvent(client.Ctx, respT.Downtime, true)
 			evTime = respT.Timestamp.Time()
 		case *Flapping:
