@@ -284,6 +284,7 @@ CREATE TABLE rule (
     timeperiod_id bigint,
     source_id bigint NOT NULL, -- the source this rule belongs to
     object_filter text,
+    type enum('escalation', 'routing') NOT NULL,
 
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
@@ -295,7 +296,7 @@ CREATE TABLE rule (
 
 CREATE INDEX idx_rule_changed_at ON rule(changed_at);
 
-CREATE TABLE rule_escalation (
+CREATE TABLE rule_entry (
     id bigint NOT NULL AUTO_INCREMENT,
     rule_id bigint NOT NULL,
     position integer,
@@ -306,23 +307,23 @@ CREATE TABLE rule_escalation (
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
 
-    CONSTRAINT pk_rule_escalation PRIMARY KEY (id),
+    CONSTRAINT pk_rule_entry PRIMARY KEY (id),
 
     -- Each position in an escalation can only be used once.
     -- Column position must be NULLed for deletion via "deleted = 'y'"
-    CONSTRAINT uk_rule_escalation_rule_id_position UNIQUE (rule_id, position),
+    CONSTRAINT uk_rule_entry_rule_id_position UNIQUE (rule_id, position),
 
-    CONSTRAINT ck_rule_escalation_not_both_condition_and_fallback_for CHECK (NOT (`condition` IS NOT NULL AND fallback_for IS NOT NULL)),
-    CONSTRAINT ck_rule_escalation_non_deleted_needs_position CHECK (deleted = 'y' OR position IS NOT NULL),
-    CONSTRAINT fk_rule_escalation_rule FOREIGN KEY (rule_id) REFERENCES rule(id),
-    CONSTRAINT fk_rule_escalation_rule_escalation FOREIGN KEY (fallback_for) REFERENCES rule_escalation(id)
+    CONSTRAINT ck_rule_entry_not_both_condition_and_fallback_for CHECK (NOT (`condition` IS NOT NULL AND fallback_for IS NOT NULL)),
+    CONSTRAINT ck_rule_entry_non_deleted_needs_position CHECK (deleted = 'y' OR position IS NOT NULL),
+    CONSTRAINT fk_rule_entry_rule FOREIGN KEY (rule_id) REFERENCES rule(id),
+    CONSTRAINT fk_rule_entry_rule_entry FOREIGN KEY (fallback_for) REFERENCES rule_entry(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-CREATE INDEX idx_rule_escalation_changed_at ON rule_escalation(changed_at);
+CREATE INDEX idx_rule_entry_changed_at ON rule_entry(changed_at);
 
-CREATE TABLE rule_escalation_recipient (
+CREATE TABLE rule_entry_recipient (
     id bigint NOT NULL AUTO_INCREMENT,
-    rule_escalation_id bigint NOT NULL,
+    rule_entry_id bigint NOT NULL,
     contact_id bigint,
     contactgroup_id bigint,
     schedule_id bigint,
@@ -331,16 +332,16 @@ CREATE TABLE rule_escalation_recipient (
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
 
-    CONSTRAINT pk_rule_escalation_recipient PRIMARY KEY (id),
-    CONSTRAINT ck_rule_escalation_recipient_has_exactly_one_recipient CHECK (if(contact_id IS NULL, 0, 1) + if(contactgroup_id IS NULL, 0, 1) + if(schedule_id IS NULL, 0, 1) = 1),
-    CONSTRAINT fk_rule_escalation_recipient_rule_escalation FOREIGN KEY (rule_escalation_id) REFERENCES rule_escalation(id),
-    CONSTRAINT fk_rule_escalation_recipient_contact FOREIGN KEY (contact_id) REFERENCES contact(id),
-    CONSTRAINT fk_rule_escalation_recipient_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
-    CONSTRAINT fk_rule_escalation_recipient_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id),
-    CONSTRAINT fk_rule_escalation_recipient_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
+    CONSTRAINT pk_rule_entry_recipient PRIMARY KEY (id),
+    CONSTRAINT ck_rule_entry_recipient_has_exactly_one_recipient CHECK (if(contact_id IS NULL, 0, 1) + if(contactgroup_id IS NULL, 0, 1) + if(schedule_id IS NULL, 0, 1) = 1),
+    CONSTRAINT fk_rule_entry_recipient_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id),
+    CONSTRAINT fk_rule_entry_recipient_contact FOREIGN KEY (contact_id) REFERENCES contact(id),
+    CONSTRAINT fk_rule_entry_recipient_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
+    CONSTRAINT fk_rule_entry_recipient_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id),
+    CONSTRAINT fk_rule_entry_recipient_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-CREATE INDEX idx_rule_escalation_recipient_changed_at ON rule_escalation_recipient(changed_at);
+CREATE INDEX idx_rule_entry_recipient_changed_at ON rule_entry_recipient(changed_at);
 
 CREATE TABLE incident (
     id bigint NOT NULL AUTO_INCREMENT,
@@ -353,15 +354,6 @@ CREATE TABLE incident (
     CONSTRAINT pk_incident PRIMARY KEY (id),
     CONSTRAINT ck_incident_severity_notnull CHECK (severity IS NOT NULL),
     CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
-
-CREATE TABLE incident_event (
-    incident_id bigint NOT NULL,
-    event_id bigint NOT NULL,
-
-    CONSTRAINT pk_incident_event PRIMARY KEY (incident_id, event_id),
-    CONSTRAINT fk_incident_event_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
-    CONSTRAINT fk_incident_event_event FOREIGN KEY (event_id) REFERENCES event(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE incident_contact (
@@ -392,28 +384,50 @@ CREATE TABLE incident_rule (
     CONSTRAINT fk_incident_rule_rule FOREIGN KEY (rule_id) REFERENCES rule(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-CREATE TABLE incident_rule_escalation_state (
+CREATE TABLE incident_rule_entry_state (
     incident_id bigint NOT NULL,
-    rule_escalation_id bigint NOT NULL,
+    rule_entry_id bigint NOT NULL,
     triggered_at bigint NOT NULL,
 
-    CONSTRAINT pk_incident_rule_escalation_state PRIMARY KEY (incident_id, rule_escalation_id),
-    CONSTRAINT fk_incident_rule_escalation_state_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
-    CONSTRAINT fk_incident_rule_escalation_state_rule_escalation FOREIGN KEY (rule_escalation_id) REFERENCES rule_escalation(id)
+    CONSTRAINT pk_incident_rule_entry_state PRIMARY KEY (incident_id, rule_entry_id),
+    CONSTRAINT fk_incident_rule_entry_state_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
+    CONSTRAINT fk_incident_rule_entry_state_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE notification_history (
+    id bigint NOT NULL AUTO_INCREMENT,
+    incident_id bigint,
+    rule_entry_id bigint,
+    contact_id bigint,
+    contactgroup_id bigint,
+    schedule_id bigint,
+    channel_id bigint,
+    time bigint NOT NULL,
+    notification_state enum('suppressed', 'pending', 'sent', 'failed'),
+    sent_at bigint,
+    message mediumtext,
+
+    CONSTRAINT pk_notification_history PRIMARY KEY (id),
+    CONSTRAINT fk_notification_history_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
+    CONSTRAINT fk_notification_history_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id),
+    CONSTRAINT fk_notification_history_contact FOREIGN KEY (contact_id) REFERENCES contact(id),
+    CONSTRAINT fk_notification_history_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
+    CONSTRAINT fk_notification_history_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id),
+    CONSTRAINT fk_notification_history_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE incident_history (
-    id bigint NOT NULL AUTO_INCREMENT,
+    id bigint NOT NULL AUTO_INCREMENT PRIMARY KEY,
     incident_id bigint NOT NULL,
-    rule_escalation_id bigint,
+    rule_entry_id bigint,
     event_id bigint,
     contact_id bigint,
     contactgroup_id bigint,
     schedule_id bigint,
     rule_id bigint,
-    channel_id bigint,
+    notification_history_id bigint,
     time bigint NOT NULL,
-    message mediumtext,
+    message mediumtext, -- Contains the (un)mute reason of an incident and is only set if type is also set to `mute`.
     -- Order to be honored for events with identical millisecond timestamps.
     -- NOT NULL is enforced via CHECK not to default to 'opened'
     type enum('opened', 'muted', 'unmuted', 'incident_severity_changed', 'rule_matched', 'escalation_triggered', 'recipient_role_changed', 'closed', 'notified'),
@@ -421,20 +435,17 @@ CREATE TABLE incident_history (
     old_severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg'),
     new_recipient_role enum('recipient', 'subscriber', 'manager'),
     old_recipient_role enum('recipient', 'subscriber', 'manager'),
-    notification_state enum('suppressed', 'pending', 'sent', 'failed'),
-    sent_at bigint,
 
-    CONSTRAINT pk_incident_history PRIMARY KEY (id),
     CONSTRAINT ck_incident_history_type_notnull CHECK (type IS NOT NULL),
-    CONSTRAINT fk_incident_history_incident_rule_escalation_state FOREIGN KEY (incident_id, rule_escalation_id) REFERENCES incident_rule_escalation_state(incident_id, rule_escalation_id),
+    CONSTRAINT fk_incident_history_incident_rule_entry_state FOREIGN KEY (incident_id, rule_entry_id) REFERENCES incident_rule_entry_state(incident_id, rule_entry_id),
     CONSTRAINT fk_incident_history_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
-    CONSTRAINT fk_incident_history_rule_escalation FOREIGN KEY (rule_escalation_id) REFERENCES rule_escalation(id),
+    CONSTRAINT fk_incident_history_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id),
     CONSTRAINT fk_incident_history_event FOREIGN KEY (event_id) REFERENCES event(id),
     CONSTRAINT fk_incident_history_contact FOREIGN KEY (contact_id) REFERENCES contact(id),
     CONSTRAINT fk_incident_history_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
     CONSTRAINT fk_incident_history_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id),
     CONSTRAINT fk_incident_history_rule FOREIGN KEY (rule_id) REFERENCES rule(id),
-    CONSTRAINT fk_incident_history_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
+    CONSTRAINT fk_incident_history_notification_history FOREIGN KEY (notification_history_id) REFERENCES notification_history(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_incident_history_time_type ON incident_history(time, type) COMMENT 'Incident History ordered by time/type';

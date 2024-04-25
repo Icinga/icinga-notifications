@@ -63,9 +63,9 @@ func (i *Incident) AddEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) e
 	return err
 }
 
-// AddRecipient adds recipient from the given *rule.Escalation to this incident.
+// AddRecipient adds recipient from the given *rule.Entry to this incident.
 // Syncs also all the recipients with the database and returns an error on db failure.
-func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation, eventId int64) error {
+func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *rule.Entry, eventId int64) error {
 	newRole := RoleRecipient
 	if i.HasManager() {
 		newRole = RoleSubscriber

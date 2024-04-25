@@ -6,6 +6,8 @@ import (
 	"go.uber.org/zap"
 	"slices"
 	"time"
+
+	"github.com/icinga/icinga-notifications/internal/filter"
 )
 
 // SourceRuleVersion for SourceRulesInfo, consisting of two numbers, one static and one incrementable.
@@ -89,7 +91,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 				newElement.TimePeriod = tp
 			}
 
-			newElement.Escalations = make(map[int64]*rule.Escalation)
+			newElement.Entries = make(map[int64]*rule.Entry)
 
 			addToRulesBySource(newElement)
 
@@ -142,17 +144,17 @@ func (r *RuntimeConfig) applyPendingRules() {
 
 	incrementalApplyPending(
 		r,
-		&r.ruleEscalations, &r.configChange.ruleEscalations,
-		func(newElement *rule.Escalation) error {
+		&r.ruleEntries, &r.configChange.ruleEntries,
+		func(newElement *rule.Entry) error {
 			elementRule, ok := r.Rules[newElement.RuleID]
 			if !ok {
 				return fmt.Errorf("rule escalation refers unknown rule %d", newElement.RuleID)
 			}
 
-			elementRule.Escalations[newElement.ID] = newElement
+			elementRule.Entries[newElement.ID] = newElement
 			return nil
 		},
-		func(curElement, update *rule.Escalation) error {
+		func(curElement, update *rule.Entry) error {
 			if curElement.RuleID != update.RuleID {
 				return errRemoveAndAddInstead
 			}
@@ -166,41 +168,41 @@ func (r *RuntimeConfig) applyPendingRules() {
 
 			return nil
 		},
-		func(delElement *rule.Escalation) error {
+		func(delElement *rule.Entry) error {
 			elementRule, ok := r.Rules[delElement.RuleID]
 			if !ok {
 				return nil
 			}
 
-			delete(elementRule.Escalations, delElement.ID)
+			delete(elementRule.Entries, delElement.ID)
 			return nil
 		})
 
 	incrementalApplyPending(
 		r,
-		&r.ruleEscalationRecipients, &r.configChange.ruleEscalationRecipients,
-		func(newElement *rule.EscalationRecipient) error {
+		&r.ruleEntryRecipients, &r.configChange.ruleEntryRecipients,
+		func(newElement *rule.EntryRecipient) error {
 			newElement.Recipient = r.GetRecipient(newElement.Key)
 			if newElement.Recipient == nil {
 				return fmt.Errorf("rule escalation recipient is missing or unknown")
 			}
 
-			escalation := r.GetRuleEscalation(newElement.EscalationID)
+			escalation := r.GetRuleEntry(newElement.EntryID)
 			if escalation == nil {
-				return fmt.Errorf("rule escalation recipient refers to unknown escalation %d", newElement.EscalationID)
+				return fmt.Errorf("rule escalation recipient refers to unknown escalation %d", newElement.EntryID)
 			}
 			escalation.Recipients = append(escalation.Recipients, newElement)
 
 			return nil
 		},
 		nil,
-		func(delElement *rule.EscalationRecipient) error {
-			escalation := r.GetRuleEscalation(delElement.EscalationID)
+		func(delElement *rule.EntryRecipient) error {
+			escalation := r.GetRuleEntry(delElement.EntryID)
 			if escalation == nil {
 				return nil
 			}
 
-			escalation.Recipients = slices.DeleteFunc(escalation.Recipients, func(recipient *rule.EscalationRecipient) bool {
+			escalation.Recipients = slices.DeleteFunc(escalation.Recipients, func(recipient *rule.EntryRecipient) bool {
 				return recipient.ID == delElement.ID
 			})
 			return nil
@@ -222,7 +224,7 @@ type EvalOptions struct {
 	//
 	// Note that if you skip the evaluation of an entry using this callback, the OnFilterMatch callback
 	// will not be triggered for that entry, even if its filter would have matched on the filterable object.
-	OnPreEvaluate func(*rule.Escalation) bool
+	OnPreEvaluate func(*rule.Entry) bool
 
 	// OnError is called when an error occurs during the filter evaluation.
 	//
@@ -233,7 +235,7 @@ type EvalOptions struct {
 	//
 	// Note that if you choose to abort the evaluation by returning "false", the OnAllConfigEvaluated callback
 	// will not be triggered, as the evaluation did not complete successfully.
-	OnError func(*rule.Escalation, error) bool
+	OnError func(*rule.Entry, error) bool
 
 	// OnFilterMatch is called when the filter for an entry matches successfully.
 	//
@@ -243,7 +245,7 @@ type EvalOptions struct {
 	//
 	// Note that if you return an error from this callback, the OnAllConfigEvaluated callback will not be triggered,
 	// as the evaluation did not complete successfully.
-	OnFilterMatch func(*rule.Escalation) error
+	OnFilterMatch func(*rule.Entry) error
 
 	// OnAllConfigEvaluated is called after all configured entries have been evaluated.
 	//
@@ -260,7 +262,7 @@ type EvalOptions struct {
 //
 // This type is used to store the results of evaluating rule.Escalation entries against a filterable object.
 // It allows for efficient lookups and ensures that each entry is unique based on its ID.
-type RuleEntries map[int64]*rule.Escalation
+type RuleEntries map[int64]*rule.Entry
 
 // Evaluate evaluates the rule.Escalation entries against the provided filterable object.
 //
@@ -271,7 +273,7 @@ type RuleEntries map[int64]*rule.Escalation
 // If an error occurs during the evaluation of an entry, the OnError callback is triggered (if provided).
 // If this callback returns "false", the evaluation is aborted prematurely, and the error is returned.
 // Otherwise, the evaluation continues with the remaining entries.
-func (re RuleEntries) Evaluate(res Resources, filterable *rule.EscalationFilter, rules map[int64]struct{}, opts EvalOptions) error {
+func (re RuleEntries) Evaluate(res Resources, filterable filter.Filterable, rules map[int64]struct{}, opts EvalOptions) error {
 	retryAfter := rule.RetryNever
 
 	for ruleID := range rules {
@@ -281,7 +283,7 @@ func (re RuleEntries) Evaluate(res Resources, filterable *rule.EscalationFilter,
 			continue
 		}
 
-		for _, entry := range r.Escalations {
+		for _, entry := range r.Entries {
 			if opts.OnPreEvaluate != nil && !opts.OnPreEvaluate(entry) {
 				continue
 			}
@@ -290,10 +292,10 @@ func (re RuleEntries) Evaluate(res Resources, filterable *rule.EscalationFilter,
 				if opts.OnError != nil && !opts.OnError(entry, err) {
 					return err
 				}
-			} else if !matched {
-				incidentAgeFilter := filterable.ReevaluateAfter(entry.Condition)
+			} else if esFilter, ok := filterable.(*rule.EscalationFilter); ok && !matched {
+				incidentAgeFilter := esFilter.ReevaluateAfter(entry.Condition)
 				retryAfter = min(retryAfter, incidentAgeFilter)
-			} else {
+			} else if matched {
 				if opts.OnFilterMatch != nil {
 					if err := opts.OnFilterMatch(entry); err != nil {
 						return err

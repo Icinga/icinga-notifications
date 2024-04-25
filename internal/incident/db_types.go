@@ -67,7 +67,7 @@ func (r *RuleRow) TableName() string {
 type HistoryRow struct {
 	ID                int64     `db:"id"`
 	IncidentID        int64     `db:"incident_id"`
-	RuleEscalationID  types.Int `db:"rule_escalation_id"`
+	RuleEntryID       types.Int `db:"rule_entry_id"`
 	EventID           types.Int `db:"event_id"`
 	recipient.Key     `db:",inline"`
 	RuleID            types.Int         `db:"rule_id"`

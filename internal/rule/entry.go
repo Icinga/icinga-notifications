@@ -11,21 +11,20 @@ import (
 	"time"
 )
 
-type Escalation struct {
+type Entry struct {
 	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+	RuleID                               int64          `db:"rule_id"`
+	NameRaw                              sql.NullString `db:"name"`
+	Condition                            filter.Filter  `db:"-"`
+	ConditionExpr                        sql.NullString `db:"condition"`
+	FallbackForID                        sql.NullInt64  `db:"fallback_for"`
 
-	RuleID        int64          `db:"rule_id"`
-	NameRaw       sql.NullString `db:"name"`
-	Condition     filter.Filter  `db:"-"`
-	ConditionExpr sql.NullString `db:"condition"`
-	FallbackForID sql.NullInt64  `db:"fallback_for"`
-	Fallbacks     []*Escalation  `db:"-"`
-
-	Recipients []*EscalationRecipient `db:"-"`
+	Fallbacks  []*Entry          `db:"-"`
+	Recipients []*EntryRecipient `db:"-"`
 }
 
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
-func (e *Escalation) IncrementalInitAndValidate() error {
+func (e *Entry) IncrementalInitAndValidate() error {
 	if e.ConditionExpr.Valid {
 		cond, err := filter.Parse(e.ConditionExpr.String)
 		if err != nil {
@@ -48,7 +47,7 @@ func (e *Escalation) IncrementalInitAndValidate() error {
 // This allows us to use `zap.Inline(escalation)` or `zap.Object("rule_escalation", escalation)` wherever
 // fine-grained logging context is needed, without having to add all the individual fields ourselves each time.
 // https://pkg.go.dev/go.uber.org/zap/zapcore#ObjectMarshaler
-func (e *Escalation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+func (e *Entry) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("id", e.ID)
 	encoder.AddInt64("rule_id", e.RuleID)
 	encoder.AddString("name", e.DisplayName())
@@ -63,9 +62,9 @@ func (e *Escalation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	return nil
 }
 
-// Eval evaluates the configured escalation filter for the provided filter.
-// Returns always true if there are no configured escalation conditions.
-func (e *Escalation) Eval(filterable *EscalationFilter) (bool, error) {
+// Eval evaluates the configured escalation/routing filter for the provided filter.
+// Returns always true if there are no configured escalation/routing conditions.
+func (e *Entry) Eval(filterable filter.Filterable) (bool, error) {
 	if e.Condition == nil {
 		return true, nil
 	}
@@ -73,7 +72,7 @@ func (e *Escalation) Eval(filterable *EscalationFilter) (bool, error) {
 	return e.Condition.Eval(filterable)
 }
 
-func (e *Escalation) DisplayName() string {
+func (e *Entry) DisplayName() string {
 	if e.NameRaw.Valid && e.NameRaw.String != "" {
 		return e.NameRaw.String
 	}
@@ -98,7 +97,7 @@ func (e *Escalation) DisplayName() string {
 	return strings.Join(recipients, ", ")
 }
 
-func (e *Escalation) GetContactsAt(t time.Time) []ContactChannelPair {
+func (e *Entry) GetContactsAt(t time.Time) []ContactChannelPair {
 	var pairs []ContactChannelPair
 
 	for _, r := range e.Recipients {
@@ -110,31 +109,35 @@ func (e *Escalation) GetContactsAt(t time.Time) []ContactChannelPair {
 	return pairs
 }
 
-func (e *Escalation) TableName() string {
-	return "rule_escalation"
+func (e *Entry) TableName() string {
+	return "rule_entry"
 }
 
-type EscalationRecipient struct {
+// EntryRecipient links a recipient to a rule entry, optionally with a specific channel.
+//
+// This allows to override the recipient's default channel for any given rule entry this recipient is linked to.
+// Otherwise, the recipient's default channel is used to deliver notifications.
+type EntryRecipient struct {
 	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
 
-	EscalationID  int64         `db:"rule_escalation_id"`
+	EntryID       int64         `db:"rule_entry_id"`
 	ChannelID     sql.NullInt64 `db:"channel_id"`
 	recipient.Key `db:",inline"`
 	Recipient     recipient.Recipient `db:"-"`
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
-func (r *EscalationRecipient) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+func (r *EntryRecipient) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("id", r.ID)
-	encoder.AddInt64("rule_escalation_id", r.EscalationID)
+	encoder.AddInt64("rule_escalation_id", r.EntryID)
 	if r.ChannelID.Valid {
 		encoder.AddInt64("channel_id", r.ChannelID.Int64)
 	}
 	return r.Key.MarshalLogObject(encoder)
 }
 
-func (r *EscalationRecipient) TableName() string {
-	return "rule_escalation_recipient"
+func (r *EntryRecipient) TableName() string {
+	return "rule_entry_recipient"
 }
 
 type ContactChannelPair struct {

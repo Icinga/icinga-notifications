@@ -13,11 +13,12 @@ type Rule struct {
 	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
 
 	Name             string                 `db:"name"`
+	Type             Type                   `db:"type"`
 	TimePeriod       *timeperiod.TimePeriod `db:"-"`
 	TimePeriodID     types.Int              `db:"timeperiod_id"`
 	SourceID         int64                  `db:"source_id"`
 	ObjectFilterExpr types.String           `db:"object_filter"`
-	Escalations      map[int64]*Escalation  `db:"-"`
+	Entries          map[int64]*Entry       `db:"-"`
 }
 
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
@@ -30,6 +31,7 @@ func (r *Rule) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("id", r.ID)
 	encoder.AddString("name", r.Name)
 	encoder.AddInt64("source_id", r.SourceID)
+	encoder.AddString("type", r.Type.String())
 
 	if r.TimePeriodID.Valid && r.TimePeriodID.Int64 != 0 {
 		encoder.AddInt64("timeperiod_id", r.TimePeriodID.Int64)
@@ -44,19 +46,19 @@ func (r *Rule) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 // ContactChannels stores a set of channel IDs for each set of individual contacts.
 type ContactChannels map[*recipient.Contact]map[int64]bool
 
-// LoadFromEscalationRecipients loads recipients channel of the specified escalation to the current map.
+// LoadFromEntryRecipients loads recipients channel of the specified rule.Entry to the current map.
 // You can provide this method a callback to control whether the channel of a specific contact should
 // be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
-func (ch ContactChannels) LoadFromEscalationRecipients(escalation *Escalation, t time.Time, isNotifiable func(recipient.Key) bool) {
-	for _, escalationRecipient := range escalation.Recipients {
-		ch.LoadRecipientChannel(escalationRecipient, t, isNotifiable)
+func (ch ContactChannels) LoadFromEntryRecipients(entry *Entry, t time.Time, isNotifiable func(recipient.Key) bool) {
+	for _, entryRecipient := range entry.Recipients {
+		ch.LoadRecipientChannel(entryRecipient, t, isNotifiable)
 	}
 }
 
 // LoadRecipientChannel loads recipient channel to the current map.
 // You can provide this method a callback to control whether the channel of a specific contact should
 // be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
-func (ch ContactChannels) LoadRecipientChannel(er *EscalationRecipient, t time.Time, isNotifiable func(recipient.Key) bool) {
+func (ch ContactChannels) LoadRecipientChannel(er *EntryRecipient, t time.Time, isNotifiable func(recipient.Key) bool) {
 	if isNotifiable(er.Key) {
 		for _, c := range er.Recipient.GetContactsAt(t) {
 			if ch[c] == nil {
@@ -72,7 +74,7 @@ func (ch ContactChannels) LoadRecipientChannel(er *EscalationRecipient, t time.T
 }
 
 // AlwaysNotifiable (checks) whether the given recipient is notifiable and returns always true.
-// This function is usually passed as an argument to ContactChannels.LoadFromEscalationRecipients whenever you do
+// This function is usually passed as an argument to ContactChannels.LoadFromEntryRecipients whenever you do
 // not want to perform any custom actions.
 func AlwaysNotifiable(_ recipient.Key) bool {
 	return true

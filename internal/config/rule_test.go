@@ -50,18 +50,18 @@ func TestRuleEntries(t *testing.T) {
 		maps.DeleteFunc(runtimeConfig.Rules, func(ruleID int64, _ *rule.Rule) bool { return ruleID > 35 && ruleID%defaultDivisor == 0 })
 
 		opts := EvalOptions{
-			OnPreEvaluate: func(re *rule.Escalation) bool {
+			OnPreEvaluate: func(re *rule.Entry) bool {
 				if re.RuleID > 35 && re.RuleID%defaultDivisor == 0 { // Those rules are deleted from our runtime config.
 					require.Failf(t, "OnPreEvaluate() shouldn't have been called", "rule %d was deleted from runtime config", re.RuleID)
 				}
 				require.Nilf(t, ruleEntries[re.ID], "Evaluate() shouldn't evaluate entry %d twice", re.ID)
 				return true
 			},
-			OnError: func(re *rule.Escalation, err error) bool {
+			OnError: func(re *rule.Entry, err error) bool {
 				require.EqualError(t, err, `unknown severity "evaluable"`)
 				return true
 			},
-			OnFilterMatch: func(re *rule.Escalation) error {
+			OnFilterMatch: func(re *rule.Entry) error {
 				require.Nilf(t, ruleEntries[re.ID], "OnPreEvaluate() shouldn't evaluate %d twice", re.ID)
 				return nil
 			},
@@ -74,7 +74,7 @@ func TestRuleEntries(t *testing.T) {
 		assertEntries(rules, &expectedLen, false, opts)
 
 		lenBeforeError := new(int)
-		opts.OnError = func(re *rule.Escalation, err error) bool {
+		opts.OnError = func(re *rule.Entry, err error) bool {
 			if *lenBeforeError != 0 {
 				require.Fail(t, "OnError() shouldn't have been called again")
 			}
@@ -87,7 +87,7 @@ func TestRuleEntries(t *testing.T) {
 
 		*lenBeforeError = 0
 		opts.OnError = nil
-		opts.OnFilterMatch = func(re *rule.Escalation) error {
+		opts.OnFilterMatch = func(re *rule.Entry) error {
 			if *lenBeforeError != 0 {
 				require.Fail(t, "OnFilterMatch() shouldn't have been called again")
 			}
@@ -101,7 +101,7 @@ func TestRuleEntries(t *testing.T) {
 		filterContext.IncidentAge = 5 * time.Minute
 
 		opts.OnFilterMatch = nil
-		opts.OnPreEvaluate = func(re *rule.Escalation) bool { return re.RuleID < 5 }
+		opts.OnPreEvaluate = func(re *rule.Entry) bool { return re.RuleID < 5 }
 		opts.OnAllConfigEvaluated = func(result time.Duration) {
 			// The filter string of the escalation condition is incident_age>=10m and the actual incident age is 5m.
 			require.Equal(t, 5*time.Minute, result)
@@ -119,27 +119,27 @@ func makeRule(t *testing.T, i int) *rule.Rule {
 	r := new(rule.Rule)
 	r.ID = int64(i)
 	r.Name = fmt.Sprintf("rule-%d", i)
-	r.Escalations = make(map[int64]*rule.Escalation)
+	r.Entries = make(map[int64]*rule.Entry)
 
 	invalidSeverity, err := filter.Parse("incident_severity=evaluable")
 	require.NoError(t, err, "parsing incident_severity=evaluable shouldn't fail")
 
-	redundant := new(rule.Escalation)
+	redundant := new(rule.Entry)
 	redundant.ID = r.ID * 150 // It must be large enough to avoid colliding with others!
 	redundant.RuleID = r.ID
 	redundant.Condition = invalidSeverity
 
-	r.Escalations[redundant.ID] = redundant
+	r.Entries[redundant.ID] = redundant
 	if i%defaultDivisor == 0 {
 		escalationCond, err := filter.Parse("incident_severity>warning||incident_age>=10m")
 		require.NoError(t, err, "parsing incident_severity>warning||incident_age>=10m shouldn't fail")
 
-		entry := new(rule.Escalation)
+		entry := new(rule.Entry)
 		entry.ID = r.ID * 2
 		entry.RuleID = r.ID
 		entry.Condition = escalationCond
 
-		r.Escalations[entry.ID] = entry
+		r.Entries[entry.ID] = entry
 	}
 
 	return r

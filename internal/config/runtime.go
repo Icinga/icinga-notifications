@@ -94,12 +94,12 @@ type ConfigSet struct {
 
 	// The following fields contain intermediate values, necessary for the incremental config synchronization.
 	// Furthermore, they allow accessing intermediate tables as everything is referred by pointers.
-	groupMembers             map[recipient.GroupMemberKey]*recipient.GroupMember
-	timePeriodEntries        map[int64]*timeperiod.Entry
-	scheduleRotations        map[int64]*recipient.Rotation
-	scheduleRotationMembers  map[int64]*recipient.RotationMember
-	ruleEscalations          map[int64]*rule.Escalation
-	ruleEscalationRecipients map[int64]*rule.EscalationRecipient
+	groupMembers            map[recipient.GroupMemberKey]*recipient.GroupMember
+	timePeriodEntries       map[int64]*timeperiod.Entry
+	scheduleRotations       map[int64]*recipient.Rotation
+	scheduleRotationMembers map[int64]*recipient.RotationMember
+	ruleEntries             map[int64]*rule.Entry
+	ruleEntryRecipients     map[int64]*rule.EntryRecipient
 }
 
 func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context) error {
@@ -177,13 +177,13 @@ func (r *RuntimeConfig) GetRecipient(k recipient.Key) recipient.Recipient {
 	return nil
 }
 
-// GetRuleEscalation returns a *rule.Escalation by the given id.
-// Returns nil if there is no rule escalation with given id.
-func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Escalation {
+// GetRuleEntry returns a *rule.Entry by the given id.
+// Returns nil if there is no rule entry with given id.
+func (r *RuntimeConfig) GetRuleEntry(entryID int64) *rule.Entry {
 	for _, r := range r.Rules {
-		escalation, ok := r.Escalations[escalationID]
+		entry, ok := r.Entries[entryID]
 		if ok {
-			return escalation
+			return entry
 		}
 	}
 
@@ -282,8 +282,8 @@ func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
 		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.TimePeriods) },
 		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.timePeriodEntries) },
 		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.Rules) },
-		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.ruleEscalations) },
-		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.ruleEscalationRecipients) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.ruleEntries) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.ruleEntryRecipients) },
 		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.Sources) },
 	}
 	for _, f := range fetchFns {
