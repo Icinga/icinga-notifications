@@ -1,9 +1,13 @@
 package incident
 
 import (
+	"context"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/utils"
+	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
+	"github.com/jmoiron/sqlx"
 )
 
 // EventRow represents a single incident event database entry.
@@ -83,6 +87,19 @@ type HistoryRow struct {
 // TableName implements the contracts.TableNamer interface.
 func (h *HistoryRow) TableName() string {
 	return "incident_history"
+}
+
+// Sync persists the current state of this history to the database and retrieves the just inserted history ID.
+// Returns error when failed to execute the query.
+func (h *HistoryRow) Sync(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx) error {
+	historyId, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, h, "id"), h)
+	if err != nil {
+		return err
+	}
+
+	h.ID = historyId
+
+	return nil
 }
 
 // NotificationEntry is used to cache a set of incident history fields of type Notified.
