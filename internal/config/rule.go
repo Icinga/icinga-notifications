@@ -20,7 +20,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 				newElement.TimePeriod = tp
 			}
 
-			newElement.Escalations = make(map[int64]*rule.Escalation)
+			newElement.Entries = make(map[int64]*rule.Entry)
 			return nil
 		},
 		func(curElement, update *rule.Rule) error {
@@ -48,17 +48,17 @@ func (r *RuntimeConfig) applyPendingRules() {
 
 	incrementalApplyPending(
 		r,
-		&r.ruleEscalations, &r.configChange.ruleEscalations,
-		func(newElement *rule.Escalation) error {
+		&r.ruleEntries, &r.configChange.ruleEntries,
+		func(newElement *rule.Entry) error {
 			elementRule, ok := r.Rules[newElement.RuleID]
 			if !ok {
 				return fmt.Errorf("rule escalation refers unknown rule %d", newElement.RuleID)
 			}
 
-			elementRule.Escalations[newElement.ID] = newElement
+			elementRule.Entries[newElement.ID] = newElement
 			return nil
 		},
-		func(curElement, update *rule.Escalation) error {
+		func(curElement, update *rule.Entry) error {
 			if curElement.RuleID != update.RuleID {
 				return errRemoveAndAddInstead
 			}
@@ -72,42 +72,42 @@ func (r *RuntimeConfig) applyPendingRules() {
 
 			return nil
 		},
-		func(delElement *rule.Escalation) error {
+		func(delElement *rule.Entry) error {
 			elementRule, ok := r.Rules[delElement.RuleID]
 			if !ok {
 				return nil
 			}
 
-			delete(elementRule.Escalations, delElement.ID)
+			delete(elementRule.Entries, delElement.ID)
 			return nil
 		})
 
 	incrementalApplyPending(
 		r,
-		&r.ruleEscalationRecipients, &r.configChange.ruleEscalationRecipients,
-		func(newElement *rule.EscalationRecipient) error {
+		&r.ruleEntryRecipients, &r.configChange.ruleEntryRecipients,
+		func(newElement *rule.EntryRecipient) error {
 			newElement.Recipient = r.GetRecipient(newElement.Key)
 			if newElement.Recipient == nil {
 				return fmt.Errorf("rule escalation recipient is missing or unknown")
 			}
 
-			escalation := r.GetRuleEscalation(newElement.EscalationID)
+			escalation := r.GetRuleEntry(newElement.EntryID)
 			if escalation == nil {
-				return fmt.Errorf("rule escalation recipient refers to unknown escalation %d", newElement.EscalationID)
+				return fmt.Errorf("rule escalation recipient refers to unknown escalation %d", newElement.EntryID)
 			}
 			escalation.Recipients = append(escalation.Recipients, newElement)
 
 			return nil
 		},
 		nil,
-		func(delElement *rule.EscalationRecipient) error {
-			escalation := r.GetRuleEscalation(delElement.EscalationID)
+		func(delElement *rule.EntryRecipient) error {
+			escalation := r.GetRuleEntry(delElement.EntryID)
 			if escalation == nil {
 				return nil
 			}
 
-			escalation.Recipients = slices.DeleteFunc(escalation.Recipients, func(recipient *rule.EscalationRecipient) bool {
-				return recipient.EscalationID == delElement.EscalationID
+			escalation.Recipients = slices.DeleteFunc(escalation.Recipients, func(recipient *rule.EntryRecipient) bool {
+				return recipient.EntryID == delElement.EntryID
 			})
 			return nil
 		})

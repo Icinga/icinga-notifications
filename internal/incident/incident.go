@@ -170,7 +170,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		// Check if any (additional) rules match this object. Incident filter rules are stateful, which means that
 		// once they have been matched, they remain effective for the ongoing incident and never need to be rechecked.
 		err := i.EvaluateRules(i.runtimeConfig, i.Object, config.EvalOptions[*rule.Rule, any]{
-			OnPreEvaluate: func(r *rule.Rule) bool { return true }, // This might change in the future!
+			OnPreEvaluate: func(r *rule.Rule) bool { return r.Type == rule.TypeEscalation },
 			OnFilterMatch: func(r *rule.Rule) error { return i.onFilterRuleMatch(ctx, r, tx, ev) },
 			OnError: func(r *rule.Rule, err error) bool {
 				i.logger.Warnw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
@@ -185,7 +185,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 
 		// Reset the evaluated escalations when leaving this function while holding the incident lock,
 		// otherwise the pointers could be invalidated in the meantime and lead to unexpected behaviour.
-		defer func() { i.RuleEntries = make(map[int64]*rule.Escalation) }()
+		defer func() { i.RuleEntries = make(map[int64]*rule.Entry) }()
 
 		// Re-evaluate escalations based on the newly evaluated rules.
 		i.evaluateEscalations(ev.Time)
@@ -242,7 +242,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 
 	// Reset the evaluated escalations when leaving this function while holding the incident lock,
 	// otherwise the pointers could be invalidated in the meantime and lead to unexpected behaviour.
-	defer func() { i.RuleEntries = make(map[int64]*rule.Escalation) }()
+	defer func() { i.RuleEntries = make(map[int64]*rule.Entry) }()
 
 	i.evaluateEscalations(ev.Time)
 	if len(i.RuleEntries) == 0 {
@@ -268,7 +268,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 
 		channels := make(rule.ContactChannels)
 		for _, escalation := range i.RuleEntries {
-			channels.LoadFromEscalationRecipients(escalation, ev.Time, i.isRecipientNotifiable)
+			channels.LoadFromEntryRecipients(escalation, ev.Time, i.isRecipientNotifiable)
 		}
 
 		notifications, err = i.generateNotifications(ctx, tx, ev, channels)
@@ -444,10 +444,10 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) {
 	// EvaluateRuleEntries only returns an error if one of the provided callback hooks returns
 	// an error or the OnError handler returns false, and since none of our callbacks return an
 	// error nor false, we can safely discard the return value here.
-	_ = i.EvaluateRuleEntries(i.runtimeConfig, filterContext, config.EvalOptions[*rule.Escalation, any]{
+	_ = i.EvaluateRuleEntries(i.runtimeConfig, filterContext, config.EvalOptions[*rule.Entry, any]{
 		// Prevent reevaluation of an already triggered escalation via the pre run hook.
-		OnPreEvaluate: func(escalation *rule.Escalation) bool { return i.EscalationState[escalation.ID] == nil },
-		OnError: func(escalation *rule.Escalation, err error) bool {
+		OnPreEvaluate: func(escalation *rule.Entry) bool { return i.EscalationState[escalation.ID] == nil },
+		OnError: func(escalation *rule.Entry, err error) bool {
 			r := i.runtimeConfig.Rules[escalation.RuleID]
 			i.logger.Warnw("Failed to evaluate escalation condition", zap.Object("rule", r),
 				zap.Object("escalation", escalation), zap.Error(err))
@@ -501,12 +501,12 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 		}
 
 		hr := &HistoryRow{
-			IncidentID:       i.ID,
-			Time:             state.TriggeredAt,
-			EventID:          utils.ToDBInt(ev.ID),
-			RuleEscalationID: utils.ToDBInt(state.RuleEscalationID),
-			RuleID:           utils.ToDBInt(r.ID),
-			Type:             EscalationTriggered,
+			IncidentID:  i.ID,
+			Time:        state.TriggeredAt,
+			EventID:     utils.ToDBInt(ev.ID),
+			RuleEntryID: utils.ToDBInt(state.RuleEscalationID),
+			RuleID:      utils.ToDBInt(r.ID),
+			Type:        EscalationTriggered,
 		}
 
 		if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -682,13 +682,13 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	contactChs := make(rule.ContactChannels)
 	// Load all escalations recipients channels
 	for escalationID := range i.EscalationState {
-		escalation := i.runtimeConfig.GetRuleEscalation(escalationID)
+		escalation := i.runtimeConfig.GetRuleEntry(escalationID)
 		if escalation == nil {
 			i.logger.Debugw("Incident refers unknown escalation, might got deleted", zap.Int64("escalation_id", escalationID))
 			continue
 		}
 
-		contactChs.LoadFromEscalationRecipients(escalation, t, i.isRecipientNotifiable)
+		contactChs.LoadFromEntryRecipients(escalation, t, i.isRecipientNotifiable)
 	}
 
 	// Check whether all the incident recipients do have an appropriate contact channel configured.
@@ -758,13 +758,13 @@ func (i *Incident) isRecipientNotifiable(key recipient.Key) bool {
 
 type EscalationState struct {
 	IncidentID       int64           `db:"incident_id"`
-	RuleEscalationID int64           `db:"rule_escalation_id"`
+	RuleEscalationID int64           `db:"rule_entry_id"`
 	TriggeredAt      types.UnixMilli `db:"triggered_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.
 func (e *EscalationState) TableName() string {
-	return "incident_rule_escalation_state"
+	return "incident_rule_entry_state"
 }
 
 type RecipientState struct {

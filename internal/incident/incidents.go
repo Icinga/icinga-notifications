@@ -101,7 +101,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 						i.runtimeConfig.RLock()
 						defer i.runtimeConfig.RUnlock()
 
-						escalation := i.runtimeConfig.GetRuleEscalation(state.RuleEscalationID)
+						escalation := i.runtimeConfig.GetRuleEntry(state.RuleEscalationID)
 						if escalation != nil {
 							i.Rules[escalation.RuleID] = true
 						}
