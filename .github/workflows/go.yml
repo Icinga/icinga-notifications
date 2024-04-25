@@ -24,7 +24,7 @@ jobs:
     - name: Vet
       run: go vet ./...
     - name: golangci-lint
-      uses: golangci/golangci-lint-action@v4
+      uses: golangci/golangci-lint-action@v5
       with:
         version: latest
         # Enable the gosec linter w/o having to create a .golangci.yml config
