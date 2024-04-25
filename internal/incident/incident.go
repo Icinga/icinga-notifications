@@ -273,8 +273,8 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 	oldSeverity := i.Severity
 	newSeverity := ev.Severity
 	if oldSeverity == newSeverity {
-		err := fmt.Errorf("%w: %s state event from source %d", event.ErrSuperfluousStateChange, ev.Severity.String(), ev.SourceId)
-		return err
+		i.logger.Debugw("Ignoring superfluous state change event", zap.Int64("source_id", ev.SourceId), zap.String("event", ev.String()))
+		return event.ErrSuperfluousStateChange
 	}
 
 	i.logger.Infof("Incident severity changed from %s to %s", oldSeverity.String(), newSeverity.String())
