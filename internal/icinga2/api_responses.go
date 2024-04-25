@@ -95,6 +95,12 @@ type Downtime struct {
 	// RemoveTime is used to indicate whether a downtime was ended automatically or cancelled prematurely by a user.
 	// It is set to zero time for the former case, otherwise to the timestamp at which time has been cancelled.
 	RemoveTime UnixFloat `json:"remove_time"`
+
+	// IsFixed is used to differentiate between fixed and flexible downtimes.
+	// Fixed downtimes always emits a start and triggered event and cause two notifications being sent
+	// for the very (same) event. Flexible downtimes, on the other hand, only emits a trigger event, and
+	// don't produce duplicates for the same event.
+	IsFixed bool `json:"fixed"`
 }
 
 // HostServiceRuntimeAttributes are common attributes of both Host and Service objects.
