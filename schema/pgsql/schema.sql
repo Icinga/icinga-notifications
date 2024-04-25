@@ -254,13 +254,6 @@ CREATE TABLE incident (
     CONSTRAINT pk_incident PRIMARY KEY (id)
 );
 
-CREATE TABLE incident_event (
-    incident_id bigint NOT NULL REFERENCES incident(id),
-    event_id bigint NOT NULL REFERENCES event(id),
-
-    CONSTRAINT pk_incident_event PRIMARY KEY (incident_id, event_id)
-);
-
 CREATE TYPE incident_contact_role AS ENUM ('recipient', 'subscriber', 'manager');
 
 CREATE TABLE incident_contact (

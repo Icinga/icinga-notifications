@@ -146,12 +146,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		i.logger = i.logger.With(zap.String("incident", i.String()))
 	}
 
-	if err = i.AddEvent(ctx, tx, ev); err != nil {
-		i.logger.Errorw("Can't insert incident event to the database", zap.Error(err))
-
-		return errors.New("can't insert incident event to the database")
-	}
-
 	switch ev.Type {
 	case event.TypeState:
 		if !isNew {
@@ -231,10 +225,6 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		err := ev.Sync(ctx, tx, i.db, i.Object.ID)
 		if err != nil {
 			return err
-		}
-
-		if err = i.AddEvent(ctx, tx, ev); err != nil {
-			return fmt.Errorf("can't insert incident event to the database: %w", err)
 		}
 
 		if err = i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
