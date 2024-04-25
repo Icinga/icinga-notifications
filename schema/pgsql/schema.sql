@@ -244,6 +244,31 @@ CREATE TABLE rule_escalation_recipient (
     CHECK (num_nonnulls(contact_id, contactgroup_id, schedule_id) = 1)
 );
 
+CREATE TABLE rule_routing (
+    id bigserial,
+    rule_id bigint NOT NULL REFERENCES rule(id),
+    position integer NOT NULL,
+    condition text,
+    name text, -- if not set, recipients are used as a fallback for display purposes
+
+    CONSTRAINT pk_rule_routing PRIMARY KEY (id),
+
+    UNIQUE (rule_id, position)
+);
+
+CREATE TABLE rule_routing_recipient (
+    id bigserial,
+    rule_routing_id bigint NOT NULL REFERENCES rule_routing(id),
+    contact_id bigint REFERENCES contact(id),
+    contactgroup_id bigint REFERENCES contactgroup(id),
+    schedule_id bigint REFERENCES schedule(id),
+    channel_id bigint REFERENCES channel(id),
+
+    CONSTRAINT pk_rule_routing_recipient PRIMARY KEY (id),
+
+    CHECK (num_nonnulls(contact_id, contactgroup_id, schedule_id) = 1)
+);
+
 CREATE TABLE incident (
     id bigserial,
     object_id bytea NOT NULL REFERENCES object(id),
@@ -284,6 +309,22 @@ CREATE TABLE incident_rule_escalation_state (
     CONSTRAINT pk_incident_rule_escalation_state PRIMARY KEY (incident_id, rule_escalation_id)
 );
 
+CREATE TABLE notification_history (
+    id bigserial,
+    incident_id bigint REFERENCES incident(id),
+    rule_routing_id bigint REFERENCES rule_routing(id),
+    contact_id bigint REFERENCES contact(id),
+    contactgroup_id bigint REFERENCES contactgroup(id),
+    schedule_id bigint REFERENCES schedule(id),
+    channel_id bigint REFERENCES channel(id),
+    time bigint NOT NULL,
+    notification_state notification_state_type,
+    sent_at bigint,
+    message text,
+
+    CONSTRAINT pk_notification_history PRIMARY KEY (id)
+);
+
 CREATE TABLE incident_history (
     id bigserial,
     incident_id bigint NOT NULL REFERENCES incident(id),
@@ -293,16 +334,13 @@ CREATE TABLE incident_history (
     contactgroup_id bigint REFERENCES contactgroup(id),
     schedule_id bigint REFERENCES schedule(id),
     rule_id bigint REFERENCES rule(id),
-    channel_id bigint REFERENCES channel(id),
+    notification_history_id bigint REFERENCES notification_history(id),
     time bigint NOT NULL,
-    message text,
     type incident_history_event_type NOT NULL,
     new_severity severity,
     old_severity severity,
     new_recipient_role incident_contact_role,
     old_recipient_role incident_contact_role,
-    notification_state notification_state_type,
-    sent_at bigint,
 
     CONSTRAINT pk_incident_history PRIMARY KEY (id),
     FOREIGN KEY (incident_id, rule_escalation_id) REFERENCES incident_rule_escalation_state(incident_id, rule_escalation_id)
