@@ -11,7 +11,7 @@ CREATE TYPE incident_history_event_type AS ENUM (
     'closed',
     'notified'
 );
-CREATE TYPE frequency_type AS ENUM ( 'MINUTELY', 'HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY' );
+CREATE TYPE rotation_type AS ENUM ( '24-7', 'partial', 'multi' );
 CREATE TYPE notification_state_type AS ENUM ( 'pending', 'sent', 'failed' );
 
 -- IPL ORM renders SQL queries with LIKE operators for all suggestions in the search bar,
@@ -92,45 +92,71 @@ CREATE TABLE schedule (
     CONSTRAINT pk_schedule PRIMARY KEY (id)
 );
 
+CREATE TABLE rotation (
+    id bigserial,
+    schedule_id bigint NOT NULL REFERENCES schedule(id),
+    -- the lower the more important, starting at 0, avoids the need to re-index upon addition
+    priority integer NOT NULL,
+    name text NOT NULL,
+    mode rotation_type NOT NULL,
+    -- JSON with rotation-specific attributes
+    -- Needed exclusively by Web to simplify editing and visualisation
+    options text NOT NULL,
+
+    -- A date in the format 'YYYY-MM-DD' when the first handoff should happen.
+    -- It is a string as handoffs are restricted to happen only once per day
+    first_handoff date NOT NULL,
+
+    -- Set to the actual time of the first handoff.
+    -- If this is in the past during creation of the rotation, it is set to the creation time.
+    -- Used by Web to avoid showing shifts that never happened
+    actual_handoff bigint NOT NULL,
+
+    -- each schedule can only have one rotation with a given priority starting at a given date
+    UNIQUE (schedule_id, priority, first_handoff),
+
+    CONSTRAINT pk_rotation PRIMARY KEY (id)
+);
+
 CREATE TABLE timeperiod (
     id bigserial,
-    owned_by_schedule_id bigint REFERENCES schedule(id), -- nullable for future standalone timeperiods
+    owned_by_rotation_id bigint REFERENCES rotation(id), -- nullable for future standalone timeperiods
 
     CONSTRAINT pk_timeperiod PRIMARY KEY (id)
+);
+
+CREATE TABLE rotation_member (
+    id bigserial,
+    rotation_id bigint NOT NULL REFERENCES rotation(id),
+    contact_id bigint REFERENCES contact(id),
+    contactgroup_id bigint REFERENCES contactgroup(id),
+    position integer NOT NULL,
+
+    UNIQUE (rotation_id, position), -- each position in a rotation can only be used once
+
+    -- Two UNIQUE constraints prevent duplicate memberships of the same contact or contactgroup in a single rotation.
+    -- Multiple NULLs are not considered to be duplicates, so rows with a contact_id but no contactgroup_id are
+    -- basically ignored in the UNIQUE constraint over contactgroup_id and vice versa. The CHECK constraint below
+    -- ensures that each row has only non-NULL values in one of these constraints.
+    UNIQUE (rotation_id, contact_id),
+    UNIQUE (rotation_id, contactgroup_id),
+    CHECK (num_nonnulls(contact_id, contactgroup_id) = 1),
+
+    CONSTRAINT pk_rotation_member PRIMARY KEY (id)
 );
 
 CREATE TABLE timeperiod_entry (
     id bigserial,
     timeperiod_id bigint NOT NULL REFERENCES timeperiod(id),
+    rotation_member_id bigint REFERENCES rotation_member(id), -- nullable for future standalone timeperiods
     start_time bigint NOT NULL,
     end_time bigint NOT NULL,
     -- Is needed by icinga-notifications-web to prefilter entries, which matches until this time and should be ignored by the daemon.
     until_time bigint,
     timezone text NOT NULL, -- e.g. 'Europe/Berlin', relevant for evaluating rrule (DST changes differ between zones)
     rrule text, -- recurrence rule (RFC5545)
-    -- Contains the same frequency types as in the rrule string except the `QUARTERLY` one, which is only offered
-    -- by web that is represented as `FREQ=MONTHLY;INTERVAL=3` in a RRule string. So, this should be also ignored
-    -- by the daemon.
-    frequency frequency_type,
-    description text,
 
     CONSTRAINT pk_timeperiod_entry PRIMARY KEY (id)
-);
-
-CREATE TABLE schedule_member (
-    schedule_id bigint NOT NULL REFERENCES schedule(id),
-    timeperiod_id bigint NOT NULL REFERENCES timeperiod(id),
-    contact_id bigint REFERENCES contact(id),
-    contactgroup_id bigint REFERENCES contactgroup(id),
-
-    -- There is no PRIMARY KEY in that table as either contact_id or contactgroup_id should be allowed to be NULL.
-    -- Instead, there are two UNIQUE constraints that prevent duplicate entries. Multiple NULLs are not considered to
-    -- be duplicates, so rows with a contact_id but no contactgroup_id are basically ignored in the UNIQUE constraint
-    -- over contactgroup_id and vice versa. The CHECK constraint below ensures that each row has only non-NULL values
-    -- in one of these constraints.
-    UNIQUE (schedule_id, timeperiod_id, contact_id),
-    UNIQUE (schedule_id, timeperiod_id, contactgroup_id),
-    CHECK (num_nonnulls(contact_id, contactgroup_id) = 1)
 );
 
 CREATE TABLE source (
