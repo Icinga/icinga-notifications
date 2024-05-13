@@ -153,7 +153,6 @@ func (ch *Email) GetInfo() *plugin.Info {
 				"en_US": "SMTP User",
 				"de_DE": "SMTP Benutzer",
 			},
-			Default: "user@example.com",
 		},
 		{
 			Name: "password",
