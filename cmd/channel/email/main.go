@@ -118,9 +118,8 @@ func (ch *Email) GetInfo() *plugin.Info {
 			},
 		},
 		{
-			Name:     "sender_mail",
-			Type:     "string",
-			Required: true,
+			Name: "sender_mail",
+			Type: "string",
 			Label: map[string]string{
 				"en_US": "Sender Address",
 				"de_DE": "Absenderadresse",
