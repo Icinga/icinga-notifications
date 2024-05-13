@@ -205,7 +205,7 @@ func (client *Client) buildDowntimeEvent(ctx context.Context, d Downtime, startE
 
 	if startEvent {
 		ev.Type = event.TypeDowntimeStart
-	} else if d.RemoveTime.Time().IsZero() {
+	} else if !d.WasCancelled() {
 		ev.Type = event.TypeDowntimeEnd
 	} else {
 		ev.Type = event.TypeDowntimeRemoved

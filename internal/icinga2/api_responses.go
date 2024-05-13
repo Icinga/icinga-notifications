@@ -103,6 +103,11 @@ type Downtime struct {
 	IsFixed bool `json:"fixed"`
 }
 
+// WasCancelled returns true when the current downtime was cancelled prematurely by a user.
+func (d *Downtime) WasCancelled() bool {
+	return d.RemoveTime.Time().After(time.UnixMilli(0))
+}
+
 // HostServiceRuntimeAttributes are common attributes of both Host and Service objects.
 //
 // When catching up potentially missed changes, the following fields are holding relevant changes which, fortunately,
