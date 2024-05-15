@@ -1,4 +1,4 @@
-package incident
+package history
 
 import (
 	"database/sql/driver"

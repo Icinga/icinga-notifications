@@ -1,9 +1,13 @@
 package incident
 
 import (
+	"context"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/utils"
+	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/types"
+	"github.com/jmoiron/sqlx"
 )
 
 // EventRow represents a single incident event database entry.
@@ -62,22 +66,19 @@ func (r *RuleRow) TableName() string {
 
 // HistoryRow represents a single incident history database entry.
 type HistoryRow struct {
-	ID                int64     `db:"id"`
-	IncidentID        int64     `db:"incident_id"`
-	RuleEscalationID  types.Int `db:"rule_escalation_id"`
-	EventID           types.Int `db:"event_id"`
-	recipient.Key     `db:",inline"`
-	RuleID            types.Int         `db:"rule_id"`
-	Time              types.UnixMilli   `db:"time"`
-	Type              HistoryEventType  `db:"type"`
-	ChannelID         types.Int         `db:"channel_id"`
-	NewSeverity       event.Severity    `db:"new_severity"`
-	OldSeverity       event.Severity    `db:"old_severity"`
-	NewRecipientRole  ContactRole       `db:"new_recipient_role"`
-	OldRecipientRole  ContactRole       `db:"old_recipient_role"`
-	Message           types.String      `db:"message"`
-	NotificationState NotificationState `db:"notification_state"`
-	SentAt            types.UnixMilli   `db:"sent_at"`
+	ID                    int64     `db:"id"`
+	IncidentID            int64     `db:"incident_id"`
+	RuleEscalationID      types.Int `db:"rule_escalation_id"`
+	EventID               types.Int `db:"event_id"`
+	recipient.Key         `db:",inline"`
+	RuleID                types.Int        `db:"rule_id"`
+	NotificationHistoryID types.Int        `db:"notification_history_id"`
+	Time                  types.UnixMilli  `db:"time"`
+	Type                  HistoryEventType `db:"type"`
+	NewSeverity           event.Severity   `db:"new_severity"`
+	OldSeverity           event.Severity   `db:"old_severity"`
+	NewRecipientRole      ContactRole      `db:"new_recipient_role"`
+	OldRecipientRole      ContactRole      `db:"old_recipient_role"`
 }
 
 // TableName implements the contracts.TableNamer interface.
@@ -85,21 +86,22 @@ func (h *HistoryRow) TableName() string {
 	return "incident_history"
 }
 
-// NotificationEntry is used to cache a set of incident history fields of type Notified.
-//
-// The event processing workflow is performed in a separate transaction before trying to send the actual
-// notifications. Thus, all resulting notification entries are marked as pending, and it creates a reference
-// to them of this type. The cached entries are then used to actually notify the contacts and mark the pending
-// notification entries as either NotificationStateSent or NotificationStateFailed.
-type NotificationEntry struct {
-	HistoryRowID int64 `db:"id"`
-	ContactID    int64
-	ChannelID    int64
-	State        NotificationState `db:"notification_state"`
-	SentAt       types.UnixMilli   `db:"sent_at"`
-}
+// Persist persists the current state of this history to the database.
+// You can set the last argument to true if you want to retrieve and set the just inserted history ID.
+// Returns error when failed to execute the query.
+func (h *HistoryRow) Persist(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx, fetchID bool) error {
+	stmt := utils.BuildInsertStmtWithout(db, h, "id")
+	if fetchID {
+		historyId, err := utils.InsertAndFetchId(ctx, tx, stmt, h)
+		if err != nil {
+			return err
+		}
 
-// TableName implements the contracts.TableNamer interface.
-func (h *NotificationEntry) TableName() string {
-	return "incident_history"
+		h.ID = historyId
+
+		return nil
+	}
+
+	_, err := tx.NamedExecContext(ctx, stmt, h)
+	return err
 }

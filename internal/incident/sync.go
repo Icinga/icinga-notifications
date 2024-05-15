@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/history"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/utils"
@@ -45,41 +46,11 @@ func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 	return nil
 }
 
-func (i *Incident) AddHistory(ctx context.Context, tx *sqlx.Tx, historyRow *HistoryRow, fetchId bool) (types.Int, error) {
-	historyRow.IncidentID = i.Id
-
-	stmt := utils.BuildInsertStmtWithout(i.db, historyRow, "id")
-	if fetchId {
-		historyId, err := utils.InsertAndFetchId(ctx, tx, stmt, historyRow)
-		if err != nil {
-			return types.Int{}, err
-		}
-
-		return utils.ToDBInt(historyId), nil
-	} else {
-		_, err := tx.NamedExecContext(ctx, stmt, historyRow)
-		if err != nil {
-			return types.Int{}, err
-		}
-	}
-
-	return types.Int{}, nil
-}
-
 func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, state *EscalationState) error {
 	state.IncidentID = i.Id
 
 	stmt, _ := i.db.BuildUpsertStmt(state)
 	_, err := tx.NamedExecContext(ctx, stmt, state)
-
-	return err
-}
-
-// AddEvent Inserts incident history record to the database and returns an error on db failure.
-func (i *Incident) AddEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	ie := &EventRow{IncidentID: i.Id, EventID: ev.ID}
-	stmt, _ := i.db.BuildInsertStmt(ie)
-	_, err := tx.NamedExecContext(ctx, stmt, ie)
 
 	return err
 }
@@ -119,8 +90,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 					OldRecipientRole: oldRole,
 				}
 
-				_, err := i.AddHistory(ctx, tx, hr, false)
-				if err != nil {
+				if err := hr.Persist(ctx, i.db, tx, false); err != nil {
 					i.logger.Errorw(
 						"Failed to insert recipient role changed incident history", zap.String("escalation", escalation.DisplayName()),
 						zap.String("recipients", r.String()), zap.Error(err),
@@ -159,37 +129,33 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 
 // addPendingNotifications inserts pending notification incident history of the given recipients.
 func (i *Incident) addPendingNotifications(
-	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels contactChannels,
-) ([]*NotificationEntry, error) {
-	var notifications []*NotificationEntry
-	for contact, channels := range contactChannels {
-		for chID := range channels {
-			hr := &HistoryRow{
-				Key:               recipient.ToKey(contact),
-				EventID:           utils.ToDBInt(ev.ID),
-				Time:              types.UnixMilli(time.Now()),
-				Type:              Notified,
-				ChannelID:         utils.ToDBInt(chID),
-				NotificationState: NotificationStatePending,
-			}
+	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
+) (history.PendingNotifications, error) {
+	notifications, err := history.AddPendingNotifications(ctx, i.db, tx, contactChannels, func(n *history.NotificationHistory) {
+		n.IncidentID = utils.ToDBInt(i.Id)
+	})
+	if err != nil {
+		i.logger.Errorw("Failed to insert pending notification histories", zap.Error(err))
+		return nil, err
+	}
 
-			id, err := i.AddHistory(ctx, tx, hr, true)
-			if err != nil {
+	for contact, entries := range notifications {
+		for _, notification := range entries {
+			hr := &HistoryRow{
+				IncidentID:            i.Id,
+				Key:                   recipient.ToKey(contact),
+				EventID:               utils.ToDBInt(ev.ID),
+				Time:                  types.UnixMilli(time.Now()),
+				Type:                  Notified,
+				NotificationHistoryID: utils.ToDBInt(notification.HistoryRowID),
+			}
+			if err := hr.Persist(ctx, i.db, tx, false); err != nil {
 				i.logger.Errorw(
 					"Failed to insert contact pending notification incident history",
-					zap.String("contact", contact.String()), zap.Error(err),
-				)
+					zap.String("contact", contact.String()), zap.Error(err))
 
 				return nil, errors.New("can't insert contact pending notification incident history")
 			}
-
-			hr.ID = id.Int64
-			notifications = append(notifications, &NotificationEntry{
-				HistoryRowID: hr.ID,
-				ContactID:    contact.ID,
-				State:        NotificationStatePending,
-				ChannelID:    chID,
-			})
 		}
 	}
 

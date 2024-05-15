@@ -2,23 +2,41 @@ package rule
 
 import (
 	"database/sql"
-	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/pkg/errors"
+	"go.uber.org/zap/zapcore"
 	"strings"
 	"time"
 )
 
 type Escalation struct {
-	ID            int64          `db:"id"`
-	RuleID        int64          `db:"rule_id"`
-	Name          string         `db:"-"`
-	NameRaw       sql.NullString `db:"name"`
-	Condition     filter.Filter  `db:"-"`
-	ConditionExpr sql.NullString `db:"condition"`
-	FallbackForID sql.NullInt64  `db:"fallback_for"`
+	Meta          `db:",inline"`
+	FallbackForID sql.NullInt64 `db:"fallback_for"`
 	Fallbacks     []*Escalation
 
 	Recipients []*EscalationRecipient
+}
+
+func (e *Escalation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	if err := e.Meta.MarshalLogObject(encoder); err != nil {
+		return err
+	}
+
+	encoder.AddInt64("fallback_for", e.FallbackForID.Int64)
+	return nil
+}
+
+func (e *Escalation) Load() error {
+	if err := e.Meta.Load(); err != nil {
+		return err
+	}
+
+	if e.FallbackForID.Valid {
+		// TODO: implement fallbacks (needs extra validation: mismatching rule_id, cycles)
+		return errors.Errorf("fallback escalation is not yet impelemented")
+	}
+
+	return nil
 }
 
 func (e *Escalation) DisplayName() string {
@@ -63,11 +81,8 @@ func (e *Escalation) TableName() string {
 }
 
 type EscalationRecipient struct {
-	ID            int64         `db:"id"`
-	EscalationID  int64         `db:"rule_escalation_id"`
-	ChannelID     sql.NullInt64 `db:"channel_id"`
-	recipient.Key `db:",inline"`
-	Recipient     recipient.Recipient
+	RecipientMeta `db:",inline"`
+	EscalationID  int64 `db:"rule_escalation_id"`
 }
 
 func (r *EscalationRecipient) TableName() string {

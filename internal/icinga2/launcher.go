@@ -11,7 +11,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
-	"github.com/icinga/icinga-notifications/internal/incident"
+	"github.com/icinga/icinga-notifications/internal/events"
 	"github.com/icinga/icingadb/pkg/icingadb"
 	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
@@ -126,12 +126,12 @@ func (launcher *Launcher) launch(src *config.Source) {
 		CallbackFn: func(ev *event.Event) {
 			l := logger.With(zap.Stringer("event", ev))
 
-			err := incident.ProcessEvent(subCtx, launcher.Db, launcher.Logs, launcher.RuntimeConfig, ev)
+			err := events.Process(subCtx, launcher.Db, launcher.Logs, launcher.RuntimeConfig, ev)
 			switch {
-			case errors.Is(err, incident.ErrSuperfluousStateChange):
+			case errors.Is(err, event.ErrSuperfluousStateChange):
 				l.Debugw("Stopped processing event with superfluous state change", zap.Error(err))
-			case err != nil:
-				l.Errorw("Cannot process event", zap.Error(err))
+			case err != nil: // events.Process doesn't return the root cause, so log it just for debugging purposes.
+				l.Debugw("Cannot process event", zap.Error(err))
 			default:
 				l.Debug("Successfully processed event over callback")
 			}

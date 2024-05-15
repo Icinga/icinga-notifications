@@ -289,41 +289,83 @@ func (r *RuntimeConfig) debugVerifyRule(id int64, rule *rule.Rule) error {
 					escalationID, i, escalationRecpient.EscalationID, escalationID, escalation.ID)
 			}
 
-			switch rec := escalationRecpient.Recipient.(type) {
-			case *recipient.Contact:
-				if rec == nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Contact) is nil", escalationID, i)
-				}
-
-				err := r.debugVerifyContact(escalationRecpient.ContactID.Int64, rec)
-				if err != nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Contact): %w", escalationID, i, err)
-				}
-
-			case *recipient.Group:
-				if rec == nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Group) is nil", escalationID, i)
-				}
-
-				err := r.debugVerifyGroup(escalationRecpient.GroupID.Int64, rec)
-				if err != nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Group): %w", escalationID, i, err)
-				}
-
-			case *recipient.Schedule:
-				if rec == nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Schedule) is nil", escalationID, i)
-				}
-
-				err := r.debugVerifySchedule(escalationRecpient.ScheduleID.Int64, rec)
-				if err != nil {
-					return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient (Schedule): %w", escalationID, i, err)
-				}
-
-			default:
-				return fmt.Errorf("Escalations[%d].Recipients[%d].Recipient has invalid type %T", escalationID, i, rec)
+			err := r.debugVerifyRecipients(escalationRecpient.RecipientMeta, fmt.Sprintf("Escalation[%d]", escalationID), i)
+			if err != nil {
+				return err
 			}
 		}
+	}
+
+	for routingID, routing := range rule.Routes {
+		if routing == nil {
+			return fmt.Errorf("Routing[%d] is nil", routingID)
+		}
+
+		if routing.ID != routingID {
+			return fmt.Errorf("Routing[%d]: rule routing has ID %d but is referenced as %d",
+				routingID, routing.ID, routingID)
+		}
+
+		if routing.RuleID != rule.ID {
+			return fmt.Errorf("Routing[%d] (ID=%d) has RuleID = %d while being referenced from rule %d",
+				routingID, routing.ID, routing.RuleID, rule.ID)
+		}
+
+		if routing.ConditionExpr.Valid && routing.Condition == nil {
+			return fmt.Errorf("Routing[%d] (ID=%d) has ConditionExpr but Condition is nil", routingID, routing.ID)
+		}
+
+		for i, routingRecipient := range routing.Recipients {
+			if routingRecipient == nil {
+				return fmt.Errorf("Routing[%d].Recipients[%d] is nil", routingID, i)
+			}
+
+			if routingRecipient.RoutingID != routing.ID {
+				return fmt.Errorf("Routing[%d].Recipients[%d].RoutingID = %d does not match Routing[%d].ID = %d",
+					routingID, i, routingRecipient.RoutingID, routingID, routing.ID)
+			}
+
+			err := r.debugVerifyRecipients(routingRecipient.RecipientMeta, fmt.Sprintf("Routing[%d]", routingID), i)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (r *RuntimeConfig) debugVerifyRecipients(recipientMeta rule.RecipientMeta, prefix string, index int) error {
+	switch rec := recipientMeta.Recipient.(type) {
+	case *recipient.Contact:
+		if rec == nil {
+			return fmt.Errorf("%s.Recipients[%d].Recipient (Contact) is nil", prefix, index)
+		}
+
+		err := r.debugVerifyContact(recipientMeta.ContactID.Int64, rec)
+		if err != nil {
+			return fmt.Errorf("%s.Recipients[%d].Recipient (Contact): %w", prefix, index, err)
+		}
+	case *recipient.Group:
+		if rec == nil {
+			return fmt.Errorf("%s.Recipients[%d].Recipient (Group) is nil", prefix, index)
+		}
+
+		err := r.debugVerifyGroup(recipientMeta.GroupID.Int64, rec)
+		if err != nil {
+			return fmt.Errorf("%s.Recipients[%d].Recipient (Group): %w", prefix, index, err)
+		}
+	case *recipient.Schedule:
+		if rec == nil {
+			return fmt.Errorf("%s.Recipients[%d].Recipient (Schedule) is nil", prefix, index)
+		}
+
+		err := r.debugVerifySchedule(recipientMeta.ScheduleID.Int64, rec)
+		if err != nil {
+			return fmt.Errorf("%s.Recipients[%d].Recipient (Schedule): %w", prefix, index, err)
+		}
+	default:
+		return fmt.Errorf("%s.Recipients[%d].Recipient has invalid type %T", prefix, index, rec)
 	}
 
 	return nil
