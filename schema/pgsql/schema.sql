@@ -101,7 +101,13 @@ CREATE TABLE rotation (
     -- Needed exclusively by Web to simplify editing and visualisation
     options text NOT NULL,
 
-    UNIQUE (schedule_id, priority), -- each schedule can only have one rotation with a given priority
+    -- A date in the format 'YYYY-MM-DD' when the first handoff should happen.
+    -- It is a string as handoffs are restricted to happen only once per day
+    first_handoff date NOT NULL,
+
+    -- each schedule can only have one rotation with a given priority starting at given date
+    UNIQUE (schedule_id, priority, first_handoff),
+
     CONSTRAINT pk_rotation PRIMARY KEY (id)
 );
 
