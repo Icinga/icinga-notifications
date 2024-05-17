@@ -24,7 +24,7 @@ import (
 type escalationID = int64
 
 type Incident struct {
-	Id          int64           `db:"id"`
+	ID          int64           `db:"id"`
 	ObjectID    types.Binary    `db:"object_id"`
 	StartedAt   types.UnixMilli `db:"started_at"`
 	RecoveredAt types.UnixMilli `db:"recovered_at"`
@@ -79,11 +79,7 @@ func NewIncident(
 }
 
 func (i *Incident) String() string {
-	return fmt.Sprintf("#%d", i.Id)
-}
-
-func (i *Incident) ID() int64 {
-	return i.Id
+	return fmt.Sprintf("#%d", i.ID)
 }
 
 func (i *Incident) HasManager() bool {
@@ -301,7 +297,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 	i.logger.Infof("Incident severity changed from %s to %s", oldSeverity.String(), newSeverity.String())
 
 	hr := &HistoryRow{
-		IncidentID:  i.Id,
+		IncidentID:  i.ID,
 		EventID:     types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Time:        types.UnixMilli(time.Now()),
 		Type:        IncidentSeverityChanged,
@@ -322,7 +318,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		RemoveCurrent(i.Object)
 
 		hr = &HistoryRow{
-			IncidentID: i.Id,
+			IncidentID: i.ID,
 			EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 			Time:       i.RecoveredAt,
 			Type:       Closed,
@@ -358,7 +354,7 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 	i.logger.Infow(fmt.Sprintf("Source %d opened incident at severity %q", ev.SourceId, i.Severity.String()), zap.String("message", ev.Message))
 
 	hr := &HistoryRow{
-		IncidentID:  i.Id,
+		IncidentID:  i.ID,
 		Type:        Opened,
 		Time:        types.UnixMilli(ev.Time),
 		EventID:     types.MakeInt(ev.ID, types.TransformZeroIntToNull),
@@ -381,7 +377,7 @@ func (i *Incident) handleMuteUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.
 		return nil
 	}
 
-	hr := &HistoryRow{IncidentID: i.Id, EventID: types.MakeInt(ev.ID, types.TransformZeroIntToNull), Time: types.UnixMilli(time.Now())}
+	hr := &HistoryRow{IncidentID: i.ID, EventID: types.MakeInt(ev.ID, types.TransformZeroIntToNull), Time: types.UnixMilli(time.Now())}
 	logger := i.logger.With(zap.String("event", ev.String()))
 	if i.Object.IsMuted() {
 		hr.Type = Muted
@@ -415,7 +411,7 @@ func (i *Incident) onFilterRuleMatch(ctx context.Context, r *rule.Rule, tx *sqlx
 	}
 
 	hr := &HistoryRow{
-		IncidentID: i.Id,
+		IncidentID: i.ID,
 		Time:       types.UnixMilli(time.Now()),
 		EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		RuleID:     types.MakeInt(r.ID, types.TransformZeroIntToNull),
@@ -510,7 +506,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 		}
 
 		hr := &HistoryRow{
-			IncidentID:       i.Id,
+			IncidentID:       i.ID,
 			Time:             state.TriggeredAt,
 			EventID:          types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 			RuleEscalationID: types.MakeInt(state.RuleEscalationID, types.TransformZeroIntToNull),
@@ -544,7 +540,7 @@ func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifica
 	}
 
 	incidentUrl := baseUrl.JoinPath("/notifications/incident")
-	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID())
+	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID)
 
 	req := &plugin.NotificationRequest{
 		Object: &plugin.Object{
@@ -554,7 +550,7 @@ func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifica
 			ExtraTags: i.Object.ExtraTags,
 		},
 		Incident: &plugin.Incident{
-			Id:       i.Id,
+			Id:       i.ID,
 			Url:      incidentUrl.String(),
 			Severity: i.Severity.String(),
 		},
@@ -659,7 +655,7 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 	i.logger.Infof("Contact %q role changed from %s to %s", contact.String(), oldRole.String(), newRole.String())
 
 	hr := &HistoryRow{
-		IncidentID:       i.Id,
+		IncidentID:       i.ID,
 		Key:              recipientKey,
 		EventID:          types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Type:             RecipientRoleChanged,
@@ -737,7 +733,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 func (i *Incident) restoreRecipients(ctx context.Context) error {
 	contact := &ContactRow{}
 	var contacts []*ContactRow
-	err := i.db.SelectContext(ctx, &contacts, i.db.Rebind(i.db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), i.Id)
+	err := i.db.SelectContext(ctx, &contacts, i.db.Rebind(i.db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), i.ID)
 	if err != nil {
 		i.logger.Errorw("Failed to restore incident recipients from the database", zap.Error(err))
 		return err
