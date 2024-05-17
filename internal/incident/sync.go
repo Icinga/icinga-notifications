@@ -26,7 +26,7 @@ func (i *Incident) Upsert() interface{} {
 // Before syncing any incident related database entries, this method should be called at least once.
 // Returns an error on db failure.
 func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
-	if i.Id != 0 {
+	if i.ID != 0 {
 		stmt, _ := i.db.BuildUpsertStmt(i)
 		_, err := tx.NamedExecContext(ctx, stmt, i)
 		if err != nil {
@@ -39,14 +39,14 @@ func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 			return err
 		}
 
-		i.Id = incidentId
+		i.ID = incidentId
 	}
 
 	return nil
 }
 
 func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, state *EscalationState) error {
-	state.IncidentID = i.Id
+	state.IncidentID = i.ID
 
 	stmt, _ := i.db.BuildUpsertStmt(state)
 	_, err := tx.NamedExecContext(ctx, stmt, state)
@@ -56,7 +56,7 @@ func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, stat
 
 // AddEvent Inserts incident history record to the database and returns an error on db failure.
 func (i *Incident) AddEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	ie := &EventRow{IncidentID: i.Id, EventID: ev.ID}
+	ie := &EventRow{IncidentID: i.ID, EventID: ev.ID}
 	stmt, _ := i.db.BuildInsertStmt(ie)
 	_, err := tx.NamedExecContext(ctx, stmt, ie)
 
@@ -73,7 +73,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 
 	for _, escalationRecipient := range escalation.Recipients {
 		r := escalationRecipient.Recipient
-		cr := &ContactRow{IncidentID: i.Id, Role: newRole}
+		cr := &ContactRow{IncidentID: i.ID, Role: newRole}
 
 		recipientKey := recipient.ToKey(r)
 		cr.Key = recipientKey
@@ -89,7 +89,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 				i.logger.Infof("Contact %q role changed from %s to %s", r, state.Role.String(), newRole.String())
 
 				hr := &HistoryRow{
-					IncidentID:       i.Id,
+					IncidentID:       i.ID,
 					EventID:          types.MakeInt(eventId, types.TransformZeroIntToNull),
 					Key:              cr.Key,
 					Time:             types.UnixMilli(time.Now()),
@@ -126,7 +126,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 // AddRuleMatched syncs the given *rule.Rule to the database.
 // Returns an error on database failure.
 func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule) error {
-	rr := &RuleRow{IncidentID: i.Id, RuleID: r.ID}
+	rr := &RuleRow{IncidentID: i.ID, RuleID: r.ID}
 	stmt, _ := i.db.BuildUpsertStmt(rr)
 	_, err := tx.NamedExecContext(ctx, stmt, rr)
 
@@ -146,7 +146,7 @@ func (i *Incident) generateNotifications(
 	for contact, channels := range contactChannels {
 		for chID := range channels {
 			hr := &HistoryRow{
-				IncidentID:        i.Id,
+				IncidentID:        i.ID,
 				Key:               recipient.ToKey(contact),
 				EventID:           types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 				Time:              types.UnixMilli(time.Now()),
