@@ -19,6 +19,11 @@ CREATE TABLE IF NOT EXISTS rotation (
     -- It is a string as handoffs are restricted to happen only once per day
     first_handoff date NOT NULL,
 
+    -- Set in case the first_handoff was in the past during creation of the rotation.
+    -- It is essentially the creation time of the rotation.
+    -- Used by Web to avoid showing shifts that never happened
+    actual_handoff bigint,
+
     -- each schedule can only have one rotation with a given priority starting at given date
     UNIQUE (schedule_id, priority, first_handoff),
 
