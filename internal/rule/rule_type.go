@@ -1,3 +1,5 @@
+//go:generate go tool stringer -linecomment -type Type -output rule_type_string.go
+
 package rule
 
 import (
@@ -5,25 +7,15 @@ import (
 	"fmt"
 )
 
-type Type int
+// Type represents the type of event rule.
+type Type uint8
 
 const (
-	TypeEscalation Type = iota
-	TypeRouting
+	TypeEscalation Type = iota // escalation
+	TypeRouting                // routing
+
+	_typeMax // internal
 )
-
-var typeByName = map[string]Type{
-	"escalation": TypeEscalation,
-	"routing":    TypeRouting,
-}
-
-var typeToName = func() map[Type]string {
-	types := make(map[Type]string)
-	for name, eventType := range typeByName {
-		types[eventType] = name
-	}
-	return types
-}()
 
 // Scan implements the sql.Scanner interface.
 func (t *Type) Scan(src any) error {
@@ -37,13 +29,12 @@ func (t *Type) Scan(src any) error {
 		return fmt.Errorf("unable to scan type %T into rule.Type", src)
 	}
 
-	ruleType, ok := typeByName[name]
-	if !ok {
-		return fmt.Errorf("unknown rule type %q", name)
+	ruleType, err := ParseRuleType(name)
+	if err != nil {
+		return err
 	}
 
 	*t = ruleType
-
 	return nil
 }
 
@@ -51,6 +42,12 @@ func (t Type) Value() (driver.Value, error) {
 	return t.String(), nil
 }
 
-func (t *Type) String() string {
-	return typeToName[*t]
+// ParseRuleType parses a string into a Type.
+func ParseRuleType(str string) (Type, error) {
+	for t := range _typeMax {
+		if t.String() == str {
+			return t, nil
+		}
+	}
+	return 0, fmt.Errorf("unknown rule type %q", str)
 }

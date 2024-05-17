@@ -83,7 +83,7 @@ func (e *EscalationFilter) EvalLess(key string, value string) (bool, error) {
 	}
 }
 
-func (e *EscalationFilter) EvalLike(key string, value string) (bool, error) {
+func (e *EscalationFilter) EvalLike(_, _ string) (bool, error) {
 	return false, fmt.Errorf("escalation filter does not support wildcard matches")
 }
 
@@ -117,4 +117,35 @@ func (e *EscalationFilter) EvalExists(key string) bool {
 	default:
 		return false
 	}
+}
+
+// RoutingFilter is used to evaluate non-state events (routing) conditions.
+// Currently, it only implements the equal operator for the "event_type" filter key.
+type RoutingFilter struct {
+	EventType event.Type
+}
+
+func (rf *RoutingFilter) EvalEqual(key, value string) (bool, error) {
+	switch key {
+	case "event_type":
+		return rf.EventType.String() == value, nil
+	default:
+		return false, fmt.Errorf("unsupported rule routing filter option %q", key)
+	}
+}
+
+func (rf *RoutingFilter) EvalLess(_, _ string) (bool, error) {
+	return false, fmt.Errorf("rule routing filter does not support '<' operator")
+}
+
+func (rf *RoutingFilter) EvalLike(_, _ string) (bool, error) {
+	return false, fmt.Errorf("rule routing filter does not support wildcard matches")
+}
+
+func (rf *RoutingFilter) EvalLessOrEqual(key, value string) (bool, error) {
+	return rf.EvalEqual(key, value)
+}
+
+func (rf *RoutingFilter) EvalExists(key string) bool {
+	return key == "event_type"
 }
