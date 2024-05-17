@@ -68,7 +68,7 @@ func TestLoadOpenIncidents(t *testing.T) {
 			RemoveCurrent(i.Object)
 
 			// Mark some of the existing incidents as recovered.
-			if i.Id%20 == 0 { // 1000 / 20 => 50 existing incidents will be marked as recovered!
+			if i.ID%20 == 0 { // 1000 / 20 => 50 existing incidents will be marked as recovered!
 				i.RecoveredAt = types.UnixMilli(time.Now())
 
 				require.NoError(t, i.Sync(ctx, tx), "failed to update/insert incident")
@@ -125,7 +125,7 @@ func assertIncidents(ctx context.Context, db *database.DB, t *testing.T, testDat
 		assert.NotNil(t, current.Object, "failed to restore incident object")
 
 		if i != nil {
-			assert.Equal(t, i.Id, current.Id, "incidents linked to the same object don't have the same ID")
+			assert.Equal(t, i.ID, current.ID, "incidents linked to the same object don't have the same ID")
 			assert.Equal(t, i.Severity, current.Severity, "failed to restore incident severity")
 			assert.Equal(t, i.StartedAt, current.StartedAt, "failed to restore incident started at")
 			assert.Equal(t, i.RecoveredAt, current.RecoveredAt, "failed to restore incident recovered at")
