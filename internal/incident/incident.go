@@ -9,6 +9,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/notification"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
@@ -200,8 +201,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 	}
 
-	var notifications []*NotificationEntry
-	notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
+	notifications, err := i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
 	if err != nil {
 		return err
 	}
@@ -245,7 +245,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		return
 	}
 
-	var notifications []*NotificationEntry
+	notifications := make(notification.PendingNotifications)
 	ctx := context.Background()
 	err := utils.RunInTx(ctx, i.db, func(tx *sqlx.Tx) error {
 		err := ev.Sync(ctx, tx, i.db, i.Object.ID)
@@ -294,7 +294,6 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		Type:        IncidentSeverityChanged,
 		NewSeverity: newSeverity,
 		OldSeverity: oldSeverity,
-		Message:     utils.ToDBString(ev.Message),
 	}
 
 	if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -350,7 +349,6 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 		Time:        types.UnixMilli(ev.Time),
 		EventID:     utils.ToDBInt(ev.ID),
 		NewSeverity: i.Severity,
-		Message:     utils.ToDBString(ev.Message),
 	}
 
 	if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -518,7 +516,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 
 // notifyContacts executes all the given pending notifications of the current incident.
 // Returns error on database failure or if the provided context is cancelled.
-func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifications []*NotificationEntry) error {
+func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notificationHistories notification.PendingNotifications) error {
 	baseUrl, err := url.Parse(daemon.Config().Icingaweb2URL)
 	if err != nil {
 		i.logger.Errorw("Failed to parse Icinga Web 2 URL", zap.String("url", daemon.Config().Icingaweb2URL), zap.Error(err))
@@ -548,26 +546,20 @@ func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifica
 		},
 	}
 
-	for _, notification := range notifications {
-		contact := i.runtimeConfig.Contacts[notification.ContactID]
-		if contact == nil {
-			i.logger.Debugw("Incident refers unknown contact, might got deleted", zap.Int64("contact_id", notification.ContactID))
-			continue
-		}
+	for contact, histories := range notificationHistories {
+		for _, history := range histories {
+			if i.notifyContact(contact, req, history.ChannelID) != nil {
+				history.State = notification.StateFailed
+			} else {
+				history.State = notification.StateSent
+			}
 
-		if i.notifyContact(contact, req, notification.ChannelID) != nil {
-			notification.State = NotificationStateFailed
-		} else {
-			notification.State = NotificationStateSent
-		}
-
-		notification.SentAt = types.UnixMilli(time.Now())
-		stmt, _ := i.db.BuildUpdateStmt(notification)
-		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
-			i.logger.Errorw(
-				"Failed to update contact notified incident history", zap.String("contact", contact.String()),
-				zap.Error(err),
-			)
+			history.SentAt = types.UnixMilli(time.Now())
+			stmt, _ := i.db.BuildUpdateStmt(history)
+			if _, err := i.db.NamedExecContext(ctx, stmt, history); err != nil {
+				i.logger.Errorw("Failed to update contact notified history",
+					zap.String("contact", contact.String()), zap.Error(err))
+			}
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -648,7 +640,6 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 		Time:             types.UnixMilli(time.Now()),
 		NewRecipientRole: newRole,
 		OldRecipientRole: oldRole,
-		Message:          utils.ToDBString(ev.Message),
 	}
 
 	if err := hr.Sync(ctx, i.db, tx); err != nil {
