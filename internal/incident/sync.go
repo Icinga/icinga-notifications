@@ -7,6 +7,7 @@ import (
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/notification"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/jmoiron/sqlx"
@@ -126,28 +127,36 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 
 // generateNotifications generates incident notification histories of the given recipients.
 //
-// This function will just insert NotificationStateSuppressed incident histories and return an empty slice if
+// This function will just insert notification.StateSuppressed incident histories and return an empty slice if
 // the current Object is muted, otherwise a slice of pending *NotificationEntry(ies) that can be used to update
 // the corresponding histories after the actual notifications have been sent out.
 func (i *Incident) generateNotifications(
-	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
-) ([]*NotificationEntry, error) {
-	var notifications []*NotificationEntry
-	suppress := i.isMuted && i.Object.IsMuted()
-	for contact, channels := range contactChannels {
-		for chID := range channels {
+	ctx context.Context,
+	tx *sqlx.Tx,
+	ev *event.Event,
+	contactChannels rule.ContactChannels,
+) (notification.PendingNotifications, error) {
+	notifications, err := notification.AddNotifications(ctx, i.DB, tx, contactChannels, func(n *notification.History) {
+		n.IncidentID = types.MakeInt(i.ID, types.TransformZeroIntToNull)
+		n.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
+		if i.isMuted && i.Object.IsMuted() {
+			n.NotificationState = notification.StateSuppressed
+		}
+	})
+	if err != nil {
+		i.Logger.Errorw("Failed to add pending notification histories", zap.Error(err))
+		return nil, err
+	}
+
+	for contact, entries := range notifications {
+		for _, entry := range entries {
 			hr := &HistoryRow{
-				IncidentID:        i.ID,
-				Key:               recipient.ToKey(contact),
-				EventID:           types.MakeInt(ev.ID, types.TransformZeroIntToNull),
-				Time:              types.UnixMilli(time.Now()),
-				Type:              Notified,
-				ChannelID:         types.MakeInt(chID, types.TransformZeroIntToNull),
-				NotificationState: NotificationStatePending,
-				Message:           types.MakeString(ev.Message, types.TransformEmptyStringToNull),
-			}
-			if suppress {
-				hr.NotificationState = NotificationStateSuppressed
+				IncidentID:            i.ID,
+				Key:                   recipient.ToKey(contact),
+				EventID:               types.MakeInt(ev.ID, types.TransformZeroIntToNull),
+				Time:                  types.UnixMilli(time.Now()),
+				Type:                  Notified,
+				NotificationHistoryID: types.MakeInt(entry.HistoryRowID, types.TransformZeroIntToNull),
 			}
 
 			if err := hr.Sync(ctx, i.DB, tx); err != nil {
@@ -156,17 +165,11 @@ func (i *Incident) generateNotifications(
 					zap.Error(err))
 				return nil, err
 			}
-
-			if !suppress {
-				notifications = append(notifications, &NotificationEntry{
-					HistoryRowID: hr.ID,
-					ContactID:    contact.ID,
-					State:        NotificationStatePending,
-					ChannelID:    chID,
-				})
-			}
 		}
 	}
 
+	if i.isMuted && i.Object.IsMuted() {
+		return nil, nil // All notifications are suppressed.
+	}
 	return notifications, nil
 }

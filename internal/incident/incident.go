@@ -10,6 +10,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/notification"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
@@ -178,8 +179,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 	}
 
-	var notifications []*NotificationEntry
-	notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
+	notifications, err := i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
 	if err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		return
 	}
 
-	var notifications []*NotificationEntry
+	notifications := make(notification.PendingNotifications)
 	ctx := context.Background()
 	err := i.DB.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
 		err := ev.Sync(ctx, tx, i.DB, i.Object.ID)
@@ -296,7 +296,6 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		Type:        IncidentSeverityChanged,
 		NewSeverity: newSeverity,
 		OldSeverity: oldSeverity,
-		Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 	}
 
 	if err := hr.Sync(ctx, i.DB, tx); err != nil {
@@ -352,7 +351,6 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 		Time:        types.UnixMilli(ev.Time),
 		EventID:     types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		NewSeverity: i.Severity,
-		Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 	}
 
 	if err := hr.Sync(ctx, i.DB, tx); err != nil {
@@ -562,28 +560,22 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 // It updates the given NotificationEntry states in the database, marking them as sent or failed.
 // Failing to update a notification entry is logged but doesn't stop the notification process, thus
 // it will only return an error if the given context is done.
-func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifications []*NotificationEntry) error {
+func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notificationHistories notification.PendingNotifications) error {
 	req := i.MakeNotificationRequest(ev)
-	for _, notification := range notifications {
-		contact := i.RuntimeConfig.Contacts[notification.ContactID]
-		if contact == nil {
-			i.Logger.Debugw("Incident refers unknown contact, might got deleted", zap.Int64("contact_id", notification.ContactID))
-			continue
-		}
+	for contact, histories := range notificationHistories {
+		for _, history := range histories {
+			if i.notifyContact(contact, req, history.ChannelID) != nil {
+				history.State = notification.StateFailed
+			} else {
+				history.State = notification.StateSent
+			}
 
-		if i.notifyContact(contact, req, notification.ChannelID) != nil {
-			notification.State = NotificationStateFailed
-		} else {
-			notification.State = NotificationStateSent
-		}
-
-		notification.SentAt = types.UnixMilli(time.Now())
-		stmt, _ := i.DB.BuildUpdateStmt(notification)
-		if _, err := i.DB.NamedExecContext(ctx, stmt, notification); err != nil {
-			i.Logger.Errorw(
-				"Failed to update contact notified incident history", zap.String("contact", contact.String()),
-				zap.Error(err),
-			)
+			history.SentAt = types.UnixMilli(time.Now())
+			stmt, _ := i.DB.BuildUpdateStmt(history)
+			if _, err := i.DB.NamedExecContext(ctx, stmt, history); err != nil {
+				i.Logger.Errorw("Failed to update contact notified history",
+					zap.String("contact", contact.String()), zap.Error(err))
+			}
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -664,7 +656,6 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 		Time:             types.UnixMilli(time.Now()),
 		NewRecipientRole: newRole,
 		OldRecipientRole: oldRole,
-		Message:          types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 	}
 
 	if err := hr.Sync(ctx, i.DB, tx); err != nil {
