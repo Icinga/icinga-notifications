@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"sync"
 	"time"
 
@@ -11,12 +12,12 @@ import (
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
-	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
+	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )
@@ -74,14 +75,6 @@ func NewIncident(
 	}
 
 	return i
-}
-
-func (i *Incident) IncidentObject() *object.Object {
-	return i.Object
-}
-
-func (i *Incident) IncidentSeverity() baseEv.Severity {
-	return i.Severity
 }
 
 func (i *Incident) String() string {
@@ -281,6 +274,40 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		}
 
 		i.logger.Info("Successfully reevaluated time-based escalations")
+	}
+}
+
+// MakeNotificationRequest creates a notification request for the current incident and the given event.
+//
+// The returned request doesn't contain any contact information, that has to be filled in by the caller.
+// The URL of the incident is constructed using the Icinga Web 2 URL configured in the daemon configuration,
+// and panics if it fails to parse that URL.
+func (i *Incident) MakeNotificationRequest(ev *event.Event) *plugin.NotificationRequest {
+	baseUrl, err := url.Parse(daemon.Config().Icingaweb2URL)
+	if err != nil {
+		i.logger.Panicw("Failed to parse Icinga Web 2 URL", zap.String("url", daemon.Config().Icingaweb2URL), zap.Error(err))
+	}
+
+	incidentUrl := baseUrl.JoinPath("/notifications/incident")
+	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID())
+
+	return &plugin.NotificationRequest{
+		Object: &plugin.Object{
+			Name: i.Object.DisplayName(),
+			Url:  ev.URL,
+			Tags: i.Object.Tags,
+		},
+		Incident: &plugin.Incident{
+			Id:       i.ID(),
+			Url:      incidentUrl.String(),
+			Severity: i.Severity,
+		},
+		Event: &plugin.Event{
+			Time:     ev.Time,
+			Type:     ev.Type,
+			Username: ev.Username,
+			Message:  ev.Message,
+		},
 	}
 }
 
@@ -560,9 +587,13 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 	return nil
 }
 
-// notifyContacts executes all the given pending notifications of the current incident.
-// Returns error on database failure or if the provided context is cancelled.
+// notifyContacts sends notifications to the given contacts via their configured channels.
+//
+// It updates the given NotificationEntry states in the database, marking them as sent or failed.
+// Failing to update a notification entry is logged but doesn't stop the notification process, thus
+// it will only return an error if the given context is done.
 func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifications []*NotificationEntry) error {
+	req := i.MakeNotificationRequest(ev)
 	for _, notification := range notifications {
 		contact := i.runtimeConfig.Contacts[notification.ContactID]
 		if contact == nil {
@@ -570,7 +601,7 @@ func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifica
 			continue
 		}
 
-		if i.notifyContact(contact, ev, notification.ChannelID) != nil {
+		if i.notifyContact(contact, req, notification.ChannelID) != nil {
 			notification.State = NotificationStateFailed
 		} else {
 			notification.State = NotificationStateSent
@@ -594,7 +625,7 @@ func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifica
 }
 
 // notifyContact notifies the given recipient via a channel matching the given ID.
-func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, chID int64) error {
+func (i *Incident) notifyContact(contact *recipient.Contact, req *plugin.NotificationRequest, chID int64) error {
 	ch := i.runtimeConfig.Channels[chID]
 	if ch == nil {
 		i.logger.Errorw("Could not find config for channel", zap.Int64("channel_id", chID))
@@ -603,16 +634,21 @@ func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, ch
 	}
 
 	i.logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type),
-		zap.Int64("channel_id", chID), zap.String("event_type", ev.Type.String()))
+		zap.Int64("channel_id", chID), zap.Stringer("event_type", req.Event.Type))
 
-	err := ch.Notify(contact, i, ev, daemon.Config().Icingaweb2URL)
-	if err != nil {
+	contactStruct := &plugin.Contact{FullName: contact.FullName}
+	for _, addr := range contact.Addresses {
+		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
+	}
+	req.Contact = contactStruct
+
+	if err := ch.Notify(req); err != nil {
 		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
 		return err
 	}
 
 	i.logger.Infow("Successfully sent a notification via channel plugin", zap.String("type", ch.Type),
-		zap.String("contact", contact.FullName), zap.String("event_type", ev.Type.String()))
+		zap.String("contact", contact.FullName), zap.Stringer("event_type", req.Event.Type))
 
 	return nil
 }
@@ -771,7 +807,3 @@ func (e *EscalationState) TableName() string {
 type RecipientState struct {
 	Role ContactRole
 }
-
-var (
-	_ contracts.Incident = (*Incident)(nil)
-)
