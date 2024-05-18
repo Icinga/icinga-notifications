@@ -402,15 +402,6 @@ CREATE TABLE incident (
     CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id)
 );
 
-CREATE TABLE incident_event (
-    incident_id bigint NOT NULL,
-    event_id bigint NOT NULL,
-
-    CONSTRAINT pk_incident_event PRIMARY KEY (incident_id, event_id),
-    CONSTRAINT fk_incident_event_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
-    CONSTRAINT fk_incident_event_event FOREIGN KEY (event_id) REFERENCES event(id)
-);
-
 CREATE TYPE incident_contact_role AS ENUM ('recipient', 'subscriber', 'manager');
 
 CREATE TABLE incident_contact (

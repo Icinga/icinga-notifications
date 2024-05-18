@@ -66,3 +66,5 @@ ALTER TABLE incident_history
 
 ALTER TABLE incident_history RENAME CONSTRAINT fk_incident_history_incident_rule_escalation_state TO fk_incident_history_incident_rule_entry_state;
 ALTER TABLE incident_history RENAME CONSTRAINT fk_incident_history_rule_escalation TO fk_incident_history_rule_entry;
+
+DROP TABLE incident_event;

@@ -146,11 +146,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		i.Logger = i.Logger.With(zap.String("incident", i.String()))
 	}
 
-	if err = i.AddEvent(ctx, tx, ev); err != nil {
-		i.Logger.Errorw("Cannot insert incident event to the database", zap.Error(err))
-		return err
-	}
-
 	if err := i.handleMuteUnmute(ctx, tx, ev); err != nil {
 		i.Logger.Errorw("Cannot insert incident muted history", zap.String("event", ev.String()), zap.Error(err))
 		return err
@@ -230,10 +225,6 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		err := ev.Sync(ctx, tx, i.DB, i.Object.ID)
 		if err != nil {
 			return err
-		}
-
-		if err = i.AddEvent(ctx, tx, ev); err != nil {
-			return fmt.Errorf("cannot insert incident event to the database: %w", err)
 		}
 
 		if err = i.triggerEscalations(ctx, tx, ev, escalations); err != nil {

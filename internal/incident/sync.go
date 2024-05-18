@@ -54,15 +54,6 @@ func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, stat
 	return err
 }
 
-// AddEvent Inserts incident history record to the database and returns an error on db failure.
-func (i *Incident) AddEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	ie := &EventRow{IncidentID: i.ID, EventID: ev.ID}
-	stmt, _ := i.DB.BuildInsertStmt(ie)
-	_, err := tx.NamedExecContext(ctx, stmt, ie)
-
-	return err
-}
-
 // AddRecipient adds recipient from the given *rule.Entry to this incident.
 // Syncs also all the recipients with the database and returns an error on db failure.
 func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *rule.Entry, eventId int64) error {

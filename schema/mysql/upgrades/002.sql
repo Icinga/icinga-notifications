@@ -84,3 +84,5 @@ ALTER TABLE incident_history
   Add CONSTRAINT fk_incident_history_incident_rule_entry_state FOREIGN KEY (incident_id, rule_entry_id) REFERENCES incident_rule_entry_state(incident_id, rule_entry_id),
   Add CONSTRAINT fk_incident_history_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id),
   ADD CONSTRAINT fk_incident_history_notification_history FOREIGN KEY (notification_history_id) REFERENCES notification_history(id);
+
+DROP TABLE incident_event;
