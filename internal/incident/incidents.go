@@ -98,10 +98,10 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 						i.EscalationState[state.RuleEscalationID] = state
 
 						// Restore the incident rule matching the current escalation state if any.
-						i.runtimeConfig.RLock()
-						defer i.runtimeConfig.RUnlock()
+						i.RuntimeConfig.RLock()
+						defer i.RuntimeConfig.RUnlock()
 
-						escalation := i.runtimeConfig.GetRuleEntry(state.RuleEscalationID)
+						escalation := i.RuntimeConfig.GetRuleEntry(state.RuleEscalationID)
 						if escalation != nil {
 							i.Rules[escalation.RuleID] = true
 						}
@@ -121,7 +121,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 					for _, i := range incidentsById {
 						i.Object = object.GetFromCache(i.ObjectID)
 						i.isMuted = i.Object.IsMuted()
-						i.logger = logger.With(zap.String("object", i.Object.DisplayName()),
+						i.Logger = logger.With(zap.String("object", i.Object.DisplayName()),
 							zap.String("incident", i.String()))
 
 						currentIncidentsMu.Lock()
