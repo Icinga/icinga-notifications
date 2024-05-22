@@ -192,7 +192,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	// We've just committed the DB transaction and can safely update the incident muted flag.
 	i.isMuted = i.Object.IsMuted()
 
-	return i.notifyContacts(ctx, ev, notifications)
+	return notification.NotifyContacts(ctx, &i.Resources, i.MakeNotificationRequest(ev), notifications)
 }
 
 // RetriggerEscalations tries to re-evaluate the escalations and notify contacts.
@@ -242,7 +242,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 	if err != nil {
 		i.Logger.Errorw("Reevaluating time-based escalations failed", zap.Error(err))
 	} else {
-		if err = i.notifyContacts(ctx, ev, notifications); err != nil {
+		if err = notification.NotifyContacts(ctx, &i.Resources, i.MakeNotificationRequest(ev), notifications); err != nil {
 			i.Logger.Errorw("Failed to notify reevaluated escalation recipients", zap.Error(err))
 			return
 		}
@@ -259,24 +259,14 @@ func (i *Incident) MakeNotificationRequest(ev *event.Event) *plugin.Notification
 	incidentUrl := daemon.Config().IcingaWeb2UrlParsed.JoinPath("/notifications/incident")
 	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID)
 
-	return &plugin.NotificationRequest{
-		Object: &plugin.Object{
-			Name: i.Object.DisplayName(),
-			Url:  ev.URL,
-			Tags: i.Object.Tags,
-		},
-		Incident: &plugin.Incident{
-			Id:       i.ID,
-			Url:      incidentUrl.String(),
-			Severity: i.Severity,
-		},
-		Event: &plugin.Event{
-			Time:     ev.Time,
-			Type:     ev.Type,
-			Username: ev.Username,
-			Message:  ev.Message,
-		},
+	req := notification.NewPluginRequest(i.Object, ev)
+	req.Incident = &plugin.Incident{
+		Id:       i.ID,
+		Url:      incidentUrl.String(),
+		Severity: i.Severity,
 	}
+
+	return req
 }
 
 func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
@@ -551,66 +541,6 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 			return err
 		}
 	}
-
-	return nil
-}
-
-// notifyContacts sends notifications to the given contacts via their configured channels.
-//
-// It updates the given NotificationEntry states in the database, marking them as sent or failed.
-// Failing to update a notification entry is logged but doesn't stop the notification process, thus
-// it will only return an error if the given context is done.
-func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notificationHistories notification.PendingNotifications) error {
-	req := i.MakeNotificationRequest(ev)
-	for contact, histories := range notificationHistories {
-		for _, history := range histories {
-			if i.notifyContact(contact, req, history.ChannelID) != nil {
-				history.State = notification.StateFailed
-			} else {
-				history.State = notification.StateSent
-			}
-
-			history.SentAt = types.UnixMilli(time.Now())
-			stmt, _ := i.DB.BuildUpdateStmt(history)
-			if _, err := i.DB.NamedExecContext(ctx, stmt, history); err != nil {
-				i.Logger.Errorw("Failed to update contact notified history",
-					zap.String("contact", contact.String()), zap.Error(err))
-			}
-		}
-
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// notifyContact notifies the given recipient via a channel matching the given ID.
-func (i *Incident) notifyContact(contact *recipient.Contact, req *plugin.NotificationRequest, chID int64) error {
-	ch := i.RuntimeConfig.Channels[chID]
-	if ch == nil {
-		i.Logger.Errorw("Could not find config for channel", zap.Int64("channel_id", chID))
-
-		return fmt.Errorf("could not find config for channel ID: %d", chID)
-	}
-
-	i.Logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type),
-		zap.Int64("channel_id", chID), zap.Stringer("event_type", req.Event.Type))
-
-	contactStruct := &plugin.Contact{FullName: contact.FullName}
-	for _, addr := range contact.Addresses {
-		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
-	}
-	req.Contact = contactStruct
-
-	if err := ch.Notify(req); err != nil {
-		i.Logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
-		return err
-	}
-
-	i.Logger.Infow("Successfully sent a notification via channel plugin", zap.String("type", ch.Type),
-		zap.String("contact", contact.FullName), zap.Stringer("event_type", req.Event.Type))
 
 	return nil
 }
