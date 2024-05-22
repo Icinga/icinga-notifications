@@ -123,20 +123,6 @@ CREATE TABLE timeperiod (
     CONSTRAINT pk_timeperiod PRIMARY KEY (id)
 );
 
-CREATE TABLE timeperiod_entry (
-    id bigserial,
-    timeperiod_id bigint NOT NULL REFERENCES timeperiod(id),
-    rotation_member_id bigint REFERENCES rotation_member(id), -- nullable for future standalone timeperiods
-    start_time bigint NOT NULL,
-    end_time bigint NOT NULL,
-    -- Is needed by icinga-notifications-web to prefilter entries, which matches until this time and should be ignored by the daemon.
-    until_time bigint,
-    timezone text NOT NULL, -- e.g. 'Europe/Berlin', relevant for evaluating rrule (DST changes differ between zones)
-    rrule text, -- recurrence rule (RFC5545)
-
-    CONSTRAINT pk_timeperiod_entry PRIMARY KEY (id)
-);
-
 CREATE TABLE rotation_member (
     id bigserial,
     rotation_id bigint NOT NULL REFERENCES rotation(id),
@@ -155,6 +141,20 @@ CREATE TABLE rotation_member (
     CHECK (num_nonnulls(contact_id, contactgroup_id) = 1),
 
     CONSTRAINT pk_rotation_member PRIMARY KEY (id)
+);
+
+CREATE TABLE timeperiod_entry (
+    id bigserial,
+    timeperiod_id bigint NOT NULL REFERENCES timeperiod(id),
+    rotation_member_id bigint REFERENCES rotation_member(id), -- nullable for future standalone timeperiods
+    start_time bigint NOT NULL,
+    end_time bigint NOT NULL,
+    -- Is needed by icinga-notifications-web to prefilter entries, which matches until this time and should be ignored by the daemon.
+    until_time bigint,
+    timezone text NOT NULL, -- e.g. 'Europe/Berlin', relevant for evaluating rrule (DST changes differ between zones)
+    rrule text, -- recurrence rule (RFC5545)
+
+    CONSTRAINT pk_timeperiod_entry PRIMARY KEY (id)
 );
 
 CREATE TABLE source (
