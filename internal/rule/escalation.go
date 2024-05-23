@@ -41,6 +41,16 @@ func (e *Escalation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	return nil
 }
 
+// Eval evaluates the configured escalation filter for the provided filter.
+// Returns always true if there are no configured escalation conditions.
+func (e *Escalation) Eval(filterable *EscalationFilter) (bool, error) {
+	if e.Condition == nil {
+		return true, nil
+	}
+
+	return e.Condition.Eval(filterable)
+}
+
 func (e *Escalation) DisplayName() string {
 	if e.NameRaw.Valid && e.NameRaw.String != "" {
 		return e.NameRaw.String
