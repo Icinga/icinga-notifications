@@ -120,11 +120,17 @@ func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, 
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 
-	object, ok := cache[id.String()]
-	if !ok {
-		object = New(db, ev)
-		object.ID = id
-		cache[id.String()] = object
+	newObject := new(Object)
+	object, objectExists := cache[id.String()]
+	if !objectExists {
+		newObject = New(db, ev)
+		newObject.ID = id
+	} else {
+		*newObject = *object
+
+		newObject.ExtraTags = ev.ExtraTags
+		newObject.Name = ev.Name
+		newObject.URL = utils.ToDBString(ev.URL)
 	}
 
 	tx, err := db.BeginTxx(ctx, nil)
@@ -133,27 +139,27 @@ func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	stmt, _ := object.db.BuildUpsertStmt(&Object{})
-	_, err = tx.NamedExecContext(ctx, stmt, object)
+	stmt, _ := db.BuildUpsertStmt(&Object{})
+	_, err = tx.NamedExecContext(ctx, stmt, newObject)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert object: %w", err)
 	}
 
-	stmt, _ = object.db.BuildUpsertStmt(&IdTagRow{})
-	_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(object.ID, ev.Tags))
+	stmt, _ = db.BuildUpsertStmt(&IdTagRow{})
+	_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(newObject.ID, ev.Tags))
 	if err != nil {
 		return nil, fmt.Errorf("failed to upsert object id tags: %w", err)
 	}
 
-	extraTag := &ExtraTagRow{ObjectId: object.ID}
+	extraTag := &ExtraTagRow{ObjectId: newObject.ID}
 	_, err = tx.NamedExecContext(ctx, `DELETE FROM "object_extra_tag" WHERE "object_id" = :object_id`, extraTag)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete object extra tags: %w", err)
 	}
 
 	if len(ev.ExtraTags) > 0 {
-		stmt, _ := object.db.BuildInsertStmt(extraTag)
-		_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(object.ID, ev.ExtraTags))
+		stmt, _ := db.BuildInsertStmt(extraTag)
+		_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(newObject.ID, ev.ExtraTags))
 		if err != nil {
 			return nil, fmt.Errorf("failed to insert object extra tags: %w", err)
 		}
@@ -163,9 +169,12 @@ func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, 
 		return nil, fmt.Errorf("can't commit object database transaction: %w", err)
 	}
 
-	object.ExtraTags = ev.ExtraTags
-	object.Name = ev.Name
-	object.URL = utils.ToDBString(ev.URL)
+	if !objectExists {
+		cache[id.String()] = newObject
+		return newObject, nil
+	}
+
+	*object = *newObject
 
 	return object, nil
 }
