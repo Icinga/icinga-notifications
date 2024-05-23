@@ -360,21 +360,19 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 		}
 
 		if _, ok := i.Rules[r.ID]; !ok {
-			if r.ObjectFilter != nil {
-				matched, err := r.ObjectFilter.Eval(i.Object)
-				if err != nil {
-					i.logger.Warnw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
-				}
+			matched, err := r.Eval(i.Object)
+			if err != nil {
+				i.logger.Warnw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
+			}
 
-				if err != nil || !matched {
-					continue
-				}
+			if err != nil || !matched {
+				continue
 			}
 
 			i.Rules[r.ID] = struct{}{}
 			i.logger.Infow("Rule matches", zap.Object("rule", r))
 
-			err := i.AddRuleMatched(ctx, tx, r)
+			err = i.AddRuleMatched(ctx, tx, r)
 			if err != nil {
 				i.logger.Errorw("Failed to upsert incident rule", zap.Object("rule", r), zap.Error(err))
 
@@ -429,27 +427,16 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 		// Check if new escalation stages are reached
 		for _, escalation := range r.Escalations {
 			if _, ok := i.EscalationState[escalation.ID]; !ok {
-				matched := false
-
-				if escalation.Condition == nil {
-					matched = true
+				matched, err := escalation.Eval(filterContext)
+				if err != nil {
+					i.logger.Warnw(
+						"Failed to evaluate escalation condition", zap.Object("rule", r),
+						zap.Object("escalation", escalation), zap.Error(err),
+					)
+				} else if !matched {
+					incidentAgeFilter := filterContext.ReevaluateAfter(escalation.Condition)
+					retryAfter = min(retryAfter, incidentAgeFilter)
 				} else {
-					var err error
-					matched, err = escalation.Condition.Eval(filterContext)
-					if err != nil {
-						i.logger.Warnw(
-							"Failed to evaluate escalation condition", zap.Object("rule", r),
-							zap.Object("escalation", escalation), zap.Error(err),
-						)
-
-						matched = false
-					} else if !matched {
-						incidentAgeFilter := filterContext.ReevaluateAfter(escalation.Condition)
-						retryAfter = min(retryAfter, incidentAgeFilter)
-					}
-				}
-
-				if matched {
 					escalations = append(escalations, escalation)
 				}
 			}
