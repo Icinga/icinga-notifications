@@ -22,12 +22,7 @@ func (r *RuntimeConfig) fetchRules(ctx context.Context, tx *sqlx.Tx) error {
 
 	rulesByID := make(map[int64]*rule.Rule)
 	for _, ru := range rules {
-		ruleLogger := r.logger.With(
-			zap.Int64("id", ru.ID),
-			zap.String("name", ru.Name),
-			zap.String("object_filter", ru.ObjectFilterExpr.String),
-			zap.Int64("timeperiod_id", ru.TimePeriodID.Int64),
-		)
+		ruleLogger := r.logger.With(zap.Inline(ru))
 
 		if ru.ObjectFilterExpr.Valid {
 			f, err := filter.Parse(ru.ObjectFilterExpr.String)
@@ -134,12 +129,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 		if pendingRule == nil {
 			delete(r.Rules, id)
 		} else {
-			ruleLogger := r.logger.With(
-				zap.Int64("id", pendingRule.ID),
-				zap.String("name", pendingRule.Name),
-				zap.String("object_filter", pendingRule.ObjectFilterExpr.String),
-				zap.Int64("timeperiod_id", pendingRule.TimePeriodID.Int64),
-			)
+			ruleLogger := r.logger.With(zap.Inline(pendingRule))
 
 			if pendingRule.TimePeriodID.Valid {
 				if p := r.TimePeriods[pendingRule.TimePeriodID.Int64]; p == nil {

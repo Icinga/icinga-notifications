@@ -5,6 +5,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
+	"go.uber.org/zap/zapcore"
 	"time"
 )
 
@@ -17,6 +18,21 @@ type Rule struct {
 	ObjectFilter     filter.Filter          `db:"-"`
 	ObjectFilterExpr types.String           `db:"object_filter"`
 	Escalations      map[int64]*Escalation  `db:"-"`
+}
+
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (r *Rule) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddInt64("id", r.ID)
+	encoder.AddString("name", r.Name)
+
+	if r.TimePeriodID.Valid && r.TimePeriodID.Int64 != 0 {
+		encoder.AddInt64("timeperiod_id", r.TimePeriodID.Int64)
+	}
+	if r.ObjectFilterExpr.Valid && r.ObjectFilterExpr.String != "" {
+		encoder.AddString("object_filter", r.ObjectFilterExpr.String)
+	}
+
+	return nil
 }
 
 // ContactChannels stores a set of channel IDs for each set of individual contacts.

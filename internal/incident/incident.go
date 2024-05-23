@@ -363,7 +363,7 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 			if r.ObjectFilter != nil {
 				matched, err := r.ObjectFilter.Eval(i.Object)
 				if err != nil {
-					i.logger.Warnw("Failed to evaluate object filter", zap.String("rule", r.Name), zap.Error(err))
+					i.logger.Warnw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
 				}
 
 				if err != nil || !matched {
@@ -372,11 +372,11 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 			}
 
 			i.Rules[r.ID] = struct{}{}
-			i.logger.Infof("Rule %q matches", r.Name)
+			i.logger.Infow("Rule matches", zap.Object("rule", r))
 
 			err := i.AddRuleMatched(ctx, tx, r)
 			if err != nil {
-				i.logger.Errorw("Failed to upsert incident rule", zap.String("rule", r.Name), zap.Error(err))
+				i.logger.Errorw("Failed to upsert incident rule", zap.Object("rule", r), zap.Error(err))
 
 				return errors.New("failed to insert incident rule")
 			}
@@ -389,7 +389,7 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 				Type:       RuleMatched,
 			}
 			if err := hr.Sync(ctx, i.db, tx); err != nil {
-				i.logger.Errorw("Failed to insert rule matched incident history", zap.String("rule", r.Name), zap.Error(err))
+				i.logger.Errorw("Failed to insert rule matched incident history", zap.Object("rule", r), zap.Error(err))
 
 				return errors.New("failed to insert rule matched incident history")
 			}
@@ -438,7 +438,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 					matched, err = escalation.Condition.Eval(filterContext)
 					if err != nil {
 						i.logger.Warnw(
-							"Failed to evaluate escalation condition", zap.String("rule", r.Name),
+							"Failed to evaluate escalation condition", zap.Object("rule", r),
 							zap.Object("escalation", escalation), zap.Error(err),
 						)
 
@@ -483,14 +483,14 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, escalations []*rule.Escalation) error {
 	for _, escalation := range escalations {
 		r := i.runtimeConfig.Rules[escalation.RuleID]
-		i.logger.Infow("Rule reached escalation", zap.String("rule", r.Name), zap.Object("escalation", escalation))
+		i.logger.Infow("Rule reached escalation", zap.Object("rule", r), zap.Object("escalation", escalation))
 
 		state := &EscalationState{RuleEscalationID: escalation.ID, TriggeredAt: types.UnixMilli(time.Now())}
 		i.EscalationState[escalation.ID] = state
 
 		if err := i.AddEscalationTriggered(ctx, tx, state); err != nil {
 			i.logger.Errorw(
-				"Failed to upsert escalation state", zap.String("rule", r.Name),
+				"Failed to upsert escalation state", zap.Object("rule", r),
 				zap.Object("escalation", escalation), zap.Error(err),
 			)
 
@@ -508,7 +508,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 
 		if err := hr.Sync(ctx, i.db, tx); err != nil {
 			i.logger.Errorw(
-				"Failed to insert escalation triggered incident history", zap.String("rule", r.Name),
+				"Failed to insert escalation triggered incident history", zap.Object("rule", r),
 				zap.Object("escalation", escalation), zap.Error(err),
 			)
 
