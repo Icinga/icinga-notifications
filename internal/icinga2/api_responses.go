@@ -157,6 +157,8 @@ const (
 	typeDowntimeStarted        = "DowntimeStarted"
 	typeDowntimeTriggered      = "DowntimeTriggered"
 	typeFlapping               = "Flapping"
+	typeObjectCreated          = "ObjectCreated"
+	typeObjectDeleted          = "ObjectDeleted"
 )
 
 // StateChange represents the Icinga 2 API Event Stream StateChange response for host/service state changes.
@@ -273,6 +275,18 @@ type Flapping struct {
 	IsFlapping bool      `json:"is_flapping"`
 }
 
+// ObjectCreatedDeleted represents the Icinga 2 API stream object created/deleted response.
+//
+// NOTE:
+//   - The ObjectName field may already contain the composed name of the checkable if the ObjectType is `Service`.
+//   - The EventType field indicates which event type is currently being streamed and is either
+//     set to typeObjectCreated or typeObjectDeleted.
+type ObjectCreatedDeleted struct {
+	ObjectName string `json:"object_name"`
+	ObjectType string `json:"object_type"`
+	EventType  string `json:"type"`
+}
+
 // UnmarshalEventStreamResponse unmarshal a JSON response line from the Icinga 2 API Event Stream.
 //
 // The function expects an Icinga 2 API Event Stream Response in its JSON form and tries to unmarshal it into one of the
@@ -323,6 +337,8 @@ func UnmarshalEventStreamResponse(bytes []byte) (any, error) {
 		resp = new(DowntimeTriggered)
 	case typeFlapping:
 		resp = new(Flapping)
+	case typeObjectCreated, typeObjectDeleted:
+		resp = new(ObjectCreatedDeleted)
 	default:
 		return nil, fmt.Errorf("unsupported type %q", responseType)
 	}
