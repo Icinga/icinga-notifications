@@ -84,13 +84,16 @@ type CheckResult struct {
 //
 // NOTE:
 //   - An empty Service field indicates a host downtime.
+//   - If a downtime was added by a ScheduledDowntime object, ConfigOwner is set to the name of that object and can
+//     only be cancelled by its owner. Otherwise, it is empty and indicates user-created downtimes (via API or/and UI).
 //
 // https://icinga.com/docs/icinga-2/latest/doc/09-object-types/#objecttype-downtime
 type Downtime struct {
-	Host    string `json:"host_name"`
-	Service string `json:"service_name"`
-	Author  string `json:"author"`
-	Comment string `json:"comment"`
+	Host        string `json:"host_name"`
+	Service     string `json:"service_name"`
+	Author      string `json:"author"`
+	Comment     string `json:"comment"`
+	ConfigOwner string `json:"config_owner"`
 
 	// RemoveTime is used to indicate whether a downtime was ended automatically or cancelled prematurely by a user.
 	// It is set to zero time for the former case, otherwise to the timestamp at which time has been cancelled.
@@ -132,6 +135,7 @@ type HostServiceRuntimeAttributes struct {
 	LastStateChange           UnixFloat   `json:"last_state_change"`
 	DowntimeDepth             int         `json:"downtime_depth"`
 	Acknowledgement           int         `json:"acknowledgement"`
+	IsFlapping                bool        `json:"flapping"`
 	AcknowledgementLastChange UnixFloat   `json:"acknowledgement_last_change"`
 }
 
@@ -180,15 +184,19 @@ type StateChange struct {
 	Acknowledgement bool        `json:"acknowledgement"`
 }
 
-// AcknowledgementSet represents the Icinga 2 API Event Stream AcknowledgementSet response for acknowledgements set on hosts/services.
+// Acknowledgement represents the Icinga 2 API Event Stream AcknowledgementSet or AcknowledgementCleared
+// response for acknowledgements set/cleared on/from hosts/services.
 //
 // NOTE:
 //   - An empty Service field indicates a host acknowledgement.
 //   - State might be StateHost{Up,Down} for hosts or StateService{Ok,Warning,Critical,Unknown} for services.
 //   - StateType might be StateTypeSoft or StateTypeHard.
+//   - EventType is either set to typeAcknowledgementSet or typeAcknowledgementCleared
+//   - Author and Comment fields are always empty when EventType is set to typeAcknowledgementCleared
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-acknowledgementset
-type AcknowledgementSet struct {
+// https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-acknowledgementcleared
+type Acknowledgement struct {
 	Timestamp UnixFloat `json:"timestamp"`
 	Host      string    `json:"host"`
 	Service   string    `json:"service"`
@@ -196,22 +204,7 @@ type AcknowledgementSet struct {
 	StateType int       `json:"state_type"`
 	Author    string    `json:"author"`
 	Comment   string    `json:"comment"`
-}
-
-// AcknowledgementCleared represents the Icinga 2 API Event Stream AcknowledgementCleared response for acknowledgements cleared on hosts/services.
-//
-// NOTE:
-//   - An empty Service field indicates a host acknowledgement.
-//   - State might be StateHost{Up,Down} for hosts or StateService{Ok,Warning,Critical,Unknown} for services.
-//   - StateType might be StateTypeSoft or StateTypeHard.
-//
-// https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-acknowledgementcleared
-type AcknowledgementCleared struct {
-	Timestamp UnixFloat `json:"timestamp"`
-	Host      string    `json:"host"`
-	Service   string    `json:"service"`
-	State     int       `json:"state"`
-	StateType int       `json:"state_type"`
+	EventType string    `json:"type"`
 }
 
 // CommentAdded represents the Icinga 2 API Event Stream CommentAdded response for added host/service comments.
@@ -266,13 +259,21 @@ type DowntimeTriggered struct {
 //
 // NOTE:
 //   - An empty Service field indicates a host being in flapping state.
+//   - State includes the current state of the Checkable at the point in time at which it enters or exits the flapping state.
+//   - CurrentFlapping indicates the current flapping value of a Checkable in percent.
+//   - ThresholdLow is the low/min flapping threshold value set by the user (CurrentFlapping < ThresholdLow = flapping end).
+//   - ThresholdHigh is the high/max flapping threshold value set by the user (CurrentFlapping > ThresholdHigh = flapping start).
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-flapping
 type Flapping struct {
-	Timestamp  UnixFloat `json:"timestamp"`
-	Host       string    `json:"host"`
-	Service    string    `json:"service"`
-	IsFlapping bool      `json:"is_flapping"`
+	Timestamp       UnixFloat `json:"timestamp"`
+	Host            string    `json:"host"`
+	Service         string    `json:"service"`
+	IsFlapping      bool      `json:"is_flapping"`
+	State           int       `json:"state"`
+	CurrentFlapping int       `json:"current_flapping"`
+	ThresholdLow    int       `json:"threshold_low"`
+	ThresholdHigh   int       `json:"threshold_high"`
 }
 
 // ObjectCreatedDeleted represents the Icinga 2 API stream object created/deleted response.
@@ -319,10 +320,8 @@ func UnmarshalEventStreamResponse(bytes []byte) (any, error) {
 	switch responseType {
 	case typeStateChange:
 		resp = new(StateChange)
-	case typeAcknowledgementSet:
-		resp = new(AcknowledgementSet)
-	case typeAcknowledgementCleared:
-		resp = new(AcknowledgementCleared)
+	case typeAcknowledgementSet, typeAcknowledgementCleared:
+		resp = new(Acknowledgement)
 	case typeCommentAdded:
 		resp = new(CommentAdded)
 	case typeCommentRemoved:

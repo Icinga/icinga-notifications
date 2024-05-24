@@ -28,7 +28,8 @@ func (e *IdTagRow) TableName() string {
 // Upsert implements the contracts.Upserter interface.
 func (o *Object) Upsert() interface{} {
 	return struct {
-		Name string       `db:"name"`
-		URL  types.String `db:"url"`
+		Name       string       `db:"name"`
+		URL        types.String `db:"url"`
+		MuteReason types.String `db:"mute_reason"`
 	}{}
 }

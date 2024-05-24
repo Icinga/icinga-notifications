@@ -16,3 +16,8 @@ import (
 func rawurlencode(s string) string {
 	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
 }
+
+// isMuted returns true if the given checkable is either in Downtime, Flapping or acknowledged, otherwise false.
+func isMuted(checkable *ObjectQueriesResult[HostServiceRuntimeAttributes]) bool {
+	return checkable.Attrs.IsFlapping || checkable.Attrs.Acknowledgement != AcknowledgementNone || checkable.Attrs.DowntimeDepth != 0
+}

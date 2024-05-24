@@ -135,11 +135,16 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 	return err
 }
 
-// addPendingNotifications inserts pending notification incident history of the given recipients.
-func (i *Incident) addPendingNotifications(
+// generateNotifications generates incident notification histories of the given recipients.
+//
+// This function will just insert NotificationStateSuppressed incident histories and return an empty slice if
+// the current Object is muted, otherwise a slice of pending *NotificationEntry(ies) that can be used to update
+// the corresponding histories after the actual notifications have been sent out.
+func (i *Incident) generateNotifications(
 	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
 ) ([]*NotificationEntry, error) {
 	var notifications []*NotificationEntry
+	suppress := i.isMuted && i.Object.IsMuted()
 	for contact, channels := range contactChannels {
 		for chID := range channels {
 			hr := &HistoryRow{
@@ -150,23 +155,28 @@ func (i *Incident) addPendingNotifications(
 				Type:              Notified,
 				ChannelID:         utils.ToDBInt(chID),
 				NotificationState: NotificationStatePending,
+				Message:           utils.ToDBString(ev.Message),
+			}
+			if suppress {
+				hr.NotificationState = NotificationStateSuppressed
 			}
 
 			if err := hr.Sync(ctx, i.db, tx); err != nil {
-				i.logger.Errorw(
-					"Failed to insert contact pending notification incident history",
-					zap.String("contact", contact.String()), zap.Error(err),
-				)
+				i.logger.Errorw("Failed to insert incident notification history",
+					zap.String("contact", contact.FullName), zap.Bool("incident_muted", i.Object.IsMuted()),
+					zap.Error(err))
 
-				return nil, errors.New("can't insert contact pending notification incident history")
+				return nil, errors.New("cannot insert incident notification history")
 			}
 
-			notifications = append(notifications, &NotificationEntry{
-				HistoryRowID: hr.ID,
-				ContactID:    contact.ID,
-				State:        NotificationStatePending,
-				ChannelID:    chID,
-			})
+			if !suppress {
+				notifications = append(notifications, &NotificationEntry{
+					HistoryRowID: hr.ID,
+					ContactID:    contact.ID,
+					State:        NotificationStatePending,
+					ChannelID:    chID,
+				})
+			}
 		}
 	}
 

@@ -149,8 +149,8 @@ func (client *Client) queryObjectsApiQuery(ctx context.Context, objType string, 
 		})
 }
 
-// fetchHostServiceGroups fetches all Host or, if service is not empty, Service groups.
-func (client *Client) fetchHostServiceGroups(ctx context.Context, host, service string) ([]string, error) {
+// fetchCheckable fetches the Checkable config state of the given Host/Service name from the Icinga 2 API.
+func (client *Client) fetchCheckable(ctx context.Context, host, service string) (*ObjectQueriesResult[HostServiceRuntimeAttributes], error) {
 	objType, objName := "host", host
 	if service != "" {
 		objType = "service"
@@ -171,7 +171,7 @@ func (client *Client) fetchHostServiceGroups(ctx context.Context, host, service 
 			objName, objType, len(objQueriesResults))
 	}
 
-	return objQueriesResults[0].Attrs.Groups, nil
+	return &objQueriesResults[0], nil
 }
 
 // fetchAcknowledgementComment fetches an Acknowledgement Comment for a Host (empty service) or for a Service at a Host.
@@ -228,23 +228,26 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ca
 		return err
 	}
 
-	var stateChangeEvents, acknowledgementEvents int
+	var stateChangeEvents, muteEvents, unmuteEvents int
 	defer func() {
 		client.Logger.Debugw("Querying API emitted events",
 			zap.String("object type", objType),
 			zap.Int("state changes", stateChangeEvents),
-			zap.Int("acknowledgements", acknowledgementEvents))
+			zap.Int("mute_events", muteEvents),
+			zap.Int("unmute_events", unmuteEvents))
 	}()
 
 	for _, objQueriesResult := range objQueriesResults {
-		var hostName, serviceName string
+		var hostName, serviceName, objectName string
 		switch objQueriesResult.Type {
 		case "Host":
 			hostName = objQueriesResult.Attrs.Name
+			objectName = hostName
 
 		case "Service":
 			hostName = objQueriesResult.Attrs.Host
 			serviceName = objQueriesResult.Attrs.Name
+			objectName = hostName + "!" + serviceName
 
 		default:
 			return fmt.Errorf("querying API delivered a wrong object type %q", objQueriesResult.Type)
@@ -256,46 +259,77 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ca
 			continue
 		}
 
-		// First: State change event
-		ev, err := client.buildHostServiceEvent(
-			ctx,
-			objQueriesResult.Attrs.LastCheckResult, objQueriesResult.Attrs.State,
-			hostName, serviceName)
+		attrs := objQueriesResult.Attrs
+		var fakeEv *event.Event
+		if attrs.Acknowledgement != AcknowledgementNone {
+			ackComment, err := client.fetchAcknowledgementComment(ctx, hostName, serviceName, attrs.AcknowledgementLastChange.Time())
+			if err != nil {
+				return fmt.Errorf("fetching acknowledgement comment for %q failed, %w", objectName, err)
+			}
+
+			ack := &Acknowledgement{Host: hostName, Service: serviceName, Author: ackComment.Author, Comment: ackComment.Text}
+			// We do not need to fake ACK set events as they are handled correctly by an incident and any
+			// redundant/successive ACK set events are discarded accordingly.
+			ack.EventType = typeAcknowledgementSet
+			fakeEv, err = client.buildAcknowledgementEvent(ctx, ack)
+			if err != nil {
+				return fmt.Errorf("failed to construct Event from Acknowledgement response, %w", err)
+			}
+		} else if isMuted(&objQueriesResult) {
+			fakeEv, err = client.buildCommonEvent(ctx, hostName, serviceName)
+			if err != nil {
+				return fmt.Errorf("failed to construct checkable fake mute event: %w", err)
+			}
+
+			fakeEv.Type = event.TypeMute
+			if attrs.IsFlapping {
+				fakeEv.SetMute(true, "Checkable is flapping, but we missed the Icinga 2 FlappingStart event")
+			} else {
+				fakeEv.SetMute(true, "Checkable is in downtime, but we missed the Icinga 2 DowntimeStart event")
+			}
+		} else {
+			// This could potentially produce numerous superfluous database (event table) entries if we generate such
+			// dummy events after each Icinga 2 / Notifications reload, thus they are being identified as such in
+			// incident#ProcessEvent() and Client.CallbackFn and suppressed accordingly.
+			fakeEv, err = client.buildCommonEvent(ctx, hostName, serviceName)
+			if err != nil {
+				return fmt.Errorf("failed to construct checkable fake unmute event: %w", err)
+			}
+
+			fakeEv.Type = event.TypeUnmute
+			fakeEv.SetMute(false, "All mute reasons of the checkable are cleared, but we missed the appropriate unmute event")
+		}
+
+		fakeEv.Message = attrs.LastCheckResult.Output
+		select {
+		case catchupEventCh <- &catchupEventMsg{eventMsg: &eventMsg{fakeEv, attrs.LastStateChange.Time()}}:
+			if fakeEv.Type == event.TypeUnmute {
+				unmuteEvents++
+			} else {
+				muteEvents++
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+
+		ev, err := client.buildHostServiceEvent(ctx, attrs.LastCheckResult, attrs.State, hostName, serviceName)
 		if err != nil {
 			return fmt.Errorf("failed to construct Event from Host/Service response, %w", err)
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case catchupEventCh <- &catchupEventMsg{eventMsg: &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time()}}:
+		case catchupEventCh <- &catchupEventMsg{eventMsg: &eventMsg{ev, attrs.LastStateChange.Time()}}:
 			stateChangeEvents++
-		}
-
-		// Second: Optional acknowledgement event
-		if objQueriesResult.Attrs.Acknowledgement == 0 {
-			continue
-		}
-
-		ackComment, err := client.fetchAcknowledgementComment(
-			ctx,
-			hostName, serviceName,
-			objQueriesResult.Attrs.AcknowledgementLastChange.Time())
-		if err != nil {
-			return fmt.Errorf("fetching acknowledgement comment for %v failed, %w", ev, err)
-		}
-
-		ev, err = client.buildAcknowledgementEvent(
-			ctx,
-			hostName, serviceName,
-			ackComment.Author, ackComment.Text, false)
-		if err != nil {
-			return fmt.Errorf("failed to construct Event from Acknowledgement response, %w", err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case catchupEventCh <- &catchupEventMsg{eventMsg: &eventMsg{ev, objQueriesResult.Attrs.LastStateChange.Time()}}:
-			acknowledgementEvents++
+			if fakeEv.Type == event.TypeAcknowledgementSet {
+				select {
+				// Retry the AckSet event so that the author of the ack is set as the incident
+				// manager if there was no existing incident before the above state change event.
+				case catchupEventCh <- &catchupEventMsg{eventMsg: &eventMsg{fakeEv, attrs.LastStateChange.Time()}}:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
 		}
 	}
 	return nil
@@ -473,11 +507,8 @@ func (client *Client) listenEventStream() error {
 
 			ev, err = client.buildHostServiceEvent(client.Ctx, respT.CheckResult, respT.State, respT.Host, respT.Service)
 			evTime = respT.Timestamp.Time()
-		case *AcknowledgementSet:
-			ev, err = client.buildAcknowledgementEvent(client.Ctx, respT.Host, respT.Service, respT.Author, respT.Comment, false)
-			evTime = respT.Timestamp.Time()
-		case *AcknowledgementCleared:
-			ev, err = client.buildAcknowledgementEvent(client.Ctx, respT.Host, respT.Service, "", "", true)
+		case *Acknowledgement:
+			ev, err = client.buildAcknowledgementEvent(client.Ctx, respT)
 			evTime = respT.Timestamp.Time()
 		// case *CommentAdded:
 		// case *CommentRemoved:
@@ -506,7 +537,7 @@ func (client *Client) listenEventStream() error {
 			ev, err = client.buildDowntimeEvent(client.Ctx, respT.Downtime, true)
 			evTime = respT.Timestamp.Time()
 		case *Flapping:
-			ev, err = client.buildFlappingEvent(client.Ctx, respT.Host, respT.Service, respT.IsFlapping)
+			ev, err = client.buildFlappingEvent(client.Ctx, respT)
 			evTime = respT.Timestamp.Time()
 		case *ObjectCreatedDeleted:
 			if err = client.deleteExtraTagsCacheFor(respT); err == nil {

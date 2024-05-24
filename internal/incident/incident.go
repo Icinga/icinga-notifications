@@ -44,6 +44,10 @@ type Incident struct {
 	// be reached solely based on the incident aging, so no more timer is necessary and timer stores nil.
 	timer *time.Timer
 
+	// isMuted indicates whether the current Object was already muted before the ongoing event.Event being processed.
+	// This prevents us from generating multiple muted histories when receiving several events that mute our Object.
+	isMuted bool
+
 	db            *database.DB
 	logger        *zap.SugaredLogger
 	runtimeConfig *config.RuntimeConfig
@@ -117,6 +121,17 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	i.runtimeConfig.RLock()
 	defer i.runtimeConfig.RUnlock()
 
+	// These event types are not like the others used to mute an object/incident, such as DowntimeStart, which
+	// uniquely identify themselves why an incident is being muted, but are rather super generic types, and as
+	// such, we are ignoring superfluous ones that don't have any effect on that incident.
+	if i.isMuted && ev.Type == event.TypeMute {
+		i.logger.Debugw("Ignoring superfluous mute event", zap.String("event", ev.String()))
+		return event.ErrSuperfluousMuteUnmuteEvent
+	} else if !i.isMuted && ev.Type == event.TypeUnmute {
+		i.logger.Debugw("Ignoring superfluous unmute event", zap.String("event", ev.String()))
+		return event.ErrSuperfluousMuteUnmuteEvent
+	}
+
 	tx, err := i.db.BeginTxx(ctx, nil)
 	if err != nil {
 		i.logger.Errorw("Can't start a db transaction", zap.Error(err))
@@ -147,6 +162,11 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		return errors.New("can't insert incident event to the database")
 	}
 
+	if err := i.handleMuteUnmute(ctx, tx, ev); err != nil {
+		i.logger.Errorw("Cannot insert incident muted history", zap.String("event", ev.String()), zap.Error(err))
+		return errors.New("cannot insert incident muted history")
+	}
+
 	switch ev.Type {
 	case event.TypeState:
 		if !isNew {
@@ -173,11 +193,18 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 	case event.TypeAcknowledgementSet:
 		if err := i.processAcknowledgementEvent(ctx, tx, ev); err != nil {
+			if errors.Is(err, errSuperfluousAckEvent) {
+				// That ack error type indicates that the acknowledgement author was already a manager, thus
+				// we can safely ignore that event and return without even committing the DB transaction.
+				return nil
+			}
+
 			return err
 		}
 	}
 
-	notifications, err := i.addPendingNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
+	var notifications []*NotificationEntry
+	notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
 	if err != nil {
 		return err
 	}
@@ -187,6 +214,9 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 
 		return errors.New("can't commit db transaction")
 	}
+
+	// We've just committed the DB transaction and can safely update the incident muted flag.
+	i.isMuted = i.Object.IsMuted()
 
 	return i.notifyContacts(ctx, ev, notifications)
 }
@@ -241,7 +271,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 			channels.LoadFromEscalationRecipients(escalation, ev.Time, i.isRecipientNotifiable)
 		}
 
-		notifications, err = i.addPendingNotifications(ctx, tx, ev, channels)
+		notifications, err = i.generateNotifications(ctx, tx, ev, channels)
 
 		return err
 	})
@@ -344,6 +374,31 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 	}
 
 	return nil
+}
+
+// handleMuteUnmute generates an incident Muted or Unmuted history based on the Object state.
+// Returns an error if fails to insert the generated history to the database.
+func (i *Incident) handleMuteUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
+	if i.isMuted == i.Object.IsMuted() {
+		return nil
+	}
+
+	hr := &HistoryRow{IncidentID: i.Id, EventID: utils.ToDBInt(ev.ID), Time: types.UnixMilli(time.Now())}
+	logger := i.logger.With(zap.String("event", ev.String()))
+	if i.Object.IsMuted() {
+		hr.Type = Muted
+		// Since the object may have already been muted with previous events before this incident even
+		// existed, we have to use the mute reason from this object and not from the ongoing event.
+		hr.Message = i.Object.MuteReason
+		logger.Infow("Muting incident", zap.String("reason", i.Object.MuteReason.String))
+	} else {
+		hr.Type = Unmuted
+		// On the other hand, if an object is unmuted, its mute reason is already reset, and we can't access it anymore.
+		hr.Message = utils.ToDBString(ev.MuteReason)
+		logger.Infow("Unmuting incident", zap.String("reason", ev.MuteReason))
+	}
+
+	return hr.Sync(ctx, i.db, tx)
 }
 
 // evaluateRules evaluates all the configured rules for this *incident.Object and
@@ -563,6 +618,10 @@ func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, ch
 	return nil
 }
 
+// errSuperfluousAckEvent is returned when the same ack author submits two successive ack set events on an incident.
+// This is error is going to be used only within this incident package.
+var errSuperfluousAckEvent = errors.New("superfluous acknowledgement set event, author is already a manager")
+
 // processAcknowledgementEvent processes the given ack event.
 // Promotes the ack author to incident.RoleManager if it's not already the case and generates a history entry.
 // Returns error on database failure.
@@ -583,7 +642,8 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 
 		if oldRole == RoleManager {
 			// The user is already a manager
-			return nil
+			i.logger.Debugw("Ignoring acknowledgement-set event, author is already a manager", zap.String("author", ev.Username))
+			return errSuperfluousAckEvent
 		}
 	} else {
 		i.Recipients[recipientKey] = &RecipientState{Role: newRole}

@@ -133,6 +133,8 @@ func (launcher *Launcher) launch(src *config.Source) {
 			switch {
 			case errors.Is(err, event.ErrSuperfluousStateChange):
 				l.Debugw("Stopped processing event with superfluous state change", zap.Error(err))
+			case errors.Is(err, event.ErrSuperfluousMuteUnmuteEvent):
+				l.Debugw("Stopped processing event with superfluous (un)mute object", zap.Error(err))
 			case err != nil:
 				l.Errorw("Cannot process event", zap.Error(err))
 			default:
