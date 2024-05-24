@@ -633,6 +633,42 @@ func TestApiResponseUnmarshal(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:     "objectcreated-host",
+			jsonData: `{"object_name":"event-stream","object_type":"Host","timestamp":1716542256.769028,"type":"ObjectCreated"}`,
+			expected: &ObjectCreatedDeleted{
+				ObjectName: "event-stream",
+				ObjectType: "Host",
+				EventType:  "ObjectCreated",
+			},
+		},
+		{
+			name:     "objectcreated-service",
+			jsonData: `{"object_name":"event-stream!ssh","object_type":"Service","timestamp":1716542256.783502,"type":"ObjectCreated"}`,
+			expected: &ObjectCreatedDeleted{
+				ObjectName: "event-stream!ssh",
+				ObjectType: "Service",
+				EventType:  "ObjectCreated",
+			},
+		},
+		{
+			name:     "objectdeleted-host",
+			jsonData: `{"object_name":"event-stream","object_type":"Host","timestamp":1716542070.492318,"type":"ObjectDeleted"}`,
+			expected: &ObjectCreatedDeleted{
+				ObjectName: "event-stream",
+				ObjectType: "Host",
+				EventType:  "ObjectDeleted",
+			},
+		},
+		{
+			name:     "objectdeleted-service",
+			jsonData: `{"object_name":"event-stream!ssh","object_type":"Service","timestamp":1716542070.492095,"type":"ObjectDeleted"}`,
+			expected: &ObjectCreatedDeleted{
+				ObjectName: "event-stream!ssh",
+				ObjectType: "Service",
+				EventType:  "ObjectDeleted",
+			},
+		},
 	}
 
 	for _, test := range tests {

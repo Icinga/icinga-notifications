@@ -3,7 +3,9 @@ package icinga2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/google/uuid"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -74,6 +76,14 @@ type Client struct {
 	eventDispatcherEventStream chan *eventMsg
 	// catchupPhaseRequest requests the main worker to switch to the catch-up-phase to query the API for missed events.
 	catchupPhaseRequest chan struct{}
+
+	// eventExtraTags is used to cache Checkable groups once they have been fetched from the Icinga 2 API so that they
+	// don't have to be fetched over again with each ongoing event. Host/Service groups are never supposed to change at
+	// runtime, so this cache is being refreshed once in a while when Icinga 2 dispatches an object created/deleted
+	// event and thus should not overload the Icinga 2 API in a large environment with numerous Checkables.
+	// The LRU cache size is defined as 2^17, and when the actual cached items reach this size, the least used values
+	// will simply be overwritten by the new ones.
+	eventExtraTagsCache *lru.Cache[string, map[string]string]
 }
 
 // buildCommonEvent creates an event.Event based on Host and (optional) Service attributes to be specified later.
@@ -88,10 +98,9 @@ type Client struct {
 //   - ID
 func (client *Client) buildCommonEvent(ctx context.Context, host, service string) (*event.Event, error) {
 	var (
-		eventName      string
-		eventUrl       *url.URL
-		eventTags      map[string]string
-		eventExtraTags = make(map[string]string)
+		eventName string
+		eventUrl  *url.URL
+		eventTags map[string]string
 	)
 
 	eventUrl, err := url.Parse(client.IcingaWebRoot)
@@ -109,14 +118,6 @@ func (client *Client) buildCommonEvent(ctx context.Context, host, service string
 			"host":    host,
 			"service": service,
 		}
-
-		serviceGroups, err := client.fetchHostServiceGroups(ctx, host, service)
-		if err != nil {
-			return nil, err
-		}
-		for _, serviceGroup := range serviceGroups {
-			eventExtraTags["servicegroup/"+serviceGroup] = ""
-		}
 	} else {
 		eventName = host
 
@@ -128,12 +129,9 @@ func (client *Client) buildCommonEvent(ctx context.Context, host, service string
 		}
 	}
 
-	hostGroups, err := client.fetchHostServiceGroups(ctx, host, "")
+	extraTags, err := client.fetchExtraTagsFor(ctx, host, service)
 	if err != nil {
 		return nil, err
-	}
-	for _, hostGroup := range hostGroups {
-		eventExtraTags["hostgroup/"+hostGroup] = ""
 	}
 
 	return &event.Event{
@@ -142,8 +140,61 @@ func (client *Client) buildCommonEvent(ctx context.Context, host, service string
 		Name:      eventName,
 		URL:       eventUrl.String(),
 		Tags:      eventTags,
-		ExtraTags: eventExtraTags,
+		ExtraTags: extraTags,
 	}, nil
+}
+
+// fetchExtraTagsFor fetches event extra tags for the given Host/Service name.
+//
+// If there are already existing extra tags in the cache, this function will just return those, otherwise
+// it will fetch the groups from the Icinga 2 API, map them to the event extra tags, add them to the client
+// Cache store and return them.
+//
+// Returns an error if it fails to successfully fetch the host/service groups from the API.
+func (client *Client) fetchExtraTagsFor(ctx context.Context, host, service string) (map[string]string, error) {
+	objectName := host
+	if service != "" {
+		objectName = host + "!" + service
+	}
+	if extraTags, ok := client.eventExtraTagsCache.Get(objectName); ok {
+		return extraTags, nil
+	}
+
+	extraTags := make(map[string]string)
+	hostGroups, err := client.fetchHostServiceGroups(ctx, host, "")
+	if err != nil {
+		return nil, err
+	}
+	for _, hostGroup := range hostGroups {
+		extraTags["hostgroup/"+hostGroup] = ""
+	}
+
+	if service != "" {
+		serviceGroups, err := client.fetchHostServiceGroups(ctx, host, service)
+		if err != nil {
+			return nil, err
+		}
+		for _, serviceGroup := range serviceGroups {
+			extraTags["servicegroup/"+serviceGroup] = ""
+		}
+	}
+
+	client.eventExtraTagsCache.Add(objectName, extraTags)
+
+	return extraTags, nil
+}
+
+// deleteExtraTagsCacheFor deletes any existing event extra tags of the given Object from the cache store.
+func (client *Client) deleteExtraTagsCacheFor(result *ObjectCreatedDeleted) error {
+	if result.ObjectType != "Host" && result.ObjectType != "Service" {
+		return fmt.Errorf("cannot delete object extra tags for unknown object_type %q", result.ObjectType)
+	}
+
+	// The checkable has just been either deleted or created, so delete all existing extra tags from our cache
+	// store as well and will be refreshed on the next access when Icinga 2 emits any other event for that object.
+	client.eventExtraTagsCache.Remove(result.ObjectName)
+
+	return nil
 }
 
 // buildHostServiceEvent constructs an event.Event based on a CheckResult, a Host or Service state, a Host name and an
@@ -454,6 +505,14 @@ func (client *Client) Process() {
 
 	client.eventDispatcherEventStream = make(chan *eventMsg)
 	client.catchupPhaseRequest = make(chan struct{})
+
+	cache, err := lru.New[string, map[string]string](1 << 17)
+	if err != nil {
+		// Is unlikely to happen, as the only error being returned is triggered by
+		// specifying negative numbers as the cache size.
+		client.Logger.Fatalw("Failed to initialise event extra tags cache", zap.Error(err))
+	}
+	client.eventExtraTagsCache = cache
 
 	go client.worker()
 

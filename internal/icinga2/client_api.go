@@ -332,6 +332,10 @@ func (client *Client) connectEventStream(esTypes []string) (io.ReadCloser, error
 		reqBody, err := json.Marshal(map[string]any{
 			"queue": fmt.Sprintf("icinga-notifications-%x", queueNameRndBuff),
 			"types": esTypes,
+			"filter": fmt.Sprintf(
+				`(event.type == %q || event.type == %q) ? (event.object_type == "Host" || event.object_type == "Service") : true`,
+				typeObjectCreated, typeObjectDeleted,
+			),
 		})
 		if err != nil {
 			return nil, err
@@ -357,7 +361,7 @@ func (client *Client) connectEventStream(esTypes []string) (io.ReadCloser, error
 		go func() {
 			defer close(resCh)
 
-			client.Logger.Debug("Try to establish an Event Stream API connection")
+			client.Logger.Debugw("Try to establish an Event Stream API connection", zap.String("request_body", string(reqBody)))
 			httpClient := &http.Client{Transport: client.ApiHttpTransport}
 			res, err := httpClient.Do(req)
 			if err != nil {
@@ -426,11 +430,16 @@ func (client *Client) listenEventStream() error {
 		typeDowntimeStarted,
 		typeDowntimeTriggered,
 		typeFlapping,
+		typeObjectCreated,
+		typeObjectDeleted,
 	})
 	if err != nil {
 		return err
 	}
 	defer func() { _ = eventStream.Close() }()
+	// Purge all event extra tags from our cache store, otherwise we might miss the typeObjectCreated event for
+	// some objects and never get their updated groups when Icinga 2 is reloaded/restarted.
+	defer client.eventExtraTagsCache.Purge()
 
 	select {
 	case <-client.Ctx.Done():
@@ -499,6 +508,10 @@ func (client *Client) listenEventStream() error {
 		case *Flapping:
 			ev, err = client.buildFlappingEvent(client.Ctx, respT.Host, respT.Service, respT.IsFlapping)
 			evTime = respT.Timestamp.Time()
+		case *ObjectCreatedDeleted:
+			if err = client.deleteExtraTagsCacheFor(respT); err == nil {
+				continue
+			}
 		default:
 			err = fmt.Errorf("unsupported type %T", resp)
 		}
