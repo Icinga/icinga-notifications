@@ -5,20 +5,20 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
 	"net/http"
 	"time"
 )
 
 type Listener struct {
-	db            *icingadb.DB
+	db            *database.DB
 	logger        *logging.Logger
 	runtimeConfig *config.RuntimeConfig
 
@@ -26,7 +26,7 @@ type Listener struct {
 	mux  http.ServeMux
 }
 
-func NewListener(db *icingadb.DB, runtimeConfig *config.RuntimeConfig, logs *logging.Logging) *Listener {
+func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *logging.Logging) *Listener {
 	l := &Listener{
 		db:            db,
 		logger:        logs.GetChildLogger("listener"),

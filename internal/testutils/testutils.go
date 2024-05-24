@@ -3,9 +3,8 @@ package testutils
 import (
 	"context"
 	"github.com/creasty/defaults"
-	"github.com/icinga/icingadb/pkg/config"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/logging"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 	"os"
@@ -19,8 +18,8 @@ import (
 //
 // The test suite will be skipped if no environment variable is set, otherwise fails fatally when
 // invalid configurations are specified.
-func GetTestDB(ctx context.Context, t *testing.T) *icingadb.DB {
-	c := &config.Database{}
+func GetTestDB(ctx context.Context, t *testing.T) *database.DB {
+	c := &database.Config{}
 	require.NoError(t, defaults.Set(c), "applying config default should not fail")
 
 	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB_TYPE"); ok {
@@ -50,7 +49,7 @@ func GetTestDB(ctx context.Context, t *testing.T) *icingadb.DB {
 
 	require.NoError(t, c.Validate(), "database config validation should not fail")
 
-	db, err := c.Open(logging.NewLogger(zaptest.NewLogger(t).Sugar(), time.Hour))
+	db, err := database.NewDbFromConfig(c, logging.NewLogger(zaptest.NewLogger(t).Sugar(), time.Hour), database.RetryConnectorCallbacks{})
 	require.NoError(t, err, "connecting to database should not fail")
 	require.NoError(t, db.PingContext(ctx), "pinging the database should not fail")
 

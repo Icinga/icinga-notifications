@@ -2,11 +2,11 @@ package incident
 
 import (
 	"context"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/types"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -40,8 +40,8 @@ func (c *ContactRow) Upsert() interface{} {
 	}{Role: c.Role}
 }
 
-// Constraint implements the contracts.Constrainter interface.
-func (c *ContactRow) Constraint() string {
+// PgsqlOnConflictConstraint implements the database.PgsqlOnConflictConstrainter interface.
+func (c *ContactRow) PgsqlOnConflictConstraint() string {
 	if c.ContactID.Valid {
 		return "key_incident_contact_contact"
 	}
@@ -91,7 +91,7 @@ func (h *HistoryRow) TableName() string {
 
 // Sync persists the current state of this history to the database and retrieves the just inserted history ID.
 // Returns error when failed to execute the query.
-func (h *HistoryRow) Sync(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx) error {
+func (h *HistoryRow) Sync(ctx context.Context, db *database.DB, tx *sqlx.Tx) error {
 	historyId, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, h, "id"), h)
 	if err != nil {
 		return err
@@ -109,9 +109,9 @@ func (h *HistoryRow) Sync(ctx context.Context, db *icingadb.DB, tx *sqlx.Tx) err
 // to them of this type. The cached entries are then used to actually notify the contacts and mark the pending
 // notification entries as either NotificationStateSent or NotificationStateFailed.
 type NotificationEntry struct {
-	HistoryRowID int64 `db:"id"`
-	ContactID    int64
-	ChannelID    int64
+	HistoryRowID int64             `db:"id"`
+	ContactID    int64             `db:"-"`
+	ChannelID    int64             `db:"-"`
 	State        NotificationState `db:"notification_state"`
 	SentAt       types.UnixMilli   `db:"sent_at"`
 }

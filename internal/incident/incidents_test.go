@@ -4,13 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/testutils"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
-	"github.com/icinga/icingadb/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
@@ -88,7 +88,7 @@ func TestLoadOpenIncidents(t *testing.T) {
 //
 // The incident loading process is limited to a maximum duration of 10 seconds and will be
 // aborted and causes the entire test suite to fail immediately, if it takes longer.
-func assertIncidents(ctx context.Context, db *icingadb.DB, t *testing.T, testData map[string]*Incident) {
+func assertIncidents(ctx context.Context, db *database.DB, t *testing.T, testData map[string]*Incident) {
 	logger := logging.NewLogger(zaptest.NewLogger(t).Sugar(), time.Hour)
 
 	// Since we have been using object.FromEvent() to persist the test objects to the database,
@@ -134,7 +134,7 @@ func assertIncidents(ctx context.Context, db *icingadb.DB, t *testing.T, testDat
 // This will firstly create and synchronise a new object from a freshly generated dummy event with distinct
 // tags and name, and ensures that no error is returned, otherwise it will cause the entire test suite to fail.
 // Once the object has been successfully synchronised, an incident is created and synced with the database.
-func makeIncident(ctx context.Context, db *icingadb.DB, t *testing.T, recovered bool) *Incident {
+func makeIncident(ctx context.Context, db *database.DB, t *testing.T, recovered bool) *Incident {
 	ev := &event.Event{
 		Time:     time.Time{},
 		SourceId: 1,

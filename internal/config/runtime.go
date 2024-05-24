@@ -4,12 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
@@ -34,7 +34,7 @@ type RuntimeConfig struct {
 
 	logs   *logging.Logging
 	logger *logging.Logger
-	db     *icingadb.DB
+	db     *database.DB
 
 	// mu is used to synchronize access to the live ConfigSet.
 	mu sync.RWMutex
@@ -43,7 +43,7 @@ type RuntimeConfig struct {
 func NewRuntimeConfig(
 	esLaunch func(source *Source),
 	logs *logging.Logging,
-	db *icingadb.DB,
+	db *database.DB,
 ) *RuntimeConfig {
 	return &RuntimeConfig{
 		EventStreamLaunchFunc: esLaunch,

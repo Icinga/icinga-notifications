@@ -4,6 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/utils"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -11,8 +14,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/icinga2"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
-	"github.com/icinga/icingadb/pkg/logging"
-	"github.com/icinga/icingadb/pkg/utils"
 	"go.uber.org/zap"
 	"os"
 	"os/signal"
@@ -55,27 +56,20 @@ func main() {
 
 	conf := daemon.Config()
 
-	logs, err := logging.NewLogging(
-		"icinga-notifications",
-		conf.Logging.Level,
-		conf.Logging.Output,
-		conf.Logging.Options,
-		conf.Logging.Interval,
-	)
+	logs, err := logging.NewLoggingFromConfig("icinga-notifications", conf.Logging)
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "cannot initialize logging:", err)
-		os.Exit(1)
+		utils.PrintErrorThenExit(err, 1)
 	}
 
 	logger := logs.GetLogger()
 	logger.Infof("Starting Icinga Notifications daemon (%s)", internal.Version.Version)
-	db, err := conf.Database.Open(logs.GetChildLogger("database"))
+	db, err := database.NewDbFromConfig(&conf.Database, logs.GetChildLogger("database"), database.RetryConnectorCallbacks{})
 	if err != nil {
 		logger.Fatalw("cannot create database connection from config", zap.Error(err))
 	}
 	defer db.Close()
 	{
-		logger.Infof("Connecting to database at '%s'", utils.JoinHostPort(conf.Database.Host, conf.Database.Port))
+		logger.Infof("Connecting to database at '%s'", db.GetAddr())
 		if err := db.Ping(); err != nil {
 			logger.Fatalw("cannot connect to database", zap.Error(err))
 		}

@@ -7,10 +7,10 @@ import (
 )
 
 type Schedule struct {
-	ID         int64  `db:"id"`
-	Name       string `db:"name"`
-	Members    []*Member
-	MemberRows []*ScheduleMemberRow
+	ID         int64                `db:"id"`
+	Name       string               `db:"name"`
+	Members    []*Member            `db:"-"`
+	MemberRows []*ScheduleMemberRow `db:"-"`
 }
 
 type Member struct {
