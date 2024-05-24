@@ -11,6 +11,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/utils"
+	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -119,6 +120,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 
 					for _, i := range incidentsById {
 						i.Object = object.GetFromCache(i.ObjectID)
+						i.isMuted = i.Object.IsMuted()
 						i.logger = logger.With(zap.String("object", i.Object.DisplayName()),
 							zap.String("incident", i.String()))
 
@@ -208,6 +210,11 @@ func ProcessEvent(
 	runtimeConfig *config.RuntimeConfig,
 	ev *event.Event,
 ) error {
+	var wasObjectMuted bool
+	if obj := object.GetFromCache(object.ID(ev.SourceId, ev.Tags)); obj != nil {
+		wasObjectMuted = obj.IsMuted()
+	}
+
 	obj, err := object.FromEvent(ctx, db, ev)
 	if err != nil {
 		return fmt.Errorf("cannot sync event object: %w", err)
@@ -227,10 +234,23 @@ func ProcessEvent(
 
 	if currentIncident == nil {
 		switch {
-		// ignore non-state event without incident
 		case ev.Severity == event.SeverityNone:
-			return fmt.Errorf("%q does not have an active incident, ignoring %q event from source %d",
-				obj.DisplayName(), ev.Type, ev.SourceId)
+			// We need to ignore superfluous mute and unmute events here, as would be the case with an existing
+			// incident, otherwise the event stream catch-up phase will generate useless events after each
+			// Icinga 2 reload and overwhelm the database with the very same mute/unmute events.
+			if wasObjectMuted && ev.Type == event.TypeMute {
+				return event.ErrSuperfluousMuteUnmuteEvent
+			} else if !wasObjectMuted && ev.Type == event.TypeUnmute {
+				return event.ErrSuperfluousMuteUnmuteEvent
+			}
+
+			// There is no active incident, but the event appears to be relevant, so try to persist it in the DB.
+			err = utils.RunInTx(ctx, db, func(tx *sqlx.Tx) error { return ev.Sync(ctx, tx, db, obj.ID) })
+			if err != nil {
+				return errors.New("cannot sync non-state event to the database")
+			}
+
+			return nil
 		case ev.Severity != event.SeverityOK:
 			panic(fmt.Sprintf("cannot process event %v with a non-OK state %v without a known incident", ev, ev.Severity))
 		default:

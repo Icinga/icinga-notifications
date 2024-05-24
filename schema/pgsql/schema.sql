@@ -4,6 +4,8 @@ CREATE TYPE boolenum AS ENUM ( 'n', 'y' );
 CREATE TYPE incident_history_event_type AS ENUM (
     -- Order to be honored for events with identical millisecond timestamps.
     'opened',
+    'muted',
+    'unmuted',
     'incident_severity_changed',
     'rule_matched',
     'escalation_triggered',
@@ -12,7 +14,7 @@ CREATE TYPE incident_history_event_type AS ENUM (
     'notified'
 );
 CREATE TYPE rotation_type AS ENUM ( '24-7', 'partial', 'multi' );
-CREATE TYPE notification_state_type AS ENUM ( 'pending', 'sent', 'failed' );
+CREATE TYPE notification_state_type AS ENUM ( 'suppressed', 'pending', 'sent', 'failed' );
 
 -- IPL ORM renders SQL queries with LIKE operators for all suggestions in the search bar,
 -- which fails for numeric and enum types on PostgreSQL. Just like in Icinga DB Web.
@@ -197,6 +199,8 @@ CREATE TABLE object (
     name text NOT NULL,
 
     url text,
+    -- mute_reason indicates whether an object is currently muted by its source, and its non-zero value is mapped to true.
+    mute_reason text,
 
     CHECK (length(id) = 256/8),
 
@@ -229,7 +233,9 @@ CREATE TYPE event_type AS ENUM (
     'flapping-end',
     'flapping-start',
     'incident-age',
-    'state'
+    'mute',
+    'state',
+    'unmute'
 );
 CREATE TYPE severity AS ENUM ('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg');
 
@@ -241,6 +247,8 @@ CREATE TABLE event (
     severity severity,
     message text,
     username citext,
+    mute boolenum,
+    mute_reason text,
 
     CONSTRAINT pk_event PRIMARY KEY (id)
 );

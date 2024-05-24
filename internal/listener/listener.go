@@ -121,6 +121,10 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	ev.SourceId = source.ID
 	if ev.Type == "" {
 		ev.Type = event.TypeState
+	} else if !ev.Mute.Valid && ev.Type == event.TypeMute {
+		ev.SetMute(true, ev.MuteReason)
+	} else if !ev.Mute.Valid && ev.Type == event.TypeUnmute {
+		ev.SetMute(false, ev.MuteReason)
 	}
 
 	if err := ev.Validate(); err != nil {

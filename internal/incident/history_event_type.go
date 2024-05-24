@@ -11,6 +11,8 @@ const (
 	HistoryEventTypeNull HistoryEventType = iota
 
 	Opened
+	Muted
+	Unmuted
 	IncidentSeverityChanged
 	RuleMatched
 	EscalationTriggered
@@ -21,6 +23,8 @@ const (
 
 var historyTypeByName = map[string]HistoryEventType{
 	"opened":                    Opened,
+	"muted":                     Muted,
+	"unmuted":                   Unmuted,
 	"incident_severity_changed": IncidentSeverityChanged,
 	"rule_matched":              RuleMatched,
 	"escalation_triggered":      EscalationTriggered,

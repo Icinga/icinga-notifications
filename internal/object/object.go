@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -25,10 +26,11 @@ var (
 )
 
 type Object struct {
-	ID       types.Binary `db:"id"`
-	SourceID int64        `db:"source_id"`
-	Name     string       `db:"name"`
-	URL      types.String `db:"url"`
+	ID         types.Binary `db:"id"`
+	SourceID   int64        `db:"source_id"`
+	Name       string       `db:"name"`
+	URL        types.String `db:"url"`
+	MuteReason types.String `db:"mute_reason"`
 
 	Tags      map[string]string `db:"-"`
 	ExtraTags map[string]string `db:"-"`
@@ -38,7 +40,7 @@ type Object struct {
 
 // New creates a new object from the given event.
 func New(db *database.DB, ev *event.Event) *Object {
-	return &Object{
+	obj := &Object{
 		SourceID:  ev.SourceId,
 		Name:      ev.Name,
 		db:        db,
@@ -46,6 +48,11 @@ func New(db *database.DB, ev *event.Event) *Object {
 		Tags:      ev.Tags,
 		ExtraTags: ev.ExtraTags,
 	}
+	if ev.Mute.Valid && ev.Mute.Bool {
+		obj.MuteReason = types.String{NullString: sql.NullString{String: ev.MuteReason, Valid: true}}
+	}
+
+	return obj
 }
 
 // GetFromCache fetches an object from the global object cache store matching the given ID.
@@ -131,6 +138,14 @@ func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, 
 		newObject.ExtraTags = ev.ExtraTags
 		newObject.Name = ev.Name
 		newObject.URL = utils.ToDBString(ev.URL)
+		if ev.Mute.Valid {
+			if ev.Mute.Bool {
+				newObject.MuteReason = utils.ToDBString(ev.MuteReason)
+			} else {
+				// The ongoing event unmutes the object, so reset the mute reason to null.
+				newObject.MuteReason = types.String{}
+			}
+		}
 	}
 
 	tx, err := db.BeginTxx(ctx, nil)
@@ -177,6 +192,11 @@ func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, 
 	*object = *newObject
 
 	return object, nil
+}
+
+// IsMuted returns whether the current object is muted by its source.
+func (o *Object) IsMuted() bool {
+	return o.MuteReason.Valid
 }
 
 func (o *Object) DisplayName() string {

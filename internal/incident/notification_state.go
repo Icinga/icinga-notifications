@@ -9,15 +9,17 @@ type NotificationState int
 
 const (
 	NotificationStateNull NotificationState = iota
+	NotificationStateSuppressed
 	NotificationStatePending
 	NotificationStateSent
 	NotificationStateFailed
 )
 
 var notificationStatTypeByName = map[string]NotificationState{
-	"pending": NotificationStatePending,
-	"sent":    NotificationStateSent,
-	"failed":  NotificationStateFailed,
+	"suppressed": NotificationStateSuppressed,
+	"pending":    NotificationStatePending,
+	"sent":       NotificationStateSent,
+	"failed":     NotificationStateFailed,
 }
 
 var notificationStateTypeToName = func() map[NotificationState]string {

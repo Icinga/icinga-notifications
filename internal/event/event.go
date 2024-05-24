@@ -15,6 +15,10 @@ import (
 // ErrSuperfluousStateChange indicates a superfluous state change being ignored and stopping further processing.
 var ErrSuperfluousStateChange = errors.New("ignoring superfluous state change")
 
+// ErrSuperfluousMuteUnmuteEvent indicates that a superfluous mute or unmute event is being ignored and is
+// triggered when trying to mute/unmute an already muted/unmuted incident.
+var ErrSuperfluousMuteUnmuteEvent = errors.New("ignoring superfluous (un)mute event")
+
 // Event received of a specified Type for internal processing.
 //
 // The JSON struct tags are being used to unmarshal a JSON representation received from the listener.Listener. Some
@@ -34,6 +38,9 @@ type Event struct {
 	Username string   `json:"username"`
 	Message  string   `json:"message"`
 
+	Mute       types.Bool `json:"mute"`
+	MuteReason string     `json:"mute_reason"`
+
 	ID int64 `json:"-"`
 }
 
@@ -49,7 +56,9 @@ const (
 	TypeFlappingEnd            = "flapping-end"
 	TypeFlappingStart          = "flapping-start"
 	TypeIncidentAge            = "incident-age"
+	TypeMute                   = "mute"
 	TypeState                  = "state"
+	TypeUnmute                 = "unmute"
 )
 
 // Validate validates the current event state.
@@ -66,6 +75,15 @@ func (e *Event) Validate() error {
 	if e.Severity != SeverityNone && e.Type != TypeState {
 		return fmt.Errorf("invalid event: if 'severity' is set, 'type' must be set to %q", TypeState)
 	}
+	if e.Type == TypeMute && (!e.Mute.Valid || !e.Mute.Bool) {
+		return fmt.Errorf("invalid event: 'mute' must be true if 'type' is set to %q", TypeMute)
+	}
+	if e.Type == TypeUnmute && (!e.Mute.Valid || e.Mute.Bool) {
+		return fmt.Errorf("invalid event: 'mute' must be false if 'type' is set to %q", TypeUnmute)
+	}
+	if e.Mute.Valid && e.Mute.Bool && e.MuteReason == "" {
+		return fmt.Errorf("invalid event: 'mute_reason' must not be empty if 'mute' is set")
+	}
 
 	switch e.Type {
 	case "":
@@ -80,11 +98,19 @@ func (e *Event) Validate() error {
 		TypeFlappingEnd,
 		TypeFlappingStart,
 		TypeIncidentAge,
-		TypeState:
+		TypeMute,
+		TypeState,
+		TypeUnmute:
 		return nil
 	default:
 		return fmt.Errorf("invalid event: unsupported event type %q", e.Type)
 	}
+}
+
+// SetMute alters the event mute and mute reason.
+func (e *Event) SetMute(muted bool, reason string) {
+	e.Mute = types.Bool{Valid: true, Bool: muted}
+	e.MuteReason = reason
 }
 
 func (e *Event) String() string {
@@ -146,13 +172,15 @@ func (e *Event) Sync(ctx context.Context, tx *sqlx.Tx, db *database.DB, objectId
 
 // EventRow represents a single event database row and isn't an in-memory representation of an event.
 type EventRow struct {
-	ID       int64           `db:"id"`
-	Time     types.UnixMilli `db:"time"`
-	ObjectID types.Binary    `db:"object_id"`
-	Type     types.String    `db:"type"`
-	Severity Severity        `db:"severity"`
-	Username types.String    `db:"username"`
-	Message  types.String    `db:"message"`
+	ID         int64           `db:"id"`
+	Time       types.UnixMilli `db:"time"`
+	ObjectID   types.Binary    `db:"object_id"`
+	Type       types.String    `db:"type"`
+	Severity   Severity        `db:"severity"`
+	Username   types.String    `db:"username"`
+	Message    types.String    `db:"message"`
+	Mute       types.Bool      `db:"mute"`
+	MuteReason types.String    `db:"mute_reason"`
 }
 
 // TableName implements the contracts.TableNamer interface.
@@ -162,11 +190,13 @@ func (er *EventRow) TableName() string {
 
 func NewEventRow(e *Event, objectId types.Binary) *EventRow {
 	return &EventRow{
-		Time:     types.UnixMilli(e.Time),
-		ObjectID: objectId,
-		Type:     utils.ToDBString(e.Type),
-		Severity: e.Severity,
-		Username: utils.ToDBString(e.Username),
-		Message:  utils.ToDBString(e.Message),
+		Time:       types.UnixMilli(e.Time),
+		ObjectID:   objectId,
+		Type:       utils.ToDBString(e.Type),
+		Severity:   e.Severity,
+		Username:   utils.ToDBString(e.Username),
+		Message:    utils.ToDBString(e.Message),
+		Mute:       e.Mute,
+		MuteReason: utils.ToDBString(e.MuteReason),
 	}
 }

@@ -161,20 +161,20 @@ func (client *Client) fetchExtraTagsFor(ctx context.Context, host, service strin
 	}
 
 	extraTags := make(map[string]string)
-	hostGroups, err := client.fetchHostServiceGroups(ctx, host, "")
+	queryResult, err := client.fetchCheckable(ctx, host, "")
 	if err != nil {
 		return nil, err
 	}
-	for _, hostGroup := range hostGroups {
+	for _, hostGroup := range queryResult.Attrs.Groups {
 		extraTags["hostgroup/"+hostGroup] = ""
 	}
 
 	if service != "" {
-		serviceGroups, err := client.fetchHostServiceGroups(ctx, host, service)
+		queryResult, err := client.fetchCheckable(ctx, host, service)
 		if err != nil {
 			return nil, err
 		}
-		for _, serviceGroup := range serviceGroups {
+		for _, serviceGroup := range queryResult.Attrs.Groups {
 			extraTags["servicegroup/"+serviceGroup] = ""
 		}
 	}
@@ -237,22 +237,30 @@ func (client *Client) buildHostServiceEvent(ctx context.Context, result CheckRes
 }
 
 // buildAcknowledgementEvent from the given fields.
-func (client *Client) buildAcknowledgementEvent(
-	ctx context.Context, host, service, author, comment string, clearEvent bool,
-) (*event.Event, error) {
-	ev, err := client.buildCommonEvent(ctx, host, service)
+func (client *Client) buildAcknowledgementEvent(ctx context.Context, ack *Acknowledgement) (*event.Event, error) {
+	ev, err := client.buildCommonEvent(ctx, ack.Host, ack.Service)
 	if err != nil {
 		return nil, err
 	}
 
-	if clearEvent {
+	ev.Username = ack.Author
+	if ack.EventType == typeAcknowledgementCleared {
 		ev.Type = event.TypeAcknowledgementCleared
+		ev.Message = "Acknowledgement cleared"
+
+		queryResult, err := client.fetchCheckable(ctx, ack.Host, ack.Service)
+		if err != nil {
+			return nil, err
+		}
+		if !isMuted(queryResult) {
+			ev.Message = queryResult.Attrs.LastCheckResult.Output
+			ev.SetMute(false, "Acknowledgement cleared")
+		}
 	} else {
 		ev.Type = event.TypeAcknowledgementSet
+		ev.Message = ack.Comment
+		ev.SetMute(true, fmt.Sprintf("Checkable acknowledged by %q: %s", ack.Author, ack.Comment))
 	}
-
-	ev.Username = author
-	ev.Message = comment
 
 	return ev, nil
 }
@@ -264,30 +272,72 @@ func (client *Client) buildDowntimeEvent(ctx context.Context, d Downtime, startE
 		return nil, err
 	}
 
+	var reason string
 	if startEvent {
 		ev.Type = event.TypeDowntimeStart
+		ev.SetMute(true, "Checkable is in downtime")
+		ev.Message = d.Comment
 	} else if !d.WasCancelled() {
 		ev.Type = event.TypeDowntimeEnd
+		reason = "Downtime expired"
 	} else {
 		ev.Type = event.TypeDowntimeRemoved
+		if d.ConfigOwner != "" {
+			reason = fmt.Sprintf("Downtime was cancelled by config owner (%s)", d.ConfigOwner)
+		} else {
+			reason = "Downtime was cancelled by user"
+		}
 	}
 
 	ev.Username = d.Author
-	ev.Message = d.Comment
+	if ev.Type != event.TypeDowntimeStart {
+		ev.Message = reason
+
+		queryResult, err := client.fetchCheckable(ctx, d.Host, d.Service)
+		if err != nil {
+			return nil, err
+		}
+		if !isMuted(queryResult) {
+			// When a downtime is cancelled/expired and there's no other active downtime/ack, we're going to send some
+			// notifications if there's still an active incident. Therefore, we need the most recent CheckResult of
+			// that Checkable to use it for the notifications.
+			ev.Message = queryResult.Attrs.LastCheckResult.Output
+			ev.SetMute(false, reason)
+		}
+	}
 
 	return ev, nil
 }
 
 // buildFlappingEvent from the given fields.
-func (client *Client) buildFlappingEvent(ctx context.Context, host, service string, isFlapping bool) (*event.Event, error) {
-	ev, err := client.buildCommonEvent(ctx, host, service)
+func (client *Client) buildFlappingEvent(ctx context.Context, flapping *Flapping) (*event.Event, error) {
+	ev, err := client.buildCommonEvent(ctx, flapping.Host, flapping.Service)
 	if err != nil {
 		return nil, err
 	}
 
-	ev.Type = event.TypeFlappingStart
-	if !isFlapping {
+	if flapping.IsFlapping {
+		ev.Type = event.TypeFlappingStart
+		ev.SetMute(true, fmt.Sprintf(
+			"Checkable started flapping (Current flapping value %d%% > high threshold %d%%)",
+			flapping.CurrentFlapping, flapping.ThresholdHigh,
+		))
+	} else {
+		reason := fmt.Sprintf(
+			"Checkable stopped flapping (Current flapping value %d%% < low threshold %d%%)",
+			flapping.CurrentFlapping, flapping.ThresholdLow,
+		)
 		ev.Type = event.TypeFlappingEnd
+		ev.Message = reason
+
+		queryResult, err := client.fetchCheckable(ctx, flapping.Host, flapping.Service)
+		if err != nil {
+			return nil, err
+		}
+		if !isMuted(queryResult) {
+			ev.Message = queryResult.Attrs.LastCheckResult.Output
+			ev.SetMute(false, reason)
+		}
 	}
 
 	return ev, nil

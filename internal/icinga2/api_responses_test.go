@@ -180,12 +180,13 @@ func TestObjectQueriesResult_UnmarshalJSON(t *testing.T) {
 				Name: "docker-master!load!c27b27c2-e0ab-45ff-8b9b-e95f29851eb0",
 				Type: "Downtime",
 				Attrs: Downtime{
-					Host:       "docker-master",
-					Service:    "load",
-					Author:     "icingaadmin",
-					Comment:    "Scheduled downtime for backup",
-					RemoveTime: UnixFloat(time.UnixMilli(0)),
-					IsFixed:    true,
+					Host:        "docker-master",
+					Service:     "load",
+					Author:      "icingaadmin",
+					Comment:     "Scheduled downtime for backup",
+					ConfigOwner: "docker-master!load!backup-downtime",
+					RemoveTime:  UnixFloat(time.UnixMilli(0)),
+					IsFixed:     true,
 				},
 			},
 		},
@@ -373,19 +374,20 @@ func TestApiResponseUnmarshal(t *testing.T) {
 		{
 			name:     "acknowledgementset-host",
 			jsonData: `{"acknowledgement_type":1,"author":"icingaadmin","comment":"working on it","expiry":0,"host":"dummy-805","notify":true,"persistent":false,"state":1,"state_type":1,"timestamp":1697201074.579106,"type":"AcknowledgementSet"}`,
-			expected: &AcknowledgementSet{
+			expected: &Acknowledgement{
 				Timestamp: UnixFloat(time.UnixMicro(1697201074579106)),
 				Host:      "dummy-805",
 				State:     StateHostDown,
 				StateType: StateTypeHard,
 				Author:    "icingaadmin",
 				Comment:   "working on it",
+				EventType: typeAcknowledgementSet,
 			},
 		},
 		{
 			name:     "acknowledgementset-service",
 			jsonData: `{"acknowledgement_type":1,"author":"icingaadmin","comment":"will be fixed soon","expiry":0,"host":"docker-master","notify":true,"persistent":false,"service":"ssh","state":2,"state_type":1,"timestamp":1697201107.64792,"type":"AcknowledgementSet"}`,
-			expected: &AcknowledgementSet{
+			expected: &Acknowledgement{
 				Timestamp: UnixFloat(time.UnixMicro(1697201107647920)),
 				Host:      "docker-master",
 				Service:   "ssh",
@@ -393,27 +395,30 @@ func TestApiResponseUnmarshal(t *testing.T) {
 				StateType: StateTypeHard,
 				Author:    "icingaadmin",
 				Comment:   "will be fixed soon",
+				EventType: typeAcknowledgementSet,
 			},
 		},
 		{
 			name:     "acknowledgementcleared-host",
 			jsonData: `{"acknowledgement_type":0,"host":"dummy-805","state":1,"state_type":1,"timestamp":1697201082.440148,"type":"AcknowledgementCleared"}`,
-			expected: &AcknowledgementCleared{
+			expected: &Acknowledgement{
 				Timestamp: UnixFloat(time.UnixMicro(1697201082440148)),
 				Host:      "dummy-805",
 				State:     StateHostDown,
 				StateType: StateTypeHard,
+				EventType: typeAcknowledgementCleared,
 			},
 		},
 		{
 			name:     "acknowledgementcleared-service",
 			jsonData: `{"acknowledgement_type":0,"host":"docker-master","service":"ssh","state":2,"state_type":1,"timestamp":1697201110.220349,"type":"AcknowledgementCleared"}`,
-			expected: &AcknowledgementCleared{
+			expected: &Acknowledgement{
 				Timestamp: UnixFloat(time.UnixMicro(1697201110220349)),
 				Host:      "docker-master",
 				Service:   "ssh",
 				State:     StateServiceCritical,
 				StateType: StateTypeHard,
+				EventType: typeAcknowledgementCleared,
 			},
 		},
 		{
