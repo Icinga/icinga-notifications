@@ -3,14 +3,14 @@ package incident
 import (
 	"context"
 	"fmt"
+	"github.com/icinga/icinga-go-library/com"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/icinga/icingadb/pkg/com"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
-	"github.com/icinga/icingadb/pkg/types"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -25,7 +25,7 @@ var (
 
 // LoadOpenIncidents loads all active (not yet closed) incidents from the database and restores all their states.
 // Returns error on any database failure.
-func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Logger, runtimeConfig *config.RuntimeConfig) error {
+func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Logger, runtimeConfig *config.RuntimeConfig) error {
 	logger.Info("Loading all active incidents from database")
 
 	g, ctx := errgroup.WithContext(ctx)
@@ -143,7 +143,7 @@ func LoadOpenIncidents(ctx context.Context, db *icingadb.DB, logger *logging.Log
 }
 
 func GetCurrent(
-	ctx context.Context, db *icingadb.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
+	ctx context.Context, db *database.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
 	create bool,
 ) (*Incident, error) {
 	currentIncidentsMu.Lock()
@@ -203,7 +203,7 @@ func GetCurrentIncidents() map[int64]*Incident {
 // The returned error might be wrapped around event.ErrSuperfluousStateChange.
 func ProcessEvent(
 	ctx context.Context,
-	db *icingadb.DB,
+	db *database.DB,
 	logs *logging.Logging,
 	runtimeConfig *config.RuntimeConfig,
 	ev *event.Event,

@@ -1,8 +1,6 @@
 package object
 
-import (
-	"github.com/icinga/icingadb/pkg/types"
-)
+import "github.com/icinga/icinga-go-library/types"
 
 // TagRow is a base type for IdTagRow and ExtraTagRow
 type TagRow struct {

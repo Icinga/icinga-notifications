@@ -8,10 +8,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/types"
 	"github.com/pkg/errors"
 	"regexp"
 	"sort"
@@ -30,14 +30,14 @@ type Object struct {
 	Name     string       `db:"name"`
 	URL      types.String `db:"url"`
 
-	Tags      map[string]string
-	ExtraTags map[string]string
+	Tags      map[string]string `db:"-"`
+	ExtraTags map[string]string `db:"-"`
 
-	db *icingadb.DB
+	db *database.DB
 }
 
 // New creates a new object from the given event.
-func New(db *icingadb.DB, ev *event.Event) *Object {
+func New(db *database.DB, ev *event.Event) *Object {
 	return &Object{
 		SourceID:  ev.SourceId,
 		Name:      ev.Name,
@@ -68,7 +68,7 @@ func ClearCache() {
 
 // RestoreObjects restores all objects and their (extra)tags matching the given IDs from the database.
 // Returns error on any database failures and panics when trying to cache an object that's already in the cache store.
-func RestoreObjects(ctx context.Context, db *icingadb.DB, ids []types.Binary) error {
+func RestoreObjects(ctx context.Context, db *database.DB, ids []types.Binary) error {
 	objects := map[string]*Object{}
 	err := utils.ForEachRow[Object](ctx, db, "id", ids, func(o *Object) {
 		o.db = db
@@ -114,7 +114,7 @@ func RestoreObjects(ctx context.Context, db *icingadb.DB, ids []types.Binary) er
 // FromEvent creates an object from the provided event tags if it's not in the cache
 // and syncs all object related types with the database.
 // Returns error on any database failure
-func FromEvent(ctx context.Context, db *icingadb.DB, ev *event.Event) (*Object, error) {
+func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, error) {
 	id := ID(ev.SourceId, ev.Tags)
 
 	cacheMu.Lock()

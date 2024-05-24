@@ -2,7 +2,7 @@ package config
 
 import (
 	"context"
-	"github.com/icinga/icingadb/pkg/types"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )

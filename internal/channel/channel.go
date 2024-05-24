@@ -18,7 +18,7 @@ type Channel struct {
 	Type   string `db:"type"`
 	Config string `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
 
-	Logger *zap.SugaredLogger
+	Logger *zap.SugaredLogger `db:"-"`
 
 	restartCh chan newConfig
 	pluginCh  chan *Plugin

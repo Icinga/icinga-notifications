@@ -10,7 +10,7 @@ type Contact struct {
 	FullName         string         `db:"full_name"`
 	Username         sql.NullString `db:"username"`
 	DefaultChannelID int64          `db:"default_channel_id"`
-	Addresses        []*Address
+	Addresses        []*Address     `db:"-"`
 }
 
 func (c *Contact) String() string {

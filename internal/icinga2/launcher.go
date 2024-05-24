@@ -7,13 +7,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
-	"github.com/icinga/icingadb/pkg/icingadb"
-	"github.com/icinga/icingadb/pkg/logging"
 	"go.uber.org/zap"
 	"net/http"
 	"sync"
@@ -25,7 +25,7 @@ import (
 type Launcher struct {
 	Ctx           context.Context
 	Logs          *logging.Logging
-	Db            *icingadb.DB
+	Db            *database.DB
 	RuntimeConfig *config.RuntimeConfig
 
 	mutex          sync.Mutex

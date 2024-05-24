@@ -2,8 +2,8 @@ package recipient
 
 import (
 	"fmt"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/icinga/icingadb/pkg/types"
 	"go.uber.org/zap/zapcore"
 	"time"
 )
