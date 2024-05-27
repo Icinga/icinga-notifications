@@ -42,11 +42,6 @@ func main() {
 		return
 	}
 
-	if configPath == "" {
-		_, _ = fmt.Fprintln(os.Stderr, "missing -config flag")
-		os.Exit(1)
-	}
-
 	err := daemon.LoadConfig(configPath)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "cannot load config:", err)
