@@ -2,7 +2,7 @@ package timeperiod
 
 import (
 	"database/sql"
-	"github.com/icinga/icingadb/pkg/types"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/pkg/errors"
 	"github.com/teambition/rrule-go"
 	"go.uber.org/zap/zapcore"
@@ -64,7 +64,6 @@ type Entry struct {
 	EndTime          types.UnixMilli `db:"end_time"`
 	Timezone         string          `db:"timezone"`
 	RRule            sql.NullString  `db:"rrule"` // RFC5545 RRULE
-	Description      sql.NullString  `db:"description"`
 	RotationMemberID sql.NullInt64   `db:"rotation_member_id"`
 
 	initialized bool

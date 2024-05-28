@@ -199,34 +199,28 @@ func (r *RuntimeConfig) debugVerifySchedule(id int64, schedule *recipient.Schedu
 		return fmt.Errorf("schedule %p is inconsistent with RuntimeConfig.Schedules[%d] = %p", schedule, id, other)
 	}
 
-	for i, member := range schedule.Members {
-		if member == nil {
-			return fmt.Errorf("Members[%d] is nil", i)
+	for i, rotation := range schedule.Rotations {
+		if rotation == nil {
+			return fmt.Errorf("Rotations[%d] is nil", i)
 		}
 
-		if member.TimePeriod == nil {
-			return fmt.Errorf("Members[%d].TimePeriod is nil", i)
-		}
-
-		if member.Contact == nil && member.ContactGroup == nil {
-			return fmt.Errorf("Members[%d] has neither Contact nor ContactGroup set", i)
-		}
-
-		if member.Contact != nil && member.ContactGroup != nil {
-			return fmt.Errorf("Members[%d] has both Contact and ContactGroup set", i)
-		}
-
-		if member.Contact != nil {
-			err := r.debugVerifyContact(member.Contact.ID, member.Contact)
-			if err != nil {
-				return fmt.Errorf("Contact: %w", err)
+		for j, member := range rotation.Members {
+			if member == nil {
+				return fmt.Errorf("Rotations[%d].Members[%d] is nil", i, j)
 			}
-		}
 
-		if member.ContactGroup != nil {
-			err := r.debugVerifyGroup(member.ContactGroup.ID, member.ContactGroup)
-			if err != nil {
-				return fmt.Errorf("ContactGroup: %w", err)
+			if member.Contact != nil {
+				err := r.debugVerifyContact(member.ContactID.Int64, member.Contact)
+				if err != nil {
+					return fmt.Errorf("Contact: %w", err)
+				}
+			}
+
+			if member.ContactGroup != nil {
+				err := r.debugVerifyGroup(member.ContactGroupID.Int64, member.ContactGroup)
+				if err != nil {
+					return fmt.Errorf("ContactGroup: %w", err)
+				}
 			}
 		}
 	}

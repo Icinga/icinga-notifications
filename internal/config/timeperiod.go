@@ -3,7 +3,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
@@ -45,9 +44,6 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, tx *sqlx.Tx) error
 
 		if p.Name == "" {
 			p.Name = fmt.Sprintf("Time Period #%d", entry.TimePeriodID)
-			if entry.Description.Valid {
-				p.Name += fmt.Sprintf(" (%s)", entry.Description.String)
-			}
 		}
 
 		err := entry.Init()
