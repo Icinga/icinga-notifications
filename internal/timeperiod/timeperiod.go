@@ -1,6 +1,9 @@
 package timeperiod
 
 import (
+	"database/sql"
+	"github.com/icinga/icingadb/pkg/types"
+	"github.com/pkg/errors"
 	"github.com/teambition/rrule-go"
 	"log"
 	"time"
@@ -47,37 +50,62 @@ func (p *TimePeriod) NextTransition(base time.Time) time.Time {
 }
 
 type Entry struct {
-	Start, End time.Time
+	ID               int64           `db:"id"`
+	TimePeriodID     int64           `db:"timeperiod_id"`
+	StartTime        types.UnixMilli `db:"start_time"`
+	EndTime          types.UnixMilli `db:"end_time"`
+	Timezone         string          `db:"timezone"`
+	RRule            sql.NullString  `db:"rrule"` // RFC5545 RRULE
+	Description      sql.NullString  `db:"description"`
+	RotationMemberID sql.NullInt64   `db:"rotation_member_id"`
 
-	// for future use
-	TimeZone string // or *time.Location
-
-	RecurrenceRule string // RFC5545 RRULE
-	rrule          *rrule.RRule
+	initialized bool
+	rrule       *rrule.RRule
 }
 
-// Init initializes the rrule instance from the configured rrule string
+// TableName implements the contracts.TableNamer interface.
+func (e *Entry) TableName() string {
+	return "timeperiod_entry"
+}
+
+// Init prepares the Entry for use after being read from the database.
+//
+// This includes loading the timezone information and parsing the recurrence rule if present.
 func (e *Entry) Init() error {
-	if e.rrule != nil || e.RecurrenceRule == "" {
+	if e.initialized {
 		return nil
 	}
 
-	option, err := rrule.StrToROptionInLocation(e.RecurrenceRule, e.Start.Location())
+	loc, err := time.LoadLocation(e.Timezone)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "timeperiod entry has an invalid timezone %q", e.Timezone)
 	}
 
-	if option.Dtstart.IsZero() {
-		option.Dtstart = e.Start
+	// Timestamps in the database are stored with millisecond resolution while RRULE only operates on seconds.
+	// Truncate to whole seconds in case there is sub-second precision.
+	// Additionally, set the location so that all times in this entry are consistent with the timezone of the entry.
+	e.StartTime = types.UnixMilli(e.StartTime.Time().Truncate(time.Second).In(loc))
+	e.EndTime = types.UnixMilli(e.EndTime.Time().Truncate(time.Second).In(loc))
+
+	if e.RRule.Valid {
+		option, err := rrule.StrToROptionInLocation(e.RRule.String, loc)
+		if err != nil {
+			return err
+		}
+
+		if option.Dtstart.IsZero() {
+			option.Dtstart = e.StartTime.Time()
+		}
+
+		rule, err := rrule.NewRRule(*option)
+		if err != nil {
+			return err
+		}
+
+		e.rrule = rule
 	}
 
-	rule, err := rrule.NewRRule(*option)
-	if err != nil {
-		return err
-	}
-
-	e.rrule = rule
-
+	e.initialized = true
 	return nil
 }
 
@@ -88,11 +116,11 @@ func (e *Entry) Contains(t time.Time) bool {
 		log.Printf("Can't initialize entry: %s", err)
 	}
 
-	if t.Before(e.Start) {
+	if t.Before(e.StartTime.Time()) {
 		return false
 	}
 
-	if t.Before(e.End) {
+	if t.Before(e.EndTime.Time()) {
 		return true
 	}
 
@@ -101,7 +129,7 @@ func (e *Entry) Contains(t time.Time) bool {
 	}
 
 	lastStart := e.rrule.Before(t, true)
-	lastEnd := lastStart.Add(e.End.Sub(e.Start))
+	lastEnd := lastStart.Add(e.EndTime.Time().Sub(e.StartTime.Time()))
 	// Whether the date time is between the last recurrence start and the last recurrence end
 	return (t.Equal(lastStart) || t.After(lastStart)) && t.Before(lastEnd)
 }
@@ -115,13 +143,13 @@ func (e *Entry) NextTransition(t time.Time) time.Time {
 		log.Printf("Can't initialize entry: %s", err)
 	}
 
-	if t.Before(e.Start) {
+	if t.Before(e.StartTime.Time()) {
 		// The passed time is before the configured event start time
-		return e.Start
+		return e.StartTime.Time()
 	}
 
-	if t.Before(e.End) {
-		return e.End
+	if t.Before(e.EndTime.Time()) {
+		return e.EndTime.Time()
 	}
 
 	if e.rrule == nil {
@@ -129,7 +157,7 @@ func (e *Entry) NextTransition(t time.Time) time.Time {
 	}
 
 	lastStart := e.rrule.Before(t, true)
-	lastEnd := lastStart.Add(e.End.Sub(e.Start))
+	lastEnd := lastStart.Add(e.EndTime.Time().Sub(e.StartTime.Time()))
 	if (t.Equal(lastStart) || t.After(lastStart)) && t.Before(lastEnd) {
 		// Base time is after the last transition begin but before the last transition end
 		return lastEnd
