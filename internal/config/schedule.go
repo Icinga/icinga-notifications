@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )
@@ -27,26 +28,91 @@ func (r *RuntimeConfig) fetchSchedules(ctx context.Context, tx *sqlx.Tx) error {
 			zap.String("name", g.Name))
 	}
 
-	var memberPtr *recipient.ScheduleMemberRow
-	stmt = r.db.BuildSelectStmt(memberPtr, memberPtr)
+	var rotationPtr *recipient.Rotation
+	stmt = r.db.BuildSelectStmt(rotationPtr, rotationPtr)
 	r.logger.Debugf("Executing query %q", stmt)
 
-	var members []*recipient.ScheduleMemberRow
+	var rotations []*recipient.Rotation
+	if err := tx.SelectContext(ctx, &rotations, stmt); err != nil {
+		r.logger.Errorln(err)
+		return err
+	}
+
+	rotationsById := make(map[int64]*recipient.Rotation)
+	for _, rotation := range rotations {
+		rotationLogger := r.logger.With(zap.Object("rotation", rotation))
+
+		if schedule := schedulesById[rotation.ScheduleID]; schedule == nil {
+			rotationLogger.Warnw("ignoring schedule rotation for unknown schedule_id")
+		} else {
+			rotationsById[rotation.ID] = rotation
+			schedule.Rotations = append(schedule.Rotations, rotation)
+
+			rotationLogger.Debugw("loaded schedule rotation")
+		}
+	}
+
+	var rotationMemberPtr *recipient.RotationMember
+	stmt = r.db.BuildSelectStmt(rotationMemberPtr, rotationMemberPtr)
+	r.logger.Debugf("Executing query %q", stmt)
+
+	var members []*recipient.RotationMember
 	if err := tx.SelectContext(ctx, &members, stmt); err != nil {
 		r.logger.Errorln(err)
 		return err
 	}
 
+	rotationMembersById := make(map[int64]*recipient.RotationMember)
 	for _, member := range members {
-		memberLogger := makeScheduleMemberLogger(r.logger.SugaredLogger, member)
+		memberLogger := r.logger.With(zap.Object("rotation_member", member))
 
-		if s := schedulesById[member.ScheduleID]; s == nil {
-			memberLogger.Warnw("ignoring schedule member for unknown schedule_id")
+		if rotation := rotationsById[member.RotationID]; rotation == nil {
+			memberLogger.Warnw("ignoring rotation member for unknown rotation_member_id")
 		} else {
-			s.MemberRows = append(s.MemberRows, member)
+			member.TimePeriodEntries = make(map[int64]*timeperiod.Entry)
+			rotation.Members = append(rotation.Members, member)
+			rotationMembersById[member.ID] = member
 
-			memberLogger.Debugw("member")
+			memberLogger.Debugw("loaded schedule rotation member")
 		}
+	}
+
+	var entryPtr *timeperiod.Entry
+	stmt = r.db.BuildSelectStmt(entryPtr, entryPtr) + " WHERE rotation_member_id IS NOT NULL"
+	r.logger.Debugf("Executing query %q", stmt)
+
+	var entries []*timeperiod.Entry
+	if err := tx.SelectContext(ctx, &entries, stmt); err != nil {
+		r.logger.Errorln(err)
+		return err
+	}
+
+	for _, entry := range entries {
+		var member *recipient.RotationMember
+		if entry.RotationMemberID.Valid {
+			member = rotationMembersById[entry.RotationMemberID.Int64]
+		}
+
+		if member == nil {
+			r.logger.Warnw("ignoring entry for unknown rotation_member_id",
+				zap.Int64("timeperiod_entry_id", entry.ID),
+				zap.Int64("timeperiod_id", entry.TimePeriodID))
+			continue
+		}
+
+		err := entry.Init()
+		if err != nil {
+			r.logger.Warnw("ignoring time period entry",
+				zap.Object("entry", entry),
+				zap.Error(err))
+			continue
+		}
+
+		member.TimePeriodEntries[entry.ID] = entry
+	}
+
+	for _, schedule := range schedulesById {
+		schedule.RefreshRotations()
 	}
 
 	if r.Schedules != nil {
@@ -72,38 +138,26 @@ func (r *RuntimeConfig) applyPendingSchedules() {
 		if pendingSchedule == nil {
 			delete(r.Schedules, id)
 		} else {
-			for _, memberRow := range pendingSchedule.MemberRows {
-				memberLogger := makeScheduleMemberLogger(r.logger.SugaredLogger, memberRow)
+			for _, rotation := range pendingSchedule.Rotations {
+				for _, member := range rotation.Members {
+					memberLogger := r.logger.With(
+						zap.Object("rotation", rotation),
+						zap.Object("rotation_member", member))
 
-				period := r.TimePeriods[memberRow.TimePeriodID]
-				if period == nil {
-					memberLogger.Warnw("ignoring schedule member for unknown timeperiod_id")
-					continue
-				}
+					if member.ContactID.Valid {
+						member.Contact = r.Contacts[member.ContactID.Int64]
+						if member.Contact == nil {
+							memberLogger.Warnw("rotation member has an unknown contact_id")
+						}
+					}
 
-				var contact *recipient.Contact
-				if memberRow.ContactID.Valid {
-					contact = r.Contacts[memberRow.ContactID.Int64]
-					if contact == nil {
-						memberLogger.Warnw("ignoring schedule member for unknown contact_id")
-						continue
+					if member.ContactGroupID.Valid {
+						member.ContactGroup = r.Groups[member.ContactGroupID.Int64]
+						if member.ContactGroup == nil {
+							memberLogger.Warnw("rotation member has an unknown contactgroup_id")
+						}
 					}
 				}
-
-				var group *recipient.Group
-				if memberRow.GroupID.Valid {
-					group = r.Groups[memberRow.GroupID.Int64]
-					if group == nil {
-						memberLogger.Warnw("ignoring schedule member for unknown contactgroup_id")
-						continue
-					}
-				}
-
-				pendingSchedule.Members = append(pendingSchedule.Members, &recipient.Member{
-					TimePeriod:   period,
-					Contact:      contact,
-					ContactGroup: group,
-				})
 			}
 
 			if currentSchedule := r.Schedules[id]; currentSchedule != nil {
@@ -115,13 +169,4 @@ func (r *RuntimeConfig) applyPendingSchedules() {
 	}
 
 	r.pending.Schedules = nil
-}
-
-func makeScheduleMemberLogger(logger *zap.SugaredLogger, member *recipient.ScheduleMemberRow) *zap.SugaredLogger {
-	return logger.With(
-		zap.Int64("schedule_id", member.ScheduleID),
-		zap.Int64("timeperiod_id", member.TimePeriodID),
-		zap.Int64("contact_id", member.ContactID.Int64),
-		zap.Int64("contactgroup_id", member.GroupID.Int64),
-	)
 }
