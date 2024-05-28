@@ -53,8 +53,7 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, tx *sqlx.Tx) error
 		err := entry.Init()
 		if err != nil {
 			r.logger.Warnw("ignoring time period entry",
-				zap.Int64("timeperiod_entry_id", entry.ID),
-				zap.String("rrule", entry.RRule.String),
+				zap.Object("entry", entry),
 				zap.Error(err))
 			continue
 		}
@@ -62,10 +61,8 @@ func (r *RuntimeConfig) fetchTimePeriods(ctx context.Context, tx *sqlx.Tx) error
 		p.Entries = append(p.Entries, entry)
 
 		r.logger.Debugw("loaded time period entry",
-			zap.String("timeperiod", p.Name),
-			zap.Time("start", entry.StartTime.Time()),
-			zap.Time("end", entry.EndTime.Time()),
-			zap.String("rrule", entry.RRule.String))
+			zap.Object("timeperiod", p),
+			zap.Object("entry", entry))
 	}
 
 	for _, p := range timePeriodsById {

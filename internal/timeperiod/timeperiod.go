@@ -5,6 +5,7 @@ import (
 	"github.com/icinga/icingadb/pkg/types"
 	"github.com/pkg/errors"
 	"github.com/teambition/rrule-go"
+	"go.uber.org/zap/zapcore"
 	"log"
 	"time"
 )
@@ -17,6 +18,13 @@ type TimePeriod struct {
 
 func (p *TimePeriod) TableName() string {
 	return "timeperiod"
+}
+
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (p *TimePeriod) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddInt64("id", p.ID)
+	encoder.AddString("name", p.Name)
+	return nil
 }
 
 // Contains returns whether a point in time t is covered by this time period, i.e. there is an entry covering it.
@@ -66,6 +74,18 @@ type Entry struct {
 // TableName implements the contracts.TableNamer interface.
 func (e *Entry) TableName() string {
 	return "timeperiod_entry"
+}
+
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (e *Entry) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddInt64("id", e.ID)
+	encoder.AddTime("start", e.StartTime.Time())
+	encoder.AddTime("end", e.EndTime.Time())
+	encoder.AddString("timezone", e.Timezone)
+	if e.RRule.Valid {
+		encoder.AddString("rrule", e.RRule.String)
+	}
+	return nil
 }
 
 // Init prepares the Entry for use after being read from the database.
