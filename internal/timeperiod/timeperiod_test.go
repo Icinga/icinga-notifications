@@ -1,8 +1,10 @@
 package timeperiod_test
 
 import (
+	"database/sql"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
+	"github.com/icinga/icingadb/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/teambition/rrule-go"
 	"testing"
@@ -19,9 +21,13 @@ func TestEntry(t *testing.T) {
 		end := berlinTime("2023-03-01 11:00:00")
 		until := berlinTime("2023-03-03 09:00:00")
 		e := &timeperiod.Entry{
-			Start:          start,
-			End:            end,
-			RecurrenceRule: fmt.Sprintf("FREQ=DAILY;UNTIL=%s", until.UTC().Format(rrule.DateTimeFormat)),
+			StartTime: types.UnixMilli(start),
+			EndTime:   types.UnixMilli(end),
+			Timezone:  berlin,
+			RRule: sql.NullString{
+				String: fmt.Sprintf("FREQ=DAILY;UNTIL=%s", until.UTC().Format(rrule.DateTimeFormat)),
+				Valid:  true,
+			},
 		}
 
 		t.Run("TimeAtFirstRecurrenceStart", func(t *testing.T) {
@@ -73,9 +79,10 @@ func TestEntry(t *testing.T) {
 			start := berlinTime("2023-03-25 01:00:00")
 			end := berlinTime("2023-03-25 02:30:00")
 			e := &timeperiod.Entry{
-				Start:          start,
-				End:            end,
-				RecurrenceRule: "FREQ=DAILY",
+				StartTime: types.UnixMilli(start),
+				EndTime:   types.UnixMilli(end),
+				Timezone:  berlin,
+				RRule:     sql.NullString{String: "FREQ=DAILY", Valid: true},
 			}
 
 			assert.True(t, e.Contains(start))
@@ -95,9 +102,10 @@ func TestEntry(t *testing.T) {
 		start := berlinTime("2023-03-01 08:00:00")
 		end := berlinTime("2023-03-01 12:30:00")
 		e := &timeperiod.Entry{
-			Start:          start,
-			End:            end,
-			RecurrenceRule: "FREQ=DAILY",
+			StartTime: types.UnixMilli(start),
+			EndTime:   types.UnixMilli(end),
+			Timezone:  berlin,
+			RRule:     sql.NullString{String: "FREQ=DAILY", Valid: true},
 		}
 
 		t.Run("TimeAtFirstRecurrenceStart", func(t *testing.T) {
@@ -124,9 +132,10 @@ func TestEntry(t *testing.T) {
 			start := berlinTime("2023-03-25 01:00:00")
 			end := berlinTime("2023-03-25 02:30:00")
 			e := &timeperiod.Entry{
-				Start:          start,
-				End:            end,
-				RecurrenceRule: "FREQ=DAILY",
+				StartTime: types.UnixMilli(start),
+				EndTime:   types.UnixMilli(end),
+				Timezone:  berlin,
+				RRule:     sql.NullString{String: "FREQ=DAILY", Valid: true},
 			}
 
 			assert.Equal(t, end, e.NextTransition(start), "next transition should match the first recurrence end")
@@ -152,9 +161,10 @@ func TestTimePeriodTransitions(t *testing.T) {
 		p := &timeperiod.TimePeriod{
 			Name: "Transition Test",
 			Entries: []*timeperiod.Entry{{
-				Start:          start,
-				End:            end,
-				RecurrenceRule: "FREQ=DAILY",
+				StartTime: types.UnixMilli(start),
+				EndTime:   types.UnixMilli(end),
+				Timezone:  berlin,
+				RRule:     sql.NullString{String: "FREQ=DAILY", Valid: true},
 			}},
 		}
 
@@ -170,14 +180,16 @@ func TestTimePeriodTransitions(t *testing.T) {
 			Name: "Transition Test",
 			Entries: []*timeperiod.Entry{
 				{
-					Start:          start,
-					End:            end,
-					RecurrenceRule: "FREQ=HOURLY;BYHOUR=1,3,5,7,9,11,13,15",
+					StartTime: types.UnixMilli(start),
+					EndTime:   types.UnixMilli(end),
+					Timezone:  berlin,
+					RRule:     sql.NullString{String: "FREQ=HOURLY;BYHOUR=1,3,5,7,9,11,13,15", Valid: true},
 				},
 				{
-					Start:          berlinTime("2023-03-27 08:00:00"),
-					End:            berlinTime("2023-03-27 08:30:00"),
-					RecurrenceRule: "FREQ=HOURLY;BYHOUR=0,2,4,6,8,10,12,14",
+					StartTime: types.UnixMilli(berlinTime("2023-03-27 08:00:00")),
+					EndTime:   types.UnixMilli(berlinTime("2023-03-27 08:30:00")),
+					Timezone:  berlin,
+					RRule:     sql.NullString{String: "FREQ=HOURLY;BYHOUR=0,2,4,6,8,10,12,14", Valid: true},
 				},
 			},
 		}
@@ -206,8 +218,10 @@ func TestTimePeriodTransitions(t *testing.T) {
 	})
 }
 
+const berlin = "Europe/Berlin"
+
 func berlinTime(value string) time.Time {
-	loc, err := time.LoadLocation("Europe/Berlin")
+	loc, err := time.LoadLocation(berlin)
 	if err != nil {
 		panic(err)
 	}
