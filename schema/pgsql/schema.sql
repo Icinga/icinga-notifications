@@ -2,7 +2,7 @@ CREATE EXTENSION IF NOT EXISTS citext;
 
 CREATE TYPE boolenum AS ENUM ( 'n', 'y' );
 CREATE TYPE incident_history_event_type AS ENUM (
-    -- Order to be honored for events with identical microsecond timestamps.
+    -- Order to be honored for events with identical millisecond timestamps.
     'opened',
     'incident_severity_changed',
     'rule_matched',
