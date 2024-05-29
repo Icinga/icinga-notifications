@@ -2,6 +2,7 @@ package channel
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
@@ -166,7 +167,7 @@ func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
 }
 
 // UpsertPlugins upsert the available_channel_type table with working plugins
-func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *database.DB) {
+func UpsertPlugins(ctx context.Context, channelPluginDir string, logger *logging.Logger, db *database.DB) {
 	logger.Debug("Updating available channel types")
 	files, err := os.ReadDir(channelPluginDir)
 	if err != nil {
@@ -209,7 +210,7 @@ func UpsertPlugins(channelPluginDir string, logger *logging.Logger, db *database
 	}
 
 	stmt, _ := db.BuildUpsertStmt(&plugin.Info{})
-	_, err = db.NamedExec(stmt, pluginInfos)
+	_, err = db.NamedExecContext(ctx, stmt, pluginInfos)
 	if err != nil {
 		logger.Errorw("Failed to update available channel types", zap.Error(err))
 	} else {

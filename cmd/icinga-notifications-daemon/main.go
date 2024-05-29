@@ -14,7 +14,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/icinga2"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
-	"go.uber.org/zap"
 	"os"
 	"os/signal"
 	"runtime"
@@ -62,23 +61,24 @@ func main() {
 	}
 
 	logger := logs.GetLogger()
+	defer func() { _ = logger.Sync() }()
+
 	logger.Infof("Starting Icinga Notifications daemon (%s)", internal.Version.Version)
 	db, err := database.NewDbFromConfig(&conf.Database, logs.GetChildLogger("database"), database.RetryConnectorCallbacks{})
 	if err != nil {
-		logger.Fatalw("cannot create database connection from config", zap.Error(err))
+		logger.Fatalf("Cannot create database connection from config: %+v", err)
 	}
 	defer db.Close()
-	{
-		logger.Infof("Connecting to database at '%s'", db.GetAddr())
-		if err := db.Ping(); err != nil {
-			logger.Fatalw("cannot connect to database", zap.Error(err))
-		}
-	}
-
-	channel.UpsertPlugins(conf.ChannelPluginDir, logs.GetChildLogger("channel"), db)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	logger.Infof("Connecting to database at '%s'", db.GetAddr())
+	if err := db.PingContext(ctx); err != nil {
+		logger.Fatalf("Cannot connect to the database: %+v", err)
+	}
+
+	channel.UpsertPlugins(ctx, conf.ChannelPluginDir, logs.GetChildLogger("channel"), db)
 
 	icinga2Launcher := &icinga2.Launcher{
 		Ctx:           ctx,
@@ -89,7 +89,7 @@ func main() {
 
 	runtimeConfig := config.NewRuntimeConfig(icinga2Launcher.Launch, logs, db)
 	if err := runtimeConfig.UpdateFromDatabase(ctx); err != nil {
-		logger.Fatalw("failed to load config from database", zap.Error(err))
+		logger.Fatalf("Failed to load config from database %+v", err)
 	}
 
 	icinga2Launcher.RuntimeConfig = runtimeConfig
@@ -98,13 +98,13 @@ func main() {
 
 	err = incident.LoadOpenIncidents(ctx, db, logs.GetChildLogger("incident"), runtimeConfig)
 	if err != nil {
-		logger.Fatalw("Can't load incidents from database", zap.Error(err))
+		logger.Fatalf("Cannot load incidents from database: %+v", err)
 	}
 
 	// Wait to load open incidents from the database before either starting Event Stream Clients or starting the Listener.
 	icinga2Launcher.Ready()
 	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {
-		logger.Errorw("Listener has finished with an error", zap.Error(err))
+		logger.Errorf("Listener has finished with an error: %+v", err)
 	} else {
 		logger.Info("Listener has finished")
 	}
