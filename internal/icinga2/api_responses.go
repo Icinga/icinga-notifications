@@ -282,12 +282,23 @@ func UnmarshalEventStreamResponse(bytes []byte) (any, error) {
 	// decompositions in different variables will result in multiple manual fixes. Thus, a two-way deserialization
 	// was chosen which selects the target type based on the first parsed type field.
 
-	var responseType string
+	var (
+		responseType  string
+		responseError int
+	)
 	err := json.Unmarshal(bytes, &struct {
-		Type *string `json:"type"`
-	}{&responseType})
+		Type  *string `json:"type"`
+		Error *int    `json:"error"`
+	}{&responseType, &responseError})
 	if err != nil {
 		return nil, err
+	}
+
+	// Please note: An Event Stream Response SHOULD NOT contain an error field. However, it might be possible that a
+	// message not produced by the Event Stream API might end up here, e.g., a generic API error message. There are
+	// already checks for HTTP error codes in place, so this is more like a second layer of protection.
+	if responseError > 0 {
+		return nil, fmt.Errorf("error field is present, faulty message is %q", bytes)
 	}
 
 	var resp any

@@ -295,8 +295,33 @@ func TestApiResponseUnmarshal(t *testing.T) {
 		expected any
 	}{
 		{
+			name:     "empty",
+			jsonData: ``,
+			isError:  true,
+		},
+		{
 			name:     "invalid-json",
 			jsonData: `{":}"`,
+			isError:  true,
+		},
+		{
+			name:     "empty-json-struct",
+			jsonData: `{}`,
+			isError:  true,
+		},
+		{
+			name:     "error-field",
+			jsonData: `{"error":401,"status":"Unauthorized. Please check your user credentials."}`,
+			isError:  true,
+		},
+		{
+			name:     "error-field-with-valid-type",
+			jsonData: `{"type":"StateChange","error":401,"status":"Unauthorized. Please check your user credentials."}`,
+			isError:  true,
+		},
+		{
+			name:     "error-field-with-invalid-error",
+			jsonData: `{"error":"tja"}`,
 			isError:  true,
 		},
 		{

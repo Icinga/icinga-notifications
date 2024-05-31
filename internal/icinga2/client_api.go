@@ -19,6 +19,25 @@ import (
 
 // This file contains Icinga 2 API related methods.
 
+// checkHTTPResponseStatusCode compares an HTTP response status code against supported Icinga 2 API codes.
+//
+// An error will be returned for invalid status codes according to the documentation. Undefined status codes are going
+// to result in errors as well.
+//
+// https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#http-statuses
+func checkHTTPResponseStatusCode(statusCode int, status string) error {
+	switch {
+	case 200 <= statusCode && statusCode <= 299:
+		return nil
+	case 400 <= statusCode && statusCode <= 499:
+		return fmt.Errorf("invalid HTTP request: %q", status)
+	case 500 <= statusCode && statusCode <= 599:
+		return fmt.Errorf("server HTTP error: %q", status)
+	default:
+		return fmt.Errorf("unknown HTTP error: %q", status)
+	}
+}
+
 // transport wraps http.Transport and overrides http.RoundTripper to set a custom User-Agent for all requests.
 type transport struct {
 	http.Transport
@@ -91,10 +110,11 @@ func (client *Client) queryObjectsApi(
 		return nil, err
 	}
 
-	if res.StatusCode != http.StatusOK {
+	err = checkHTTPResponseStatusCode(res.StatusCode, res.Status)
+	if err != nil {
 		_, _ = io.Copy(io.Discard, res.Body)
 		_ = res.Body.Close()
-		return nil, fmt.Errorf("unexpected HTTP status code %d", res.StatusCode)
+		return nil, err
 	}
 
 	return res.Body, nil
@@ -342,6 +362,14 @@ func (client *Client) connectEventStream(esTypes []string) (io.ReadCloser, error
 			res, err := httpClient.Do(req)
 			if err != nil {
 				client.Logger.Warnw("Establishing an Event Stream API connection failed, will be retried",
+					zap.Error(err),
+					zap.Duration("delay", retryDelay))
+				return
+			}
+
+			err = checkHTTPResponseStatusCode(res.StatusCode, res.Status)
+			if err != nil {
+				client.Logger.Errorw("Establishing an Event Stream API connection failed with an HTTP error, will be retried",
 					zap.Error(err),
 					zap.Duration("delay", retryDelay))
 				return
