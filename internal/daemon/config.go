@@ -7,12 +7,14 @@ import (
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"os"
+	"time"
 )
 
 type ConfigFile struct {
 	Listen           string          `yaml:"listen" default:"localhost:5680"`
 	DebugPassword    string          `yaml:"debug-password"`
 	ChannelPluginDir string          `yaml:"channel-plugin-dir" default:"/usr/libexec/icinga-notifications/channel"`
+	ApiTimeout       time.Duration   `yaml:"api-timeout" default:"1m"`
 	Icingaweb2URL    string          `yaml:"icingaweb2-url"`
 	Database         database.Config `yaml:"database"`
 	Logging          logging.Config  `yaml:"logging"`
