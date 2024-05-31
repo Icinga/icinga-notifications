@@ -118,7 +118,10 @@ func (launcher *Launcher) launch(src *config.Source) {
 		ApiBaseURL:       src.Icinga2BaseURL.String,
 		ApiBasicAuthUser: src.Icinga2AuthUser.String,
 		ApiBasicAuthPass: src.Icinga2AuthPass.String,
+
 		ApiHttpTransport: trans,
+
+		ApiTimeout: daemon.Config().ApiTimeout,
 
 		EventSourceId: src.ID,
 		IcingaWebRoot: daemon.Config().Icingaweb2URL,

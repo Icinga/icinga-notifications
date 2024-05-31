@@ -8,6 +8,7 @@
 
 icingaweb2-url: http://localhost/icingaweb2/
 channel-plugin-dir: /usr/libexec/icinga-notifications/channel
+api-timeout: 1m
 
 database:
   type: pgsql

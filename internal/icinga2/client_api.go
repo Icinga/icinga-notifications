@@ -103,7 +103,7 @@ func (client *Client) queryObjectsApi(
 	// The underlying network connection is reused by using client.ApiHttpTransport.
 	httpClient := &http.Client{
 		Transport: client.ApiHttpTransport,
-		Timeout:   3 * time.Second,
+		Timeout:   client.ApiTimeout,
 	}
 	res, err := httpClient.Do(req)
 	if err != nil {
