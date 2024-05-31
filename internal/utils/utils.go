@@ -139,25 +139,6 @@ func ToDBInt(value int64) types.Int {
 	return val
 }
 
-func RemoveIf[T any](slice []T, pred func(T) bool) []T {
-	n := len(slice)
-
-	for i := 0; i < n; i++ {
-		for i < n && pred(slice[i]) {
-			n--
-			slice[i], slice[n] = slice[n], slice[i]
-		}
-	}
-
-	return slice[:n]
-}
-
-func RemoveNils[T any](slice []*T) []*T {
-	return RemoveIf(slice, func(ptr *T) bool {
-		return ptr == nil
-	})
-}
-
 // IterateOrderedMap implements iter.Seq2 to iterate over a map in the key's order.
 //
 // This function returns a func yielding key-value-pairs from a given map in the order of their keys, if their type
