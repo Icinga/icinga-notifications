@@ -6,7 +6,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/teambition/rrule-go"
 	"go.uber.org/zap/zapcore"
-	"log"
 	"time"
 )
 
@@ -129,10 +128,11 @@ func (e *Entry) Init() error {
 }
 
 // Contains returns whether a point in time t is covered by this entry.
+//
+// This function may only be called after a successful call to Init().
 func (e *Entry) Contains(t time.Time) bool {
-	err := e.Init()
-	if err != nil {
-		log.Printf("Can't initialize entry: %s", err)
+	if !e.initialized {
+		panic("timeperiod.Entry: called Contains() before Init()")
 	}
 
 	if t.Before(e.StartTime.Time()) {
@@ -156,10 +156,11 @@ func (e *Entry) Contains(t time.Time) bool {
 // NextTransition returns the next recurrence start or end of this entry relative to the given time inclusively.
 // This function returns also time.Time's zero value if there is no transition that starts/ends at/after the
 // specified time.
+//
+// This function may only be called after a successful call to Init().
 func (e *Entry) NextTransition(t time.Time) time.Time {
-	err := e.Init()
-	if err != nil {
-		log.Printf("Can't initialize entry: %s", err)
+	if !e.initialized {
+		panic("timeperiod.Entry: called NextTransition() before Init()")
 	}
 
 	if t.Before(e.StartTime.Time()) {

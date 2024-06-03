@@ -6,6 +6,7 @@ import (
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/teambition/rrule-go"
 	"testing"
 	"time"
@@ -29,6 +30,8 @@ func TestEntry(t *testing.T) {
 				Valid:  true,
 			},
 		}
+
+		require.NoError(t, e.Init())
 
 		t.Run("TimeAtFirstRecurrenceStart", func(t *testing.T) {
 			assert.True(t, e.Contains(start))
@@ -85,6 +88,8 @@ func TestEntry(t *testing.T) {
 				RRule:     sql.NullString{String: "FREQ=DAILY", Valid: true},
 			}
 
+			require.NoError(t, e.Init())
+
 			assert.True(t, e.Contains(start))
 
 			tz := time.FixedZone("CET", 60*60)
@@ -107,6 +112,8 @@ func TestEntry(t *testing.T) {
 			Timezone:  berlin,
 			RRule:     sql.NullString{String: "FREQ=DAILY", Valid: true},
 		}
+
+		require.NoError(t, e.Init())
 
 		t.Run("TimeAtFirstRecurrenceStart", func(t *testing.T) {
 			assert.Equal(t, end, e.NextTransition(start))
@@ -137,6 +144,7 @@ func TestEntry(t *testing.T) {
 				Timezone:  berlin,
 				RRule:     sql.NullString{String: "FREQ=DAILY", Valid: true},
 			}
+			require.NoError(t, e.Init())
 
 			assert.Equal(t, end, e.NextTransition(start), "next transition should match the first recurrence end")
 
@@ -168,6 +176,10 @@ func TestTimePeriodTransitions(t *testing.T) {
 			}},
 		}
 
+		for _, e := range p.Entries {
+			require.NoError(t, e.Init())
+		}
+
 		assert.Equal(t, end, p.NextTransition(start), "next transition should match the interval end")
 	})
 
@@ -192,6 +204,10 @@ func TestTimePeriodTransitions(t *testing.T) {
 					RRule:     sql.NullString{String: "FREQ=HOURLY;BYHOUR=0,2,4,6,8,10,12,14", Valid: true},
 				},
 			},
+		}
+
+		for _, e := range p.Entries {
+			require.NoError(t, e.Init())
 		}
 
 		assert.Equal(t, end, p.NextTransition(start), "next transition should match the interval end")

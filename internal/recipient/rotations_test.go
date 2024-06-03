@@ -5,6 +5,7 @@ import (
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
 )
@@ -36,8 +37,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 		return t
 	}
 
-	var s rotationResolver
-	s.update([]*Rotation{
+	rotations := []*Rotation{
 		// Weekend rotation starting 2024, alternating between contacts contactWeekend2024a and contactWeekend2024b
 		{
 			ActualHandoff: types.UnixMilli(parse("2024-01-01")),
@@ -132,7 +132,18 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 				},
 			},
 		},
-	})
+	}
+
+	for _, r := range rotations {
+		for _, m := range r.Members {
+			for _, e := range m.TimePeriodEntries {
+				require.NoError(t, e.Init())
+			}
+		}
+	}
+
+	var s rotationResolver
+	s.update(rotations)
 
 	for ts := parse("2023-01-01"); ts.Before(parse("2027-01-01")); ts = ts.Add(30 * time.Minute) {
 		got := s.getContactsAt(ts)
