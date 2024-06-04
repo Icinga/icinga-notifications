@@ -14,6 +14,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/icinga2"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
+	"github.com/okzk/sdnotify"
 	"os"
 	"os/signal"
 	"runtime"
@@ -103,6 +104,10 @@ func main() {
 
 	// Wait to load open incidents from the database before either starting Event Stream Clients or starting the Listener.
 	icinga2Launcher.Ready()
+
+	// When Icinga Notifications is started by systemd, we've to notify systemd that we're ready.
+	_ = sdnotify.Ready()
+
 	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {
 		logger.Errorf("Listener has finished with an error: %+v", err)
 	} else {
