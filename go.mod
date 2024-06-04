@@ -11,6 +11,7 @@ require (
 	github.com/icinga/icinga-go-library v0.2.0
 	github.com/jhillyerd/enmime v1.2.0
 	github.com/jmoiron/sqlx v1.4.0
+	github.com/okzk/sdnotify v0.0.0-20180710141335-d9becc38acbd
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.9.0
 	github.com/teambition/rrule-go v1.8.2
