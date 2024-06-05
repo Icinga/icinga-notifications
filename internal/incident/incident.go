@@ -648,11 +648,20 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 		}
 
 		if i.IsNotifiable(state.Role) {
-			for _, contact := range r.GetContactsAt(t) {
-				if contactChs[contact] == nil {
-					contactChs[contact] = make(map[int64]bool)
-					contactChs[contact][contact.DefaultChannelID] = true
+			contacts := r.GetContactsAt(t)
+			if len(contacts) > 0 {
+				i.logger.Debugw("Expanded recipient to contacts",
+					zap.Object("recipient", r),
+					zap.Objects("contacts", contacts))
+
+				for _, contact := range contacts {
+					if contactChs[contact] == nil {
+						contactChs[contact] = make(map[int64]bool)
+						contactChs[contact][contact.DefaultChannelID] = true
+					}
 				}
+			} else {
+				i.logger.Warnw("Recipient expanded to no contacts", zap.Object("recipient", r))
 			}
 		}
 	}

@@ -10,6 +10,7 @@ import (
 
 type Recipient interface {
 	fmt.Stringer
+	zapcore.ObjectMarshaler
 
 	GetContactsAt(t time.Time) []*Contact
 }

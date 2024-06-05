@@ -2,6 +2,7 @@ package recipient
 
 import (
 	"database/sql"
+	"go.uber.org/zap/zapcore"
 	"time"
 )
 
@@ -19,6 +20,14 @@ func (c *Contact) String() string {
 
 func (c *Contact) GetContactsAt(t time.Time) []*Contact {
 	return []*Contact{c}
+}
+
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (c *Contact) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	// Use contact_id as key so that the type is explicit if logged as the Recipient interface.
+	encoder.AddInt64("contact_id", c.ID)
+	encoder.AddString("name", c.FullName)
+	return nil
 }
 
 var _ Recipient = (*Contact)(nil)

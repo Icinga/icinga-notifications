@@ -23,6 +23,14 @@ func (s *Schedule) RefreshRotations() {
 	s.rotationResolver.update(s.Rotations)
 }
 
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (s *Schedule) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	// Use schedule_id as key so that the type is explicit if logged as the Recipient interface.
+	encoder.AddInt64("schedule_id", s.ID)
+	encoder.AddString("name", s.Name)
+	return nil
+}
+
 type Rotation struct {
 	ID            int64             `db:"id"`
 	ScheduleID    int64             `db:"schedule_id"`
