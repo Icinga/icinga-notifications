@@ -36,6 +36,7 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
 	l.mux.HandleFunc("/dump-config", l.DumpConfig)
 	l.mux.HandleFunc("/dump-incidents", l.DumpIncidents)
+	l.mux.HandleFunc("/dump-schedules", l.DumpSchedules)
 	return l
 }
 
@@ -219,4 +220,33 @@ func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(encodedIncidents)
+}
+
+func (l *Listener) DumpSchedules(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = fmt.Fprintln(w, "GET required")
+		return
+	}
+
+	if !l.checkDebugPassword(w, r) {
+		return
+	}
+
+	l.runtimeConfig.RLock()
+	defer l.runtimeConfig.RUnlock()
+
+	for _, schedule := range l.runtimeConfig.Schedules {
+		fmt.Fprintf(w, "[id=%d] %q:\n", schedule.ID, schedule.Name)
+
+		// Iterate in 30 minute steps as this is the granularity Icinga Notifications Web allows in the configuration.
+		// Truncation to seconds happens only for a more readable output.
+		step := 30 * time.Minute
+		start := time.Now().Truncate(time.Second)
+		for t := start; t.Before(start.Add(48 * time.Hour)); t = t.Add(step) {
+			fmt.Fprintf(w, "\t%v: %v\n", t, schedule.GetContactsAt(t))
+		}
+
+		fmt.Fprintln(w)
+	}
 }
