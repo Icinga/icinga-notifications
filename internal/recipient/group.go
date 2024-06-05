@@ -1,6 +1,9 @@
 package recipient
 
-import "time"
+import (
+	"go.uber.org/zap/zapcore"
+	"time"
+)
 
 type Group struct {
 	ID        int64      `db:"id"`
@@ -19,6 +22,14 @@ func (g *Group) TableName() string {
 
 func (g *Group) String() string {
 	return g.Name
+}
+
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (g *Group) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	// Use contact_id as key so that the type is explicit if logged as the Recipient interface.
+	encoder.AddInt64("group_id", g.ID)
+	encoder.AddString("name", g.Name)
+	return nil
 }
 
 var _ Recipient = (*Group)(nil)
