@@ -350,7 +350,7 @@ CREATE TABLE browser_session (
     php_session_id varchar(256) NOT NULL,
     username citext NOT NULL,
     user_agent varchar(4096) NOT NULL,
-    authenticated_at bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) * 1000),
+    authenticated_at bigint NOT NULL,
 
     CONSTRAINT pk_browser_session PRIMARY KEY (php_session_id)
 );
