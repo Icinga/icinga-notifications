@@ -22,6 +22,19 @@ const (
 type Chain struct {
 	op    LogicalOp // The filter chain operator to be used to evaluate the rules
 	rules []Filter
+
+	// grouped indicates whether a given filter chain is wrapped within parentheses `(foo&bar)`.
+	// You don't and won't ever need to access this property, it's purely meant to be used by the parser.
+	grouped bool
+}
+
+func NewChain(op LogicalOp, rules ...Filter) (*Chain, error) {
+	switch op {
+	case None, All, Any:
+		return &Chain{rules: rules, op: op}, nil
+	default:
+		return nil, fmt.Errorf("invalid logical operator provided: %q", op)
+	}
 }
 
 // Eval evaluates the filter rule sets recursively based on their operator type.
@@ -80,6 +93,35 @@ func (c *Chain) ExtractConditions() []*Condition {
 	return conditions
 }
 
+// pop pops the last filter from the rules slice (if not empty) and returns it.
+func (c *Chain) pop() Filter {
+	if len(c.rules) == 0 {
+		return nil
+	}
+
+	rule := c.rules[len(c.rules)-1]
+	c.rules = c.rules[:len(c.rules)-1]
+
+	return rule
+}
+
+// top picks and erases the first element from its rules and returns it.
+func (c *Chain) top() Filter {
+	if len(c.rules) == 0 {
+		return nil
+	}
+
+	rule := c.rules[0]
+	c.rules = c.rules[1:]
+
+	return rule
+}
+
+// add adds the given filter rules to the current chain.
+func (c *Chain) add(rules ...Filter) {
+	c.rules = append(c.rules, rules...)
+}
+
 // CompOperator is a type used for grouping the individual comparison operators of a filter string.
 type CompOperator string
 
@@ -103,6 +145,17 @@ type Condition struct {
 	op     CompOperator
 	column string
 	value  string
+}
+
+// NewCondition initiates a new Condition instance from the given data.
+// Returns error if invalid CompOperator is provided.
+func NewCondition(column string, op CompOperator, value string) (Filter, error) {
+	switch op {
+	case Equal, UnEqual, Like, UnLike, LessThan, LessThanEqual, GreaterThan, GreaterThanEqual:
+		return &Condition{op: op, column: column, value: value}, nil
+	default:
+		return nil, fmt.Errorf("invalid comparison operator provided: %q", op)
+	}
 }
 
 // Eval evaluates this Condition based on its operator.
