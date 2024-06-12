@@ -54,7 +54,6 @@ CREATE TABLE contact (
     full_name citext NOT NULL,
     username citext, -- reference to web user
     default_channel_id bigint NOT NULL REFERENCES channel(id),
-    color varchar(7) NOT NULL, -- hex color codes e.g #000000
 
     CONSTRAINT pk_contact PRIMARY KEY (id),
     UNIQUE (username)
@@ -73,7 +72,6 @@ CREATE TABLE contact_address (
 CREATE TABLE contactgroup (
     id bigserial,
     name citext NOT NULL,
-    color varchar(7) NOT NULL, -- hex color codes e.g #000000
 
     CONSTRAINT pk_contactgroup PRIMARY KEY (id)
 );
