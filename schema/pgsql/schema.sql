@@ -219,13 +219,25 @@ CREATE TABLE object_extra_tag (
     CONSTRAINT pk_object_extra_tag PRIMARY KEY (object_id, tag)
 );
 
+CREATE TYPE event_type AS ENUM (
+    'acknowledgement-cleared',
+    'acknowledgement-set',
+    'custom',
+    'downtime-end',
+    'downtime-removed',
+    'downtime-start',
+    'flapping-end',
+    'flapping-start',
+    'incident-age',
+    'state'
+);
 CREATE TYPE severity AS ENUM ('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg');
 
 CREATE TABLE event (
     id bigserial,
     time bigint NOT NULL,
     object_id bytea NOT NULL REFERENCES object(id),
-    type text NOT NULL,
+    type event_type NOT NULL,
     severity severity,
     message text,
     username citext,
