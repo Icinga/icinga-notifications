@@ -37,17 +37,19 @@ type Event struct {
 	ID int64 `json:"-"`
 }
 
+// Please keep the following types in alphabetically order and, even more important, make sure that the database type
+// event_type reflects the same values.
 const (
-	TypeState                  = "state"
-	TypeAcknowledgementSet     = "acknowledgement-set"
 	TypeAcknowledgementCleared = "acknowledgement-cleared"
-	TypeInternal               = "internal"
+	TypeAcknowledgementSet     = "acknowledgement-set"
+	TypeCustom                 = "custom"
+	TypeDowntimeEnd            = "downtime-end"
 	TypeDowntimeRemoved        = "downtime-removed"
 	TypeDowntimeStart          = "downtime-start"
-	TypeDowntimeEnd            = "downtime-end"
-	TypeCustom                 = "custom"
-	TypeFlappingStart          = "flapping-start"
 	TypeFlappingEnd            = "flapping-end"
+	TypeFlappingStart          = "flapping-start"
+	TypeIncidentAge            = "incident-age"
+	TypeState                  = "state"
 )
 
 // Validate validates the current event state.
@@ -68,16 +70,17 @@ func (e *Event) Validate() error {
 	switch e.Type {
 	case "":
 		return fmt.Errorf("invalid event: 'type' must not be empty")
-	case TypeState,
-		TypeAcknowledgementSet,
+	case
 		TypeAcknowledgementCleared,
-		TypeInternal,
+		TypeAcknowledgementSet,
+		TypeCustom,
+		TypeDowntimeEnd,
 		TypeDowntimeRemoved,
 		TypeDowntimeStart,
-		TypeDowntimeEnd,
-		TypeCustom,
+		TypeFlappingEnd,
 		TypeFlappingStart,
-		TypeFlappingEnd:
+		TypeIncidentAge,
+		TypeState:
 		return nil
 	default:
 		return fmt.Errorf("invalid event: unsupported event type %q", e.Type)
