@@ -77,12 +77,16 @@ func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 }
 
 func (ch *RocketChat) SetConfig(jsonStr json.RawMessage) error {
+	err := plugin.PopulateDefaults(ch)
+	if err != nil {
+		return err
+	}
+
 	return json.Unmarshal(jsonStr, ch)
 }
 
 func (ch *RocketChat) GetInfo() *plugin.Info {
-
-	elements := []*plugin.ConfigOption{
+	configAttrs := plugin.ConfigOptions{
 		{
 			Name: "url",
 			Type: "string",
@@ -110,11 +114,6 @@ func (ch *RocketChat) GetInfo() *plugin.Info {
 			},
 			Required: true,
 		},
-	}
-
-	configAttrs, err := json.Marshal(elements)
-	if err != nil {
-		panic(err)
 	}
 
 	return &plugin.Info{

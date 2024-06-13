@@ -95,7 +95,12 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 }
 
 func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
-	err := json.Unmarshal(jsonStr, ch)
+	err := plugin.PopulateDefaults(ch)
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal(jsonStr, ch)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %s %w", jsonStr, err)
 	}
@@ -108,24 +113,7 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *Email) GetInfo() *plugin.Info {
-	elements := []*plugin.ConfigOption{
-		{
-			Name: "sender_name",
-			Type: "string",
-			Label: map[string]string{
-				"en_US": "Sender Name",
-				"de_DE": "Absendername",
-			},
-		},
-		{
-			Name: "sender_mail",
-			Type: "string",
-			Label: map[string]string{
-				"en_US": "Sender Address",
-				"de_DE": "Absenderadresse",
-			},
-			Default: "icinga@example.com",
-		},
+	configAttrs := plugin.ConfigOptions{
 		{
 			Name:     "host",
 			Type:     "string",
@@ -145,6 +133,24 @@ func (ch *Email) GetInfo() *plugin.Info {
 			},
 			Min: types.Int{NullInt64: sql.NullInt64{Int64: 1, Valid: true}},
 			Max: types.Int{NullInt64: sql.NullInt64{Int64: 65535, Valid: true}},
+		},
+		{
+			Name: "sender_name",
+			Type: "string",
+			Label: map[string]string{
+				"en_US": "Sender Name",
+				"de_DE": "Absendername",
+			},
+			Default: "Icinga",
+		},
+		{
+			Name: "sender_mail",
+			Type: "string",
+			Label: map[string]string{
+				"en_US": "Sender Address",
+				"de_DE": "Absenderadresse",
+			},
+			Default: "icinga@example.com",
 		},
 		{
 			Name: "user",
@@ -176,11 +182,6 @@ func (ch *Email) GetInfo() *plugin.Info {
 				EncryptionTLS:      "TLS",
 			},
 		},
-	}
-
-	configAttrs, err := json.Marshal(elements)
-	if err != nil {
-		panic(err)
 	}
 
 	return &plugin.Info{
