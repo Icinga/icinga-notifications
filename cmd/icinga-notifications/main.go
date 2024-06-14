@@ -14,6 +14,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/icinga2"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
+	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/okzk/sdnotify"
 	"os"
 	"os/signal"
@@ -95,6 +96,12 @@ func main() {
 	err = incident.LoadOpenIncidents(ctx, db, logs.GetChildLogger("incident"), runtimeConfig)
 	if err != nil {
 		logger.Fatalf("Cannot load incidents from database: %+v", err)
+	}
+
+	// Restore all muted objects that do not have an active incident yet, so that we do not trigger notifications
+	// for them even though they are muted, and also not to override the actual mute reason with a made-up one.
+	if err := object.RestoreMutedObjects(ctx, db); err != nil {
+		logger.Fatalf("Failed to restore muted objects: %+v", err)
 	}
 
 	// Wait to load open incidents from the database before either starting Event Stream Clients or starting the Listener.
