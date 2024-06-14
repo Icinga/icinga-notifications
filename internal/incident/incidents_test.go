@@ -2,8 +2,6 @@ package incident
 
 import (
 	"context"
-	"crypto/rand"
-	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/types"
@@ -138,10 +136,10 @@ func makeIncident(ctx context.Context, db *database.DB, t *testing.T, recovered 
 	ev := &event.Event{
 		Time:     time.Time{},
 		SourceId: 1,
-		Name:     makeRandomString(t),
+		Name:     testutils.MakeRandomString(t),
 		Tags: map[string]string{ // Always generate unique object tags not to produce same object ID!
-			"host":    makeRandomString(t),
-			"service": makeRandomString(t),
+			"host":    testutils.MakeRandomString(t),
+			"service": testutils.MakeRandomString(t),
 		},
 		ExtraTags: map[string]string{
 			"hostgroup/database-server": "",
@@ -166,12 +164,4 @@ func makeIncident(ctx context.Context, db *database.DB, t *testing.T, recovered 
 	require.NoError(t, tx.Commit(), "committing a transaction should not fail")
 
 	return i
-}
-
-func makeRandomString(t *testing.T) string {
-	buf := make([]byte, 20)
-	_, err := rand.Read(buf)
-	require.NoError(t, err, "failed to generate random string")
-
-	return fmt.Sprintf("%x", buf)
 }
