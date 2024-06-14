@@ -17,6 +17,14 @@ var (
 	cacheMu sync.Mutex
 )
 
+// DeleteFromCache deletes the Object from the global cache store matching the given ID (if any).
+func DeleteFromCache(id types.Binary) {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+
+	delete(cache, id.String())
+}
+
 // RestoreMutedObjects restores all muted objects and their extra / ID tags from the database.
 // Note, this function only retrieves muted objects without non-recovered incident.
 //

@@ -7,10 +7,12 @@ import (
 	"github.com/google/uuid"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/object"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -188,6 +190,17 @@ func (client *Client) fetchExtraTagsFor(ctx context.Context, host, service strin
 func (client *Client) deleteExtraTagsCacheFor(result *ObjectCreatedDeleted) error {
 	if result.ObjectType != "Host" && result.ObjectType != "Service" {
 		return fmt.Errorf("cannot delete object extra tags for unknown object_type %q", result.ObjectType)
+	}
+
+	if result.EventType == typeObjectDeleted {
+		names := strings.Split(result.ObjectName, "!")
+		tags := map[string]string{"host": names[0]}
+		if len(names) == 2 {
+			tags["service"] = names[1]
+		}
+
+		// Delete the object from our global cache to avoid having huge dangling objects that don't exist in Icinga 2.
+		object.DeleteFromCache(object.ID(client.EventSourceId, tags))
 	}
 
 	// The checkable has just been either deleted or created, so delete all existing extra tags from our cache
