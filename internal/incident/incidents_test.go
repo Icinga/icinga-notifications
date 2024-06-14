@@ -9,6 +9,8 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/testutils"
+	"github.com/icinga/icinga-notifications/internal/utils"
+	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
@@ -20,11 +22,16 @@ func TestLoadOpenIncidents(t *testing.T) {
 	ctx := context.Background()
 	db := testutils.GetTestDB(ctx, t)
 
-	// Insert a dummy sources for our test cases!
-	source := config.Source{ID: 1, Type: "notifications", Name: "Icinga Notifications", Icinga2InsecureTLS: types.Bool{Bool: false, Valid: true}}
-	stmt, _ := db.BuildInsertStmt(source)
-	_, err := db.NamedExecContext(ctx, stmt, source)
-	require.NoError(t, err, "populating source table should not fail")
+	// Insert a dummy source for our test cases!
+	source := config.Source{Type: "notifications", Name: "Icinga Notifications", Icinga2InsecureTLS: types.Bool{Bool: false, Valid: true}}
+	err := utils.RunInTx(ctx, db, func(tx *sqlx.Tx) error {
+		id, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, source, "id"), source)
+		require.NoError(t, err, "populating source table should not fail")
+
+		source.ID = id
+		return nil
+	})
+	require.NoError(t, err, "utils.RunInTx() should not fail")
 
 	// Reduce the default placeholders per statement to a meaningful number, so that we can
 	// test some parallelism when loading the incidents.
@@ -37,7 +44,7 @@ func TestLoadOpenIncidents(t *testing.T) {
 
 	testData := make(map[string]*Incident, 10*db.Options.MaxPlaceholdersPerStatement)
 	for j := 1; j <= 10*db.Options.MaxPlaceholdersPerStatement; j++ {
-		i := makeIncident(ctx, db, t, false)
+		i := makeIncident(ctx, db, t, source.ID, false)
 		testData[i.ObjectID.String()] = i
 	}
 
@@ -69,11 +76,11 @@ func TestLoadOpenIncidents(t *testing.T) {
 
 		for j := 1; j <= db.Options.MaxPlaceholdersPerStatement/2; j++ {
 			// We don't need to cache recovered incidents in memory.
-			_ = makeIncident(ctx, db, t, true)
+			_ = makeIncident(ctx, db, t, source.ID, true)
 
 			if j%2 == 0 {
 				// Add some extra new not recovered incidents to fully simulate a daemon reload.
-				i := makeIncident(ctx, db, t, false)
+				i := makeIncident(ctx, db, t, source.ID, false)
 				testData[i.ObjectID.String()] = i
 			}
 		}
@@ -132,10 +139,10 @@ func assertIncidents(ctx context.Context, db *database.DB, t *testing.T, testDat
 // This will firstly create and synchronise a new object from a freshly generated dummy event with distinct
 // tags and name, and ensures that no error is returned, otherwise it will cause the entire test suite to fail.
 // Once the object has been successfully synchronised, an incident is created and synced with the database.
-func makeIncident(ctx context.Context, db *database.DB, t *testing.T, recovered bool) *Incident {
+func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID int64, recovered bool) *Incident {
 	ev := &event.Event{
 		Time:     time.Time{},
-		SourceId: 1,
+		SourceId: sourceID,
 		Name:     testutils.MakeRandomString(t),
 		Tags: map[string]string{ // Always generate unique object tags not to produce same object ID!
 			"host":    testutils.MakeRandomString(t),
