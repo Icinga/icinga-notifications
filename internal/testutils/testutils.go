@@ -2,6 +2,8 @@ package testutils
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
 	"github.com/creasty/defaults"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
@@ -54,4 +56,13 @@ func GetTestDB(ctx context.Context, t *testing.T) *database.DB {
 	require.NoError(t, db.PingContext(ctx), "pinging the database should not fail")
 
 	return db
+}
+
+// MakeRandomString returns a 20 byte random hex string.
+func MakeRandomString(t *testing.T) string {
+	buf := make([]byte, 20)
+	_, err := rand.Read(buf)
+	require.NoError(t, err, "failed to generate random string")
+
+	return fmt.Sprintf("%x", buf)
 }
