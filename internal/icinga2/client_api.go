@@ -255,7 +255,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ca
 
 		// Only process HARD states
 		if objQueriesResult.Attrs.StateType == StateTypeSoft {
-			client.Logger.Debugf("Skipping SOFT event, %#v", objQueriesResult.Attrs)
+			client.Logger.Debugw("Skipping SOFT event", zap.Inline(&objQueriesResult.Attrs))
 			continue
 		}
 
@@ -501,7 +501,7 @@ func (client *Client) listenEventStream() error {
 		case *StateChange:
 			// Only process HARD states
 			if respT.StateType == StateTypeSoft {
-				client.Logger.Debugf("Skipping SOFT State Change, %#v", respT)
+				client.Logger.Debugw("Skipping SOFT State Change", zap.Inline(respT))
 				continue
 			}
 
@@ -520,7 +520,8 @@ func (client *Client) listenEventStream() error {
 			if !respT.Downtime.IsFixed {
 				// This may never happen, but Icinga 2 does the same thing, and we need to ignore the start
 				// event for flexible downtime, as there will definitely be a triggered event for it.
-				client.Logger.Debugf("Skipping flexible downtime start event, %#v", respT)
+				client.Logger.Debugw("Skipping flexible downtime start event",
+					zap.Time("timestamp", respT.Timestamp.Time()), zap.Inline(&respT.Downtime))
 				continue
 			}
 
@@ -530,7 +531,8 @@ func (client *Client) listenEventStream() error {
 			if respT.Downtime.IsFixed {
 				// Fixed downtimes generate two events (start, triggered), the latter applies here and must
 				// be ignored, since we're going to process its start event to avoid duplicated notifications.
-				client.Logger.Debugf("Skipping fixed downtime triggered event, %#v", respT)
+				client.Logger.Debugw("Skipping fixed downtime triggered event",
+					zap.Time("timestamp", respT.Timestamp.Time()), zap.Inline(&respT.Downtime))
 				continue
 			}
 

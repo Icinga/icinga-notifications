@@ -3,6 +3,7 @@ package icinga2
 import (
 	"encoding/json"
 	"fmt"
+	"go.uber.org/zap/zapcore"
 	"strconv"
 	"time"
 )
@@ -80,6 +81,14 @@ type CheckResult struct {
 	ExecutionEnd   UnixFloat `json:"execution_end"`
 }
 
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (cr *CheckResult) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddInt("exit_status", cr.ExitStatus)
+	encoder.AddInt("state", cr.State)
+	encoder.AddString("output", cr.Output)
+	return nil
+}
+
 // Downtime represents the Icinga 2 API Downtime object.
 //
 // NOTE:
@@ -104,6 +113,21 @@ type Downtime struct {
 	// for the very (same) event. Flexible downtimes, on the other hand, only emits a trigger event, and
 	// don't produce duplicates for the same event.
 	IsFixed bool `json:"fixed"`
+}
+
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (d *Downtime) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddString("host", d.Host)
+	if d.Service != "" {
+		encoder.AddString("service", d.Service)
+	}
+
+	encoder.AddString("author", d.Author)
+	encoder.AddBool("fixed", d.IsFixed)
+	encoder.AddBool("was_cancelled", d.WasCancelled())
+	encoder.AddTime("remove_time", d.RemoveTime.Time())
+	encoder.AddString("comment", d.Comment)
+	return nil
 }
 
 // WasCancelled returns true when the current downtime was cancelled prematurely by a user.
@@ -137,6 +161,31 @@ type HostServiceRuntimeAttributes struct {
 	Acknowledgement           int         `json:"acknowledgement"`
 	IsFlapping                bool        `json:"flapping"`
 	AcknowledgementLastChange UnixFloat   `json:"acknowledgement_last_change"`
+}
+
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (hsra *HostServiceRuntimeAttributes) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddString("name", hsra.Name)
+	if hsra.Host != "" {
+		encoder.AddString("host", hsra.Host)
+	}
+
+	encoder.AddInt("state", hsra.State)
+	encoder.AddInt("state_type", hsra.StateType)
+	encoder.AddBool("in_downtime", hsra.DowntimeDepth != 0)
+	encoder.AddBool("acknowledged", hsra.Acknowledgement != AcknowledgementNone)
+	encoder.AddTime("last_state_change", hsra.LastStateChange.Time())
+	err := encoder.AddArray("groups", zapcore.ArrayMarshalerFunc(func(encoder zapcore.ArrayEncoder) error {
+		for _, group := range hsra.Groups {
+			encoder.AppendString(group)
+		}
+		return nil
+	}))
+	if err != nil {
+		return err
+	}
+
+	return encoder.AddObject("check_result", &hsra.LastCheckResult)
 }
 
 // ObjectQueriesResult represents the Icinga 2 API Object Queries Result wrapper object.
@@ -182,6 +231,21 @@ type StateChange struct {
 	CheckResult     CheckResult `json:"check_result"`
 	DowntimeDepth   int         `json:"downtime_depth"`
 	Acknowledgement bool        `json:"acknowledgement"`
+}
+
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (sc *StateChange) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddTime("timestamp", sc.Timestamp.Time())
+	encoder.AddString("host", sc.Host)
+	if sc.Service != "" {
+		encoder.AddString("service", sc.Service)
+	}
+
+	encoder.AddInt("state", sc.State)
+	encoder.AddInt("state_type", sc.StateType)
+	encoder.AddBool("in_downtime", sc.DowntimeDepth != 0)
+	encoder.AddBool("acknowledged", sc.Acknowledgement)
+	return encoder.AddObject("check_result", &sc.CheckResult)
 }
 
 // Acknowledgement represents the Icinga 2 API Event Stream AcknowledgementSet or AcknowledgementCleared
