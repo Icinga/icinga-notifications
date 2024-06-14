@@ -31,7 +31,7 @@ CREATE OR REPLACE FUNCTION anynonarrayliketext(anynonarray, text)
 CREATE OPERATOR ~~ (LEFTARG=anynonarray, RIGHTARG=text, PROCEDURE=anynonarrayliketext);
 
 CREATE TABLE available_channel_type (
-    type text NOT NULL,
+    type varchar(255) NOT NULL,
     name text NOT NULL,
     version text NOT NULL,
     author text NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE available_channel_type (
 CREATE TABLE channel (
     id bigserial,
     name citext NOT NULL,
-    type text NOT NULL, -- 'email', 'sms', ...
+    type varchar(255) NOT NULL, -- 'email', 'sms', ...
     config text, -- JSON with channel-specific attributes
     -- for now type determines the implementation, in the future, this will need a reference to a concrete
     -- implementation to allow multiple implementations of a sms channel for example, probably even user-provided ones
@@ -71,6 +71,7 @@ CREATE TABLE contact (
     -- As the username is unique, it must be NULLed for deletion via "deleted = 'y'"
     CONSTRAINT uk_contact_username UNIQUE (username),
 
+    CONSTRAINT ck_contact_username_up_to_254_chars CHECK (length(username) <= 254),
     CONSTRAINT fk_contact_channel FOREIGN KEY (default_channel_id) REFERENCES channel(id)
 );
 
@@ -79,7 +80,7 @@ CREATE INDEX idx_contact_changed_at ON contact(changed_at);
 CREATE TABLE contact_address (
     id bigserial,
     contact_id bigint NOT NULL,
-    type text NOT NULL, -- 'phone', 'email', ...
+    type varchar(255) NOT NULL, -- 'phone', 'email', ...
     address text NOT NULL, -- phone number, email address, ...
 
     changed_at bigint NOT NULL,
@@ -285,7 +286,7 @@ CREATE TABLE object (
 
 CREATE TABLE object_id_tag (
     object_id bytea NOT NULL,
-    tag text NOT NULL,
+    tag varchar(255) NOT NULL,
     value text NOT NULL,
 
     CONSTRAINT pk_object_id_tag PRIMARY KEY (object_id, tag),
@@ -294,7 +295,7 @@ CREATE TABLE object_id_tag (
 
 CREATE TABLE object_extra_tag (
     object_id bytea NOT NULL,
-    tag text NOT NULL,
+    tag varchar(255) NOT NULL,
     value text NOT NULL,
 
     CONSTRAINT pk_object_extra_tag PRIMARY KEY (object_id, tag),
@@ -495,7 +496,8 @@ CREATE TABLE browser_session (
     user_agent varchar(4096) NOT NULL,
     authenticated_at bigint NOT NULL,
 
-    CONSTRAINT pk_browser_session PRIMARY KEY (php_session_id)
+    CONSTRAINT pk_browser_session PRIMARY KEY (php_session_id),
+    CONSTRAINT ck_browser_session_username_up_to_254_chars CHECK (length(username) <= 254)
 );
 
 CREATE INDEX idx_browser_session_authenticated_at ON browser_session (authenticated_at DESC);

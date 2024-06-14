@@ -230,5 +230,9 @@ func ValidateType(t string) error {
 		return fmt.Errorf("type contains invalid chars, may only contain a-zA-Z0-9, %q given", t)
 	}
 
+	if len(t) > 255 {
+		return fmt.Errorf("type is too long, at most 255 chars allowed, %d given", len(t))
+	}
+
 	return nil
 }
