@@ -17,12 +17,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
-)
-
-var (
-	cache   = make(map[string]*Object)
-	cacheMu sync.Mutex
 )
 
 type Object struct {
@@ -104,16 +98,7 @@ func RestoreObjects(ctx context.Context, db *database.DB, ids []types.Binary) er
 		return errors.Wrap(err, "cannot restore objects extra tags")
 	}
 
-	cacheMu.Lock()
-	defer cacheMu.Unlock()
-
-	for _, o := range objects {
-		if obj, ok := cache[o.ID.String()]; ok {
-			panic(fmt.Sprintf("Object %q is already in the cache", obj.DisplayName()))
-		}
-
-		cache[o.ID.String()] = o
-	}
+	addObjectsToCache(objects)
 
 	return nil
 }

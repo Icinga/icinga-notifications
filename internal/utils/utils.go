@@ -80,23 +80,15 @@ func InsertAndFetchId(ctx context.Context, tx *sqlx.Tx, stmt string, args any) (
 	return lastInsertId, nil
 }
 
-// ForEachRow applies the provided restoreFunc callback for each successfully retrieved row of the specified type.
-// It will bulk SELECT the data from the database scoped to the specified ids and scans into the provided Row type.
+// ExecAndApply applies the provided restoreFunc callback for each successfully retrieved row of the specified type.
 // Returns error on any database failure or fails to acquire the table semaphore.
-func ForEachRow[Row, Id any](ctx context.Context, db *database.DB, idColumn string, ids []Id, restoreFunc func(*Row)) error {
-	subject := new(Row)
-	table := database.TableName(subject)
+func ExecAndApply[Row any](ctx context.Context, db *database.DB, stmt string, args []interface{}, restoreFunc func(*Row)) error {
+	table := database.TableName(new(Row))
 	sem := db.GetSemaphoreForTable(table)
 	if err := sem.Acquire(ctx, 1); err != nil {
 		return errors.Wrapf(err, "cannot acquire semaphore for table %q", table)
 	}
 	defer sem.Release(1)
-
-	query := fmt.Sprintf("%s WHERE %q IN (?)", db.BuildSelectStmt(subject, subject), idColumn)
-	stmt, args, err := sqlx.In(query, ids)
-	if err != nil {
-		return errors.Wrapf(err, "cannot build placeholders for %q", query)
-	}
 
 	rows, err := db.QueryxContext(ctx, db.Rebind(stmt), args...)
 	if err != nil {
@@ -117,6 +109,20 @@ func ForEachRow[Row, Id any](ctx context.Context, db *database.DB, idColumn stri
 	}
 
 	return rows.Err()
+}
+
+// ForEachRow applies the provided restoreFunc callback for each successfully retrieved row of the specified type.
+// It will bulk SELECT the data from the database scoped to the specified ids and scans into the provided Row type.
+// Returns error on any database failure or fails to acquire the table semaphore.
+func ForEachRow[Row, Id any](ctx context.Context, db *database.DB, idColumn string, ids []Id, restoreFunc func(*Row)) error {
+	subject := new(Row)
+	query := fmt.Sprintf("%s WHERE %q IN (?)", db.BuildSelectStmt(subject, subject), idColumn)
+	stmt, args, err := sqlx.In(query, ids)
+	if err != nil {
+		return errors.Wrapf(err, "cannot build placeholders for %q", query)
+	}
+
+	return ExecAndApply(ctx, db, stmt, args, restoreFunc)
 }
 
 // ToDBString transforms the given string to types.String.
