@@ -11,4 +11,4 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build Image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
