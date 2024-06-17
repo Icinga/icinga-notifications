@@ -98,7 +98,7 @@ CREATE TABLE rotation (
     -- the lower the more important, starting at 0, avoids the need to re-index upon addition
     priority integer NOT NULL,
     name text NOT NULL,
-    mode rotation_type NOT NULL,
+    mode rotation_type NOT NULL DEFAULT '24-7',
     -- JSON with rotation-specific attributes
     -- Needed exclusively by Web to simplify editing and visualisation
     options text NOT NULL,
@@ -243,7 +243,7 @@ CREATE TABLE event (
     id bigserial,
     time bigint NOT NULL,
     object_id bytea NOT NULL REFERENCES object(id),
-    type event_type NOT NULL,
+    type event_type NOT NULL DEFAULT 'acknowledgement-cleared',
     severity severity,
     message text,
     username citext,
@@ -295,7 +295,7 @@ CREATE TABLE incident (
     object_id bytea NOT NULL REFERENCES object(id),
     started_at bigint NOT NULL,
     recovered_at bigint,
-    severity severity NOT NULL,
+    severity severity NOT NULL DEFAULT 'ok',
 
     CONSTRAINT pk_incident PRIMARY KEY (id)
 );
@@ -314,7 +314,7 @@ CREATE TABLE incident_contact (
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),
     schedule_id bigint REFERENCES schedule(id),
-    role incident_contact_role NOT NULL,
+    role incident_contact_role NOT NULL DEFAULT 'recipient',
 
     CONSTRAINT key_incident_contact_contact UNIQUE (incident_id, contact_id),
     CONSTRAINT key_incident_contact_contactgroup UNIQUE (incident_id, contactgroup_id),
@@ -349,7 +349,7 @@ CREATE TABLE incident_history (
     channel_id bigint REFERENCES channel(id),
     time bigint NOT NULL,
     message text,
-    type incident_history_event_type NOT NULL,
+    type incident_history_event_type NOT NULL DEFAULT 'opened',
     new_severity severity,
     old_severity severity,
     new_recipient_role incident_contact_role,
