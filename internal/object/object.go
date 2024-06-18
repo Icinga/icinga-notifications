@@ -13,7 +13,6 @@ import (
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/pkg/errors"
 	"regexp"
 	"sort"
 	"strings"
@@ -65,42 +64,6 @@ func ClearCache() {
 	defer cacheMu.Unlock()
 
 	cache = make(map[string]*Object)
-}
-
-// RestoreObjects restores all objects and their (extra)tags matching the given IDs from the database.
-// Returns error on any database failures and panics when trying to cache an object that's already in the cache store.
-func RestoreObjects(ctx context.Context, db *database.DB, ids []types.Binary) error {
-	objects := map[string]*Object{}
-	err := utils.ForEachRow[Object](ctx, db, "id", ids, func(o *Object) {
-		o.db = db
-		o.Tags = map[string]string{}
-		o.ExtraTags = map[string]string{}
-
-		objects[o.ID.String()] = o
-	})
-	if err != nil {
-		return errors.Wrap(err, "cannot restore objects")
-	}
-
-	// Restore object ID tags matching the given object ids
-	err = utils.ForEachRow[IdTagRow](ctx, db, "object_id", ids, func(ir *IdTagRow) {
-		objects[ir.ObjectId.String()].Tags[ir.Tag] = ir.Value
-	})
-	if err != nil {
-		return errors.Wrap(err, "cannot restore objects ID tags")
-	}
-
-	// Restore object extra tags matching the given object ids
-	err = utils.ForEachRow[ExtraTagRow](ctx, db, "object_id", ids, func(et *ExtraTagRow) {
-		objects[et.ObjectId.String()].ExtraTags[et.Tag] = et.Value
-	})
-	if err != nil {
-		return errors.Wrap(err, "cannot restore objects extra tags")
-	}
-
-	addObjectsToCache(objects)
-
-	return nil
 }
 
 // FromEvent creates an object from the provided event tags if it's not in the cache
