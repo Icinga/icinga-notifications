@@ -7,6 +7,7 @@ import (
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/utils"
+	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 	"sync"
@@ -30,14 +31,34 @@ func DeleteFromCache(id types.Binary) {
 //
 // Returns an error on any database failure and panics when trying to cache an object that's already in the cache store.
 func RestoreMutedObjects(ctx context.Context, db *database.DB) error {
+	query := db.BuildSelectStmt(new(Object), new(Object)) + " WHERE mute_reason IS NOT NULL " +
+		"AND NOT EXISTS((SELECT 1 FROM incident WHERE object_id = object.id AND recovered_at IS NULL))"
+	return restoreObjectsFromQuery(ctx, db, query)
+}
+
+// RestoreObjects restores all objects and their (extra)tags matching the given IDs from the database.
+// Returns error on any database failures and panics when trying to cache an object that's already in the cache store.
+func RestoreObjects(ctx context.Context, db *database.DB, ids []types.Binary) error {
+	var obj *Object
+	query, args, err := sqlx.In(db.BuildSelectStmt(obj, obj)+" WHERE id IN (?)", ids)
+	if err != nil {
+		return errors.Wrapf(err, "cannot build placeholders for %q", query)
+	}
+
+	return restoreObjectsFromQuery(ctx, db, query, args...)
+}
+
+// restoreObjectsFromQuery takes a query that returns rows of the object table, executes it and loads the returned
+// objects into the local cache.
+//
+// Returns an error on any database failure and panics when trying to cache an object that's already in the cache store.
+func restoreObjectsFromQuery(ctx context.Context, db *database.DB, query string, args ...any) error {
 	objects := make(chan *Object)
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		defer close(objects)
 
-		clause := `WHERE mute_reason IS NOT NULL AND NOT EXISTS((SELECT 1 FROM incident WHERE object_id = object.id AND recovered_at IS NULL))`
-		query := fmt.Sprintf("%s %s", db.BuildSelectStmt(new(Object), new(Object)), clause)
-		err := utils.ExecAndApply[Object](ctx, db, query, nil, func(o *Object) {
+		err := utils.ExecAndApply[Object](ctx, db, query, args, func(o *Object) {
 			o.db = db
 			o.Tags = map[string]string{}
 			o.ExtraTags = map[string]string{}
@@ -64,8 +85,8 @@ func RestoreMutedObjects(ctx context.Context, db *database.DB) error {
 				}
 
 				g.Go(func() error {
-					var ids []types.Binary
-					objectsMap := map[string]*Object{}
+					ids := make([]types.Binary, 0, len(bulk))
+					objectsMap := make(map[string]*Object, len(bulk))
 					for _, obj := range bulk {
 						objectsMap[obj.ID.String()] = obj
 						ids = append(ids, obj.ID)
@@ -87,7 +108,16 @@ func RestoreMutedObjects(ctx context.Context, db *database.DB) error {
 						return errors.Wrap(err, "cannot restore objects extra tags")
 					}
 
-					addObjectsToCache(objectsMap)
+					cacheMu.Lock()
+					defer cacheMu.Unlock()
+
+					for _, o := range objectsMap {
+						if obj, ok := cache[o.ID.String()]; ok {
+							panic(fmt.Sprintf("Object %q is already in the cache", obj.DisplayName()))
+						}
+
+						cache[o.ID.String()] = o
+					}
 
 					return nil
 				})
@@ -96,19 +126,4 @@ func RestoreMutedObjects(ctx context.Context, db *database.DB) error {
 	})
 
 	return g.Wait()
-}
-
-// addObjectsToCache adds the objects from the given map to the global object cache store.
-// Panics when trying to cache an object that's already in the cache store.
-func addObjectsToCache(objects map[string]*Object) {
-	cacheMu.Lock()
-	defer cacheMu.Unlock()
-
-	for _, o := range objects {
-		if obj, ok := cache[o.ID.String()]; ok {
-			panic(fmt.Sprintf("Object %q is already in the cache", obj.DisplayName()))
-		}
-
-		cache[o.ID.String()] = o
-	}
 }
