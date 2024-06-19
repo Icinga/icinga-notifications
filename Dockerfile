@@ -5,20 +5,15 @@ ENV CGO_ENABLED 0
 COPY . /src/icinga-notifications
 WORKDIR /src/icinga-notifications
 
-RUN mkdir bin
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -o bin/ ./cmd/icinga-notifications
+    make all
 
-RUN mkdir bin/channel
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go build -o bin/channel/ ./cmd/channel/...
+RUN make DESTDIR=/target install
 
 FROM docker.io/library/alpine
 
-COPY --from=build /src/icinga-notifications/bin/icinga-notifications /usr/bin/icinga-notifications
-COPY --from=build /src/icinga-notifications/bin/channel /usr/libexec/icinga-notifications/channel
+COPY --from=build /target /
 
 RUN apk add tzdata
 
@@ -28,4 +23,4 @@ RUN adduser -u 1000 -H -D -G $username $username
 USER $username
 
 EXPOSE 5680
-CMD ["/usr/bin/icinga-notifications", "--config", "/etc/icinga-notifications/config.yml"]
+CMD ["/usr/sbin/icinga-notifications", "--config", "/etc/icinga-notifications/config.yml"]
