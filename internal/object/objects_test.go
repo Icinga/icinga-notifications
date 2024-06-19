@@ -20,13 +20,12 @@ func TestRestoreMutedObjects(t *testing.T) {
 
 	var sourceID int64
 	err := utils.RunInTx(ctx, db, func(tx *sqlx.Tx) error {
-		args := map[string]interface{}{
-			"type":     "notifications",
-			"name":     "Icinga Notifications",
-			"insecure": "n",
+		args := map[string]any{
+			"type": "notifications",
+			"name": "Icinga Notifications",
 		}
 		// We can't use config.Source here unfortunately due to cyclic import error!
-		id, err := utils.InsertAndFetchId(ctx, tx, `INSERT INTO source (type, name, icinga2_insecure_tls) VALUES (:type, :name, :insecure)`, args)
+		id, err := utils.InsertAndFetchId(ctx, tx, `INSERT INTO source (type, name) VALUES (:type, :name)`, args)
 		require.NoError(t, err, "populating source table should not fail")
 
 		sourceID = id
@@ -66,7 +65,7 @@ func TestRestoreMutedObjects(t *testing.T) {
 			assert.Equal(t, o.ExtraTags, objFromCache.ExtraTags, "objects tags should match")
 		}
 
-		// Purge all newly created objects and its relations not mes up local database tests.
+		// Purge all newly created objects and their relations not mes up local database tests.
 		_, err = db.NamedExecContext(ctx, `DELETE FROM object_id_tag WHERE object_id = :id`, o)
 		assert.NoError(t, err, "deleting object id tags should not fail")
 
