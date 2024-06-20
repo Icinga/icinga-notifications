@@ -15,6 +15,9 @@ all:
 	go build -o build/ ./cmd/icinga-notifications
 	go build -o build/channel/ ./cmd/channel/...
 
+test:
+	go test ./...
+
 install:
 	@# config
 	install -d $(DESTDIR)$(sysconfdir)/icinga-notifications
@@ -30,8 +33,7 @@ install:
 	@# chmod ensures consistent permissions when cp is called with umask != 022
 	chmod -R u=rwX,go=rX $(DESTDIR)$(datadir)/icinga-notifications/schema
 
-
 clean:
 	rm -rf build
 
-.PHONY: all install clean
+.PHONY: all test install clean
