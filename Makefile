@@ -10,9 +10,13 @@ libexecdir ?= $(prefix)/libexec
 datadir    ?= $(prefix)/share
 sysconfdir ?= /etc
 
+all: pkg = github.com/icinga/icinga-notifications/internal
 all:
 	mkdir -p build
-	go build -o build/ ./cmd/icinga-notifications
+	go build \
+		-o build/ \
+		-ldflags "-X '$(pkg).LibExecDir=$(libexecdir)'" \
+		./cmd/icinga-notifications
 	go build -o build/channel/ ./cmd/channel/...
 
 test:
