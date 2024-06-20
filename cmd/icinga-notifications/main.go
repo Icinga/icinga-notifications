@@ -26,7 +26,7 @@ func main() {
 	var configPath string
 	var showVersion bool
 
-	flag.StringVar(&configPath, "config", "", "path to config file")
+	flag.StringVar(&configPath, "config", internal.SysConfDir+"/icinga-notifications/config.yml", "path to config file")
 	flag.BoolVar(&showVersion, "version", false, "print version")
 	flag.Parse()
 
@@ -41,11 +41,6 @@ func main() {
 			fmt.Println("  Git commit:", internal.Version.Commit)
 		}
 		return
-	}
-
-	if configPath == "" {
-		_, _ = fmt.Fprintln(os.Stderr, "missing -config flag")
-		os.Exit(1)
 	}
 
 	err := daemon.LoadConfig(configPath)
