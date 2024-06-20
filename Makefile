@@ -15,7 +15,7 @@ all:
 	mkdir -p build
 	go build \
 		-o build/ \
-		-ldflags "-X '$(pkg).LibExecDir=$(libexecdir)'" \
+		-ldflags "-X '$(pkg).LibExecDir=$(libexecdir)' -X '$(pkg).SysConfDir=$(sysconfdir)'" \
 		./cmd/icinga-notifications
 	go build -o build/channel/ ./cmd/channel/...
 

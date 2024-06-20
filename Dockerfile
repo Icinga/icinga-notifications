@@ -23,4 +23,4 @@ RUN adduser -u 1000 -H -D -G $username $username
 USER $username
 
 EXPOSE 5680
-CMD ["/usr/sbin/icinga-notifications", "--config", "/etc/icinga-notifications/config.yml"]
+CMD ["/usr/sbin/icinga-notifications"]
