@@ -6,6 +6,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-notifications/internal"
 	"os"
 	"time"
 )
@@ -13,12 +14,22 @@ import (
 type ConfigFile struct {
 	Listen           string          `yaml:"listen" default:"localhost:5680"`
 	DebugPassword    string          `yaml:"debug-password"`
-	ChannelPluginDir string          `yaml:"channel-plugin-dir" default:"/usr/libexec/icinga-notifications/channel"`
+	ChannelPluginDir string          `yaml:"channel-plugin-dir"`
 	ApiTimeout       time.Duration   `yaml:"api-timeout" default:"1m"`
 	Icingaweb2URL    string          `yaml:"icingaweb2-url"`
 	Database         database.Config `yaml:"database"`
 	Logging          logging.Config  `yaml:"logging"`
 }
+
+// SetDefaults implements the defaults.Setter interface.
+func (c *ConfigFile) SetDefaults() {
+	if defaults.CanUpdate(c.ChannelPluginDir) {
+		c.ChannelPluginDir = internal.LibExecDir + "/icinga-notifications/channel"
+	}
+}
+
+// Assert interface compliance.
+var _ defaults.Setter = (*ConfigFile)(nil)
 
 // config holds the configuration state as a singleton. It is used from LoadConfig and Config
 var config *ConfigFile
