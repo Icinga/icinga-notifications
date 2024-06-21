@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,13 +70,23 @@ type ConfigOption struct {
 	Max types.Int `json:"max,omitempty"`
 }
 
+// ConfigOptions describes all ConfigOption entries.
+//
+// This type became necessary to implement the database.sql.driver.Valuer to marshal it into JSON.
+type ConfigOptions []ConfigOption
+
+// Value implements database.sql's driver.Valuer to represent all ConfigOptions as a JSON array.
+func (c ConfigOptions) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
 // Info contains plugin information.
 type Info struct {
-	Type             string          `db:"type" json:"-"`
-	Name             string          `db:"name" json:"name"`
-	Version          string          `db:"version" json:"version"`
-	Author           string          `db:"author" json:"author"`
-	ConfigAttributes json.RawMessage `db:"config_attrs" json:"config_attrs"` // ConfigOption(s) as json-encoded list
+	Type             string        `db:"type" json:"-"`
+	Name             string        `db:"name" json:"name"`
+	Version          string        `db:"version" json:"version"`
+	Author           string        `db:"author" json:"author"`
+	ConfigAttributes ConfigOptions `db:"config_attrs" json:"config_attrs"`
 }
 
 // TableName implements the contracts.TableNamer interface.
@@ -129,6 +140,25 @@ type Plugin interface {
 
 	// SendNotification sends the notification, returns an error on failure
 	SendNotification(req *NotificationRequest) error
+}
+
+// PopulateDefaults sets the struct fields from Info.ConfigAttributes where ConfigOption.Default is set.
+//
+// It should be called from each channel plugin within its Plugin.SetConfig before doing any further configuration.
+func PopulateDefaults(typePtr Plugin) error {
+	defaults := make(map[string]any)
+	for _, confAttr := range typePtr.GetInfo().ConfigAttributes {
+		if confAttr.Default != nil {
+			defaults[confAttr.Name] = confAttr.Default
+		}
+	}
+
+	defaultConf, err := json.Marshal(defaults)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(defaultConf, typePtr)
 }
 
 // RunPlugin reads the incoming stdin requests, processes and writes the responses to stdout
