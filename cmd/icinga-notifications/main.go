@@ -70,8 +70,19 @@ func main() {
 	defer cancel()
 
 	logger.Infof("Connecting to database at '%s'", db.GetAddr())
-	if err := db.PingContext(ctx); err != nil {
-		logger.Fatalf("Cannot connect to the database: %+v", err)
+	{
+		// When installing Icinga Notifications via our packages, the systemd service will be started automatically
+		// e.g. on Debian based systems, and since the unit type is set to `notify`, make sure you don't block the
+		// installation if no database is configured yet.
+		dbCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
+		defer cancelFunc()
+		if err := db.PingContext(dbCtx); err != nil {
+			logger.Fatalf("Cannot connect to the database: %+v", err)
+		}
+
+		// The deferred call above is going to be invoked when main exits, but we want to release the resources now.
+		// So call it here and the deferred one becomes a no-op.
+		cancelFunc()
 	}
 
 	channel.UpsertPlugins(ctx, conf.ChannelPluginDir, logs.GetChildLogger("channel"), db)
