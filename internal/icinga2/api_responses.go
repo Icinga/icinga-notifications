@@ -191,8 +191,8 @@ type StateChange struct {
 //   - An empty Service field indicates a host acknowledgement.
 //   - State might be StateHost{Up,Down} for hosts or StateService{Ok,Warning,Critical,Unknown} for services.
 //   - StateType might be StateTypeSoft or StateTypeHard.
-//   - EventType is either set to typeAcknowledgementSet or typeAcknowledgementCleared
-//   - Author and Comment fields are always empty when EventType is set to typeAcknowledgementCleared
+//   - EventType is either set to typeAcknowledgementSet or typeAcknowledgementCleared.
+//   - Author and Comment fields are always empty when EventType is set to typeAcknowledgementCleared.
 //
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-acknowledgementset
 // https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#event-stream-type-acknowledgementcleared
@@ -279,7 +279,7 @@ type Flapping struct {
 // ObjectCreatedDeleted represents the Icinga 2 API stream object created/deleted response.
 //
 // NOTE:
-//   - The ObjectName field may already contain the composed name of the checkable if the ObjectType is `Service`.
+//   - The ObjectName field already contains the composed name of the checkable if the ObjectType is `Service`.
 //   - The EventType field indicates which event type is currently being streamed and is either
 //     set to typeObjectCreated or typeObjectDeleted.
 type ObjectCreatedDeleted struct {
