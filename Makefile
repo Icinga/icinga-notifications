@@ -1,7 +1,7 @@
 # These variables follow the naming convention from the GNU Make documentation
 # but their defaults correspond to the rest of the code (note that changing
 # libexecdir here wouldn't affect the default path for the channel plugin
-# directory used by the dameon for example).
+# directory used by the daemon for example).
 #
 # https://www.gnu.org/software/make/manual/html_node/Directory-Variables.html
 prefix     ?= /usr
