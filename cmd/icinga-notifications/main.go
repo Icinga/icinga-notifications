@@ -75,7 +75,7 @@ func main() {
 		logger.Fatalf("Cannot connect to the database: %+v", err)
 	}
 
-	channel.UpsertPlugins(ctx, conf.ChannelPluginDir, logs.GetChildLogger("channel"), db)
+	channel.UpsertPlugins(ctx, conf.ChannelsDir, logs.GetChildLogger("channel"), db)
 
 	icinga2Launcher := &icinga2.Launcher{
 		Ctx:           ctx,

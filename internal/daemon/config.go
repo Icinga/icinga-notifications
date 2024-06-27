@@ -12,19 +12,19 @@ import (
 )
 
 type ConfigFile struct {
-	Listen           string          `yaml:"listen" default:"localhost:5680"`
-	DebugPassword    string          `yaml:"debug-password"`
-	ChannelPluginDir string          `yaml:"channel-plugin-dir"`
-	ApiTimeout       time.Duration   `yaml:"api-timeout" default:"1m"`
-	Icingaweb2URL    string          `yaml:"icingaweb2-url"`
-	Database         database.Config `yaml:"database"`
-	Logging          logging.Config  `yaml:"logging"`
+	Listen        string          `yaml:"listen" default:"localhost:5680"`
+	DebugPassword string          `yaml:"debug-password"`
+	ChannelsDir   string          `yaml:"channels-dir"`
+	ApiTimeout    time.Duration   `yaml:"api-timeout" default:"1m"`
+	Icingaweb2URL string          `yaml:"icingaweb2-url"`
+	Database      database.Config `yaml:"database"`
+	Logging       logging.Config  `yaml:"logging"`
 }
 
 // SetDefaults implements the defaults.Setter interface.
 func (c *ConfigFile) SetDefaults() {
-	if defaults.CanUpdate(c.ChannelPluginDir) {
-		c.ChannelPluginDir = internal.LibExecDir + "/icinga-notifications/channel"
+	if defaults.CanUpdate(c.ChannelsDir) {
+		c.ChannelsDir = internal.LibExecDir + "/icinga-notifications/channels"
 	}
 }
 
