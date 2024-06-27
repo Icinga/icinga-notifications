@@ -1,4 +1,22 @@
-## Channel Plugin
+# Channels
+
+After Icinga Notifications decides to send a notification of any kind, it will be passed to a channel plugin.
+Such a channel plugin submits the notification event to a channel, e.g., email or a chat client.
+
+Icinga Notifications comes packed with channel plugins, but also enables you to develop your own plugins.
+
+To make those plugins available to Icinga Notifications, they must be placed in the
+[channels directory](03-Configuration.md#channels-directory),
+which is being done automatically for package installations.
+Afterwards they can be configured through Icinga Notifications Web.
+
+## Available Channels
+
+- _email_: Email submission via SMTP
+- _rocketchat_: Rocket.Chat
+- _webhook_: Configurable HTTP/HTTPS queries for your backend
+
+## Technical Channel Description
 
 Channel plugins are processes that run continuously and independently of each other. They receive many requests over
 their lifetime. They receive JSON-formatted requests on stdin and reply with JSON-formatted responses on stdout. The
