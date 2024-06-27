@@ -17,7 +17,7 @@ all:
 		-o build/ \
 		-ldflags "-X '$(pkg).LibExecDir=$(libexecdir)' -X '$(pkg).SysConfDir=$(sysconfdir)'" \
 		./cmd/icinga-notifications
-	go build -o build/channel/ ./cmd/channel/...
+	go build -o build/channels/ ./cmd/channels/...
 
 test:
 	go test ./...
@@ -28,9 +28,9 @@ install:
 	install -m644 config.example.yml $(DESTDIR)$(sysconfdir)/icinga-notifications/config.yml
 	@# dameon
 	install -D build/icinga-notifications $(DESTDIR)$(sbindir)/icinga-notifications
-	@# channel plugins
-	install -d $(DESTDIR)$(libexecdir)/icinga-notifications/channel
-	install build/channel/* $(DESTDIR)$(libexecdir)/icinga-notifications/channel/
+	@# channels
+	install -d $(DESTDIR)$(libexecdir)/icinga-notifications/channels
+	install build/channels/* $(DESTDIR)$(libexecdir)/icinga-notifications/channels/
 	@# database schema
 	install -d $(DESTDIR)$(datadir)/icinga-notifications
 	cp -rv --no-dereference schema $(DESTDIR)$(datadir)/icinga-notifications

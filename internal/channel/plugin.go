@@ -31,7 +31,7 @@ type Plugin struct {
 
 // NewPlugin starts and returns a new plugin instance. If the start of the plugin fails, an error is returned
 func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
-	file := filepath.Join(daemon.Config().ChannelPluginDir, pluginType)
+	file := filepath.Join(daemon.Config().ChannelsDir, pluginType)
 
 	logger.Debugw("Starting new channel plugin process", zap.String("path", file))
 
