@@ -47,8 +47,10 @@ CREATE TABLE channel (
     config text, -- JSON with channel-specific attributes
     -- for now type determines the implementation, in the future, this will need a reference to a concrete
     -- implementation to allow multiple implementations of a sms channel for example, probably even user-provided ones
+    external_uuid uuid NOT NULL,
 
-    CONSTRAINT pk_channel PRIMARY KEY (id)
+    CONSTRAINT pk_channel PRIMARY KEY (id),
+    UNIQUE (external_uuid)
 );
 
 CREATE TABLE contact (
@@ -56,9 +58,11 @@ CREATE TABLE contact (
     full_name citext NOT NULL,
     username citext, -- reference to web user
     default_channel_id bigint NOT NULL REFERENCES channel(id),
+    external_uuid uuid NOT NULL,
 
     CONSTRAINT pk_contact PRIMARY KEY (id),
-    UNIQUE (username)
+    UNIQUE (username),
+    UNIQUE (external_uuid)
 );
 
 CREATE TABLE contact_address (
@@ -74,8 +78,10 @@ CREATE TABLE contact_address (
 CREATE TABLE contactgroup (
     id bigserial,
     name citext NOT NULL,
+    external_uuid uuid NOT NULL,
 
-    CONSTRAINT pk_contactgroup PRIMARY KEY (id)
+    CONSTRAINT pk_contactgroup PRIMARY KEY (id),
+    UNIQUE (external_uuid)
 );
 
 CREATE TABLE contactgroup_member (
