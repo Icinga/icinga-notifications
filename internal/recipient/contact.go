@@ -2,12 +2,14 @@ package recipient
 
 import (
 	"database/sql"
+	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"go.uber.org/zap/zapcore"
 	"time"
 )
 
 type Contact struct {
-	ID               int64          `db:"id"`
+	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+
 	FullName         string         `db:"full_name"`
 	Username         sql.NullString `db:"username"`
 	DefaultChannelID int64          `db:"default_channel_id"`
@@ -33,10 +35,18 @@ func (c *Contact) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 var _ Recipient = (*Contact)(nil)
 
 type Address struct {
-	ID        int64  `db:"id"`
+	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+
 	ContactID int64  `db:"contact_id"`
 	Type      string `db:"type"`
 	Address   string `db:"address"`
+}
+
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (a *Address) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddInt64("id", a.ID)
+	encoder.AddInt64("contact_id", a.ContactID)
+	return nil
 }
 
 func (a *Address) TableName() string {
