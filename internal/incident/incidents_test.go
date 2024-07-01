@@ -6,6 +6,7 @@ import (
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
+	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/testutils"
@@ -23,7 +24,17 @@ func TestLoadOpenIncidents(t *testing.T) {
 	db := testutils.GetTestDB(ctx, t)
 
 	// Insert a dummy source for our test cases!
-	source := config.Source{Type: "notifications", Name: "Icinga Notifications", Icinga2InsecureTLS: types.Bool{Bool: false, Valid: true}}
+	source := config.Source{
+		IncrementalPkDbEntry: baseconf.IncrementalPkDbEntry[int64]{
+			IncrementalDbEntry: baseconf.IncrementalDbEntry{
+				ChangedAt: types.UnixMilli(time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)),
+				Deleted:   types.Bool{Bool: false, Valid: true},
+			},
+		},
+		Type:               "notifications",
+		Name:               "Icinga Notifications",
+		Icinga2InsecureTLS: types.Bool{Bool: false, Valid: true},
+	}
 	err := utils.RunInTx(ctx, db, func(tx *sqlx.Tx) error {
 		id, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, source, "id"), source)
 		require.NoError(t, err, "populating source table should not fail")

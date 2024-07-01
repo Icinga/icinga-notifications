@@ -2,6 +2,8 @@ package rule
 
 import (
 	"database/sql"
+	"fmt"
+	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"go.uber.org/zap/zapcore"
@@ -10,7 +12,8 @@ import (
 )
 
 type Escalation struct {
-	ID            int64          `db:"id"`
+	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+
 	RuleID        int64          `db:"rule_id"`
 	NameRaw       sql.NullString `db:"name"`
 	Condition     filter.Filter  `db:"-"`
@@ -19,6 +22,25 @@ type Escalation struct {
 	Fallbacks     []*Escalation  `db:"-"`
 
 	Recipients []*EscalationRecipient `db:"-"`
+}
+
+// IncrementalValidate implements the config.IncrementalConfigurableValidatable interface.
+func (e *Escalation) IncrementalValidate() error {
+	if e.ConditionExpr.Valid {
+		cond, err := filter.Parse(e.ConditionExpr.String)
+		if err != nil {
+			return err
+		}
+
+		e.Condition = cond
+	}
+
+	if e.FallbackForID.Valid {
+		// TODO: implement fallbacks (needs extra validation: mismatching rule_id, cycles)
+		return fmt.Errorf("ignoring fallback escalation (not yet implemented)")
+	}
+
+	return nil
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
@@ -93,8 +115,10 @@ func (e *Escalation) TableName() string {
 }
 
 type EscalationRecipient struct {
-	ID            int64         `db:"id"`
+	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+
 	EscalationID  int64         `db:"rule_escalation_id"`
+	RuleID        int64         `db:"-"`
 	ChannelID     sql.NullInt64 `db:"channel_id"`
 	recipient.Key `db:",inline"`
 	Recipient     recipient.Recipient `db:"-"`

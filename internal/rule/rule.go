@@ -2,6 +2,7 @@ package rule
 
 import (
 	"github.com/icinga/icinga-go-library/types"
+	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
@@ -10,7 +11,8 @@ import (
 )
 
 type Rule struct {
-	ID               int64                  `db:"id"`
+	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+
 	IsActive         types.Bool             `db:"is_active"`
 	Name             string                 `db:"name"`
 	TimePeriod       *timeperiod.TimePeriod `db:"-"`
@@ -18,6 +20,20 @@ type Rule struct {
 	ObjectFilter     filter.Filter          `db:"-"`
 	ObjectFilterExpr types.String           `db:"object_filter"`
 	Escalations      map[int64]*Escalation  `db:"-"`
+}
+
+// IncrementalValidate implements the config.IncrementalConfigurableValidate interface.
+func (r *Rule) IncrementalValidate() error {
+	if r.ObjectFilterExpr.Valid {
+		f, err := filter.Parse(r.ObjectFilterExpr.String)
+		if err != nil {
+			return err
+		}
+
+		r.ObjectFilter = f
+	}
+
+	return nil
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
