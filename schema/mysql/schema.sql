@@ -1,35 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS citext;
-
-CREATE TYPE boolenum AS ENUM ( 'n', 'y' );
-CREATE TYPE incident_history_event_type AS ENUM (
-    -- Order to be honored for events with identical millisecond timestamps.
-    'opened',
-    'muted',
-    'unmuted',
-    'incident_severity_changed',
-    'rule_matched',
-    'escalation_triggered',
-    'recipient_role_changed',
-    'closed',
-    'notified'
-);
-CREATE TYPE rotation_type AS ENUM ( '24-7', 'partial', 'multi' );
-CREATE TYPE notification_state_type AS ENUM ( 'suppressed', 'pending', 'sent', 'failed' );
-
--- IPL ORM renders SQL queries with LIKE operators for all suggestions in the search bar,
--- which fails for numeric and enum types on PostgreSQL. Just like in Icinga DB Web.
-CREATE OR REPLACE FUNCTION anynonarrayliketext(anynonarray, text)
-    RETURNS bool
-    LANGUAGE plpgsql
-    IMMUTABLE
-    PARALLEL SAFE
-    AS $$
-        BEGIN
-            RETURN $1::TEXT LIKE $2;
-        END;
-    $$;
-CREATE OPERATOR ~~ (LEFTARG=anynonarray, RIGHTARG=text, PROCEDURE=anynonarrayliketext);
-
 CREATE TABLE available_channel_type (
     type varchar(255) NOT NULL,
     name text NOT NULL,
@@ -38,68 +6,67 @@ CREATE TABLE available_channel_type (
     config_attrs text NOT NULL,
 
     CONSTRAINT pk_available_channel_type PRIMARY KEY (type)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
 CREATE TABLE channel (
-    id bigserial,
-    name citext NOT NULL,
+    id bigint NOT NULL AUTO_INCREMENT,
+    name text NOT NULL COLLATE utf8mb4_unicode_ci,
     type varchar(255) NOT NULL REFERENCES available_channel_type(type), -- 'email', 'sms', ...
     config text, -- JSON with channel-specific attributes
     -- for now type determines the implementation, in the future, this will need a reference to a concrete
     -- implementation to allow multiple implementations of a sms channel for example, probably even user-provided ones
 
     CONSTRAINT pk_channel PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
 CREATE TABLE contact (
-    id bigserial,
-    full_name citext NOT NULL,
-    username citext, -- reference to web user
+    id bigint NOT NULL AUTO_INCREMENT,
+    full_name text NOT NULL COLLATE utf8mb4_unicode_ci,
+    username varchar(254) COLLATE utf8mb4_unicode_ci, -- reference to web user
     default_channel_id bigint NOT NULL REFERENCES channel(id),
 
     CONSTRAINT pk_contact PRIMARY KEY (id),
-    UNIQUE (username),
-    CHECK (length(username) <= 254)
-);
+    UNIQUE (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
 CREATE TABLE contact_address (
-    id bigserial,
+    id bigint NOT NULL AUTO_INCREMENT,
     contact_id bigint NOT NULL REFERENCES contact(id),
     type varchar(255) NOT NULL, -- 'phone', 'email', ...
     address text NOT NULL, -- phone number, email address, ...
 
     CONSTRAINT pk_contact_address PRIMARY KEY (id),
     UNIQUE (contact_id, type) -- constraint may be relaxed in the future to support multiple addresses per type
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
 CREATE TABLE contactgroup (
-    id bigserial,
-    name citext NOT NULL,
+    id bigint NOT NULL AUTO_INCREMENT,
+    name text NOT NULL COLLATE utf8mb4_unicode_ci,
 
     CONSTRAINT pk_contactgroup PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE contactgroup_member (
     contactgroup_id bigint NOT NULL REFERENCES contactgroup(id),
     contact_id bigint NOT NULL REFERENCES contact(id),
 
     CONSTRAINT pk_contactgroup_member PRIMARY KEY (contactgroup_id, contact_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE schedule (
-    id bigserial,
-    name citext NOT NULL,
+    id bigint NOT NULL AUTO_INCREMENT,
+    name text NOT NULL COLLATE utf8mb4_unicode_ci,
 
     CONSTRAINT pk_schedule PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE rotation (
-    id bigserial,
+    id bigint NOT NULL AUTO_INCREMENT,
     schedule_id bigint NOT NULL REFERENCES schedule(id),
     -- the lower the more important, starting at 0, avoids the need to re-index upon addition
     priority integer NOT NULL,
     name text NOT NULL,
-    mode rotation_type NOT NULL DEFAULT '24-7',
+    mode enum('24-7', 'partial', 'multi') NOT NULL,
     -- JSON with rotation-specific attributes
     -- Needed exclusively by Web to simplify editing and visualisation
     options text NOT NULL,
@@ -117,17 +84,17 @@ CREATE TABLE rotation (
     UNIQUE (schedule_id, priority, first_handoff),
 
     CONSTRAINT pk_rotation PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE timeperiod (
-    id bigserial,
-    owned_by_rotation_id bigint REFERENCES rotation(id), -- nullable for future standalone timeperiods
+    id bigint NOT NULL AUTO_INCREMENT,
+    owned_by_schedule_id bigint REFERENCES rotation(id), -- nullable for future standalone timeperiods
 
     CONSTRAINT pk_timeperiod PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE rotation_member (
-    id bigserial,
+    id bigint NOT NULL AUTO_INCREMENT,
     rotation_id bigint NOT NULL REFERENCES rotation(id),
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),
@@ -141,13 +108,13 @@ CREATE TABLE rotation_member (
     -- ensures that each row has only non-NULL values in one of these constraints.
     UNIQUE (rotation_id, contact_id),
     UNIQUE (rotation_id, contactgroup_id),
-    CHECK (num_nonnulls(contact_id, contactgroup_id) = 1),
+    CHECK (if(contact_id IS NULL, 0, 1) + if(contactgroup_id IS NULL, 0, 1) = 1),
 
     CONSTRAINT pk_rotation_member PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE timeperiod_entry (
-    id bigserial,
+    id bigint NOT NULL AUTO_INCREMENT,
     timeperiod_id bigint NOT NULL REFERENCES timeperiod(id),
     rotation_member_id bigint REFERENCES rotation_member(id), -- nullable for future standalone timeperiods
     start_time bigint NOT NULL,
@@ -158,13 +125,13 @@ CREATE TABLE timeperiod_entry (
     rrule text, -- recurrence rule (RFC5545)
 
     CONSTRAINT pk_timeperiod_entry PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE source (
-    id bigserial,
+    id bigint NOT NULL AUTO_INCREMENT,
     -- The type "icinga2" is special and requires (at least some of) the icinga2_ prefixed columns.
     type text NOT NULL,
-    name citext NOT NULL,
+    name text NOT NULL COLLATE utf8mb4_unicode_ci,
     -- will likely need a distinguishing value for multiple sources of the same type in the future, like for example
     -- the Icinga DB environment ID for Icinga 2 sources
 
@@ -183,7 +150,7 @@ CREATE TABLE source (
     -- icinga2_common_name requires Icinga 2's certificate to hold this Common Name if not NULL. This allows using a
     -- differing Common Name - maybe an Icinga 2 Endpoint object name - from the FQDN within icinga2_base_url.
     icinga2_common_name text,
-    icinga2_insecure_tls boolenum NOT NULL DEFAULT 'n',
+    icinga2_insecure_tls enum('n', 'y') NOT NULL DEFAULT 'n',
 
     -- The hash is a PHP password_hash with PASSWORD_DEFAULT algorithm, defaulting to bcrypt. This check roughly ensures
     -- that listener_password_hash can only be populated with bcrypt hashes.
@@ -192,10 +159,10 @@ CREATE TABLE source (
     CHECK (type != 'icinga2' OR (icinga2_base_url IS NOT NULL AND icinga2_auth_user IS NOT NULL AND icinga2_auth_pass IS NOT NULL)),
 
     CONSTRAINT pk_source PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE object (
-    id bytea NOT NULL, -- SHA256 of identifying tags and the source.id
+    id binary(32) NOT NULL, -- SHA256 of identifying tags and the source.id
     source_id bigint NOT NULL REFERENCES source(id),
     name text NOT NULL,
 
@@ -203,83 +170,65 @@ CREATE TABLE object (
     -- mute_reason indicates whether an object is currently muted by its source, and its non-zero value is mapped to true.
     mute_reason text,
 
-    CHECK (length(id) = 256/8),
-
     CONSTRAINT pk_object PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE object_id_tag (
-    object_id bytea NOT NULL REFERENCES object(id),
+    object_id binary(32) NOT NULL REFERENCES object(id),
     tag varchar(255) NOT NULL,
     value text NOT NULL,
 
     CONSTRAINT pk_object_id_tag PRIMARY KEY (object_id, tag)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
 CREATE TABLE object_extra_tag (
-    object_id bytea NOT NULL REFERENCES object(id),
+    object_id binary(32) NOT NULL REFERENCES object(id),
     tag varchar(255) NOT NULL,
     value text NOT NULL,
 
     CONSTRAINT pk_object_extra_tag PRIMARY KEY (object_id, tag)
-);
-
-CREATE TYPE event_type AS ENUM (
-    'acknowledgement-cleared',
-    'acknowledgement-set',
-    'custom',
-    'downtime-end',
-    'downtime-removed',
-    'downtime-start',
-    'flapping-end',
-    'flapping-start',
-    'incident-age',
-    'mute',
-    'state',
-    'unmute'
-);
-CREATE TYPE severity AS ENUM ('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg');
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
 CREATE TABLE event (
-    id bigserial,
+    id bigint NOT NULL AUTO_INCREMENT,
     time bigint NOT NULL,
-    object_id bytea NOT NULL REFERENCES object(id),
-    type event_type NOT NULL DEFAULT 'acknowledgement-cleared',
-    severity severity,
+    object_id binary(32) NOT NULL REFERENCES object(id),
+    type enum('acknowledgement-cleared', 'acknowledgement-set', 'custom', 'downtime-end', 'downtime-removed', 'downtime-start', 'flapping-end', 'flapping-start', 'incident-age', 'mute', 'state', 'unmute') NOT NULL,
+    severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg'),
     message text,
-    username citext,
-    mute boolenum,
+    username text COLLATE utf8mb4_unicode_ci,
+    mute enum('n', 'y'),
     mute_reason text,
 
     CONSTRAINT pk_event PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE rule (
-    id bigserial,
-    name citext NOT NULL,
+    id bigint NOT NULL AUTO_INCREMENT,
+    name text NOT NULL COLLATE utf8mb4_unicode_ci,
     timeperiod_id bigint REFERENCES timeperiod(id),
     object_filter text,
-    is_active boolenum NOT NULL DEFAULT 'y',
+    is_active enum('n', 'y') NOT NULL DEFAULT 'y',
 
     CONSTRAINT pk_rule PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE rule_escalation (
-    id bigserial,
+    id bigint NOT NULL AUTO_INCREMENT,
     rule_id bigint NOT NULL REFERENCES rule(id),
     position integer NOT NULL,
-    condition text,
-    name citext, -- if not set, recipients are used as a fallback for display purposes
+    `condition` text,
+    name text COLLATE utf8mb4_unicode_ci, -- if not set, recipients are used as a fallback for display purposes
     fallback_for bigint REFERENCES rule_escalation(id),
 
     CONSTRAINT pk_rule_escalation PRIMARY KEY (id),
 
     UNIQUE (rule_id, position),
-    CHECK (NOT (condition IS NOT NULL AND fallback_for IS NOT NULL))
-);
+    CHECK (NOT (`condition` IS NOT NULL AND fallback_for IS NOT NULL))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE rule_escalation_recipient (
-    id bigserial,
+    id bigint NOT NULL AUTO_INCREMENT,
     rule_escalation_id bigint NOT NULL REFERENCES rule_escalation(id),
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),
@@ -288,47 +237,45 @@ CREATE TABLE rule_escalation_recipient (
 
     CONSTRAINT pk_rule_escalation_recipient PRIMARY KEY (id),
 
-    CHECK (num_nonnulls(contact_id, contactgroup_id, schedule_id) = 1)
-);
+    CHECK (if(contact_id IS NULL, 0, 1) + if(contactgroup_id IS NULL, 0, 1) + if(schedule_id IS NULL, 0, 1) = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE incident (
-    id bigserial,
-    object_id bytea NOT NULL REFERENCES object(id),
+    id bigint NOT NULL AUTO_INCREMENT,
+    object_id binary(32) NOT NULL REFERENCES object(id),
     started_at bigint NOT NULL,
     recovered_at bigint,
-    severity severity NOT NULL DEFAULT 'ok',
+    severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg') NOT NULL,
 
     CONSTRAINT pk_incident PRIMARY KEY (id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE incident_event (
     incident_id bigint NOT NULL REFERENCES incident(id),
     event_id bigint NOT NULL REFERENCES event(id),
 
     CONSTRAINT pk_incident_event PRIMARY KEY (incident_id, event_id)
-);
-
-CREATE TYPE incident_contact_role AS ENUM ('recipient', 'subscriber', 'manager');
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE incident_contact (
     incident_id bigint NOT NULL REFERENCES incident(id),
     contact_id bigint REFERENCES contact(id),
     contactgroup_id bigint REFERENCES contactgroup(id),
     schedule_id bigint REFERENCES schedule(id),
-    role incident_contact_role NOT NULL DEFAULT 'recipient',
+    role enum('recipient', 'subscriber', 'manager') NOT NULL,
 
     CONSTRAINT key_incident_contact_contact UNIQUE (incident_id, contact_id),
     CONSTRAINT key_incident_contact_contactgroup UNIQUE (incident_id, contactgroup_id),
     CONSTRAINT key_incident_contact_schedule UNIQUE (incident_id, schedule_id),
-    CONSTRAINT nonnulls_incident_recipients_check CHECK (num_nonnulls(contact_id, contactgroup_id, schedule_id) = 1)
-);
+    CONSTRAINT nonnulls_incident_recipients_check CHECK (if(contact_id IS NULL, 0, 1) + if(contactgroup_id IS NULL, 0, 1) + if(schedule_id IS NULL, 0, 1) = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE incident_rule (
     incident_id bigint NOT NULL REFERENCES incident(id),
     rule_id bigint NOT NULL REFERENCES rule(id),
 
     CONSTRAINT pk_incident_rule PRIMARY KEY (incident_id, rule_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE incident_rule_escalation_state (
     incident_id bigint NOT NULL REFERENCES incident(id),
@@ -336,10 +283,10 @@ CREATE TABLE incident_rule_escalation_state (
     triggered_at bigint NOT NULL,
 
     CONSTRAINT pk_incident_rule_escalation_state PRIMARY KEY (incident_id, rule_escalation_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE incident_history (
-    id bigserial,
+    id bigint NOT NULL AUTO_INCREMENT,
     incident_id bigint NOT NULL REFERENCES incident(id),
     rule_escalation_id bigint REFERENCES rule_escalation(id),
     event_id bigint REFERENCES event(id),
@@ -350,30 +297,29 @@ CREATE TABLE incident_history (
     channel_id bigint REFERENCES channel(id),
     time bigint NOT NULL,
     message text,
-    type incident_history_event_type NOT NULL DEFAULT 'opened',
-    new_severity severity,
-    old_severity severity,
-    new_recipient_role incident_contact_role,
-    old_recipient_role incident_contact_role,
-    notification_state notification_state_type,
+    -- Order to be honored for events with identical millisecond timestamps.
+    type enum('opened', 'muted', 'unmuted', 'incident_severity_changed', 'rule_matched', 'escalation_triggered', 'recipient_role_changed', 'closed', 'notified') NOT NULL,
+    new_severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg'),
+    old_severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg'),
+    new_recipient_role enum('recipient', 'subscriber', 'manager'),
+    old_recipient_role enum('recipient', 'subscriber', 'manager'),
+    notification_state enum('suppressed', 'pending', 'sent', 'failed'),
     sent_at bigint,
 
     CONSTRAINT pk_incident_history PRIMARY KEY (id),
     FOREIGN KEY (incident_id, rule_escalation_id) REFERENCES incident_rule_escalation_state(incident_id, rule_escalation_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-CREATE INDEX idx_incident_history_time_type ON incident_history(time, type);
-COMMENT ON INDEX idx_incident_history_time_type IS 'Incident History ordered by time/type';
+CREATE INDEX idx_incident_history_time_type ON incident_history(time, type) COMMENT 'Incident History ordered by time/type';
 
 CREATE TABLE browser_session (
     php_session_id varchar(256) NOT NULL,
-    username citext NOT NULL,
+    username varchar(254) NOT NULL COLLATE utf8mb4_unicode_ci,
     user_agent varchar(4096) NOT NULL,
     authenticated_at bigint NOT NULL,
 
-    CONSTRAINT pk_browser_session PRIMARY KEY (php_session_id),
-    CHECK (length(username) <= 254)
-);
+    CONSTRAINT pk_browser_session PRIMARY KEY (php_session_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin ROW_FORMAT=DYNAMIC;
 
 CREATE INDEX idx_browser_session_authenticated_at ON browser_session (authenticated_at DESC);
-CREATE INDEX idx_browser_session_username_agent ON browser_session (username, user_agent);
+CREATE INDEX idx_browser_session_username_agent ON browser_session (username, user_agent(512));

@@ -7,6 +7,66 @@ on:
   pull_request: {}
 
 jobs:
+  mysql:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - icinga/icingadb-mysql:5.5
+          - icinga/icingadb-mysql:5.6
+          - mysql:5.7
+          - mysql:latest
+          - icinga/mariadb:10.0
+          - icinga/mariadb:10.1
+          - mariadb:10.2
+          - mariadb:10.3
+          - mariadb:10.4
+          - mariadb:10.5
+          - mariadb:10.6
+          - mariadb:10.7
+          - mariadb:latest
+
+    env:
+      NOTIFICATIONS_TESTS_DB_TYPE: mysql
+      NOTIFICATIONS_TESTS_DB: notifications
+      NOTIFICATIONS_TESTS_DB_USER: root
+      NOTIFICATIONS_TESTS_DB_PASSWORD: notifications
+      NOTIFICATIONS_TESTS_DB_HOST: 127.0.0.1
+      NOTIFICATIONS_TESTS_DB_PORT: 3306
+
+    services:
+      mysql:
+        image: ${{ matrix.image }}
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ env.NOTIFICATIONS_TESTS_DB_PASSWORD }}
+          MYSQL_DATABASE: ${{ env.NOTIFICATIONS_TESTS_DB }}
+        ports:
+          - 3306:3306
+
+    steps:
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Importing Schema
+        run: >
+          sleep 15;
+          mysql -h127.0.0.1 -u${{ env.NOTIFICATIONS_TESTS_DB_USER }} -p${{ env.NOTIFICATIONS_TESTS_DB_PASSWORD }}
+          ${{ env.NOTIFICATIONS_TESTS_DB }} < ${{ github.workspace }}/schema/mysql/schema.sql
+
+      - name: Download dependencies
+        run: go get -v -t -d ./...
+
+      - name: Run tests
+        timeout-minutes: 10
+        run: go test -v -timeout 5m ./...
+
   postgresql:
     name: PostgreSQL ${{ matrix.version }}
     runs-on: ubuntu-latest
