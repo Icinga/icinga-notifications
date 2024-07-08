@@ -53,4 +53,4 @@ To install Icinga Notifications see [Installation](02-Installation.md).
 ## License
 
 Icinga Notifications and the Icinga Notifications documentation are licensed under the terms of the
-[GNU General Public License Version 2](../LICENSE).
+[GNU General Public License Version 2](https://github.com/Icinga/icinga-notifications/blob/main/LICENSE).
