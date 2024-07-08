@@ -265,7 +265,9 @@ func (client *Client) buildAcknowledgementEvent(ctx context.Context, ack *Acknow
 		if err != nil {
 			return nil, err
 		}
-		if !isMuted(queryResult) {
+		if muted, err := isMuted(ctx, client, queryResult); err != nil {
+			return nil, err
+		} else if !muted {
 			ev.Message = queryResult.Attrs.LastCheckResult.Output
 			ev.SetMute(false, "Acknowledgement cleared")
 		}
@@ -310,7 +312,9 @@ func (client *Client) buildDowntimeEvent(ctx context.Context, d Downtime, startE
 		if err != nil {
 			return nil, err
 		}
-		if !isMuted(queryResult) {
+		if muted, err := isMuted(ctx, client, queryResult); err != nil {
+			return nil, err
+		} else if !muted {
 			// When a downtime is cancelled/expired and there's no other active downtime/ack, we're going to send some
 			// notifications if there's still an active incident. Therefore, we need the most recent CheckResult of
 			// that Checkable to use it for the notifications.
@@ -347,7 +351,9 @@ func (client *Client) buildFlappingEvent(ctx context.Context, flapping *Flapping
 		if err != nil {
 			return nil, err
 		}
-		if !isMuted(queryResult) {
+		if muted, err := isMuted(ctx, client, queryResult); err != nil {
+			return nil, err
+		} else if !muted {
 			ev.Message = queryResult.Attrs.LastCheckResult.Output
 			ev.SetMute(false, reason)
 		}

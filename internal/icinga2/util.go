@@ -1,6 +1,7 @@
 package icinga2
 
 import (
+	"context"
 	"net/url"
 	"strings"
 )
@@ -18,6 +19,24 @@ func rawurlencode(s string) string {
 }
 
 // isMuted returns true if the given checkable is either in Downtime, Flapping or acknowledged, otherwise false.
-func isMuted(checkable *ObjectQueriesResult[HostServiceRuntimeAttributes]) bool {
-	return checkable.Attrs.IsFlapping || checkable.Attrs.Acknowledgement != AcknowledgementNone || checkable.Attrs.DowntimeDepth != 0
+//
+// When the checkable is Flapping, and neither the flapping detection for that Checkable nor for the entire zone is
+// enabled, this will always return false.
+//
+// Returns an error if it fails to query the status of IcingaApplication from the /v1/status endpoint.
+func isMuted(ctx context.Context, client *Client, checkable *ObjectQueriesResult[HostServiceRuntimeAttributes]) (bool, error) {
+	if checkable.Attrs.Acknowledgement != AcknowledgementNone || checkable.Attrs.DowntimeDepth != 0 {
+		return true, nil
+	}
+
+	if checkable.Attrs.IsFlapping && checkable.Attrs.EnableFlapping {
+		status, err := client.fetchIcingaAppStatus(ctx)
+		if err != nil {
+			return false, err
+		}
+
+		return status.App.EnableFlapping, nil
+	}
+
+	return false, nil
 }

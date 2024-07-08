@@ -149,6 +149,44 @@ func (client *Client) queryObjectsApiQuery(ctx context.Context, objType string, 
 		})
 }
 
+// fetchIcingaAppStatus retrieves the global state of the IcingaApplication type via the /v1/status endpoint.
+func (client *Client) fetchIcingaAppStatus(ctx context.Context) (*IcingaApplication, error) {
+	response, err := client.queryObjectsApi(
+		ctx,
+		[]string{"/v1/status/IcingaApplication/"},
+		http.MethodGet,
+		nil,
+		map[string]string{"Accept": "application/json"})
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		_, _ = io.Copy(io.Discard, response)
+		_ = response.Close()
+	}()
+
+	type status struct {
+		Status struct {
+			IcingaApplication *IcingaApplication `json:"icingaapplication"`
+		} `json:"status"`
+	}
+
+	var results []status
+	err = json.NewDecoder(response).Decode(&struct {
+		Results *[]status `json:"results"`
+	}{&results})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("unable to fetch IcingaApplication status")
+	}
+
+	return results[0].Status.IcingaApplication, nil
+}
+
 // fetchCheckable fetches the Checkable config state of the given Host/Service name from the Icinga 2 API.
 func (client *Client) fetchCheckable(ctx context.Context, host, service string) (*ObjectQueriesResult[HostServiceRuntimeAttributes], error) {
 	objType, objName := "host", host
@@ -260,8 +298,13 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ca
 		}
 
 		attrs := objQueriesResult.Attrs
+		checkableIsMuted, err := isMuted(ctx, client, &objQueriesResult)
+		if err != nil {
+			return err
+		}
+
 		var fakeEv *event.Event
-		if attrs.Acknowledgement != AcknowledgementNone {
+		if checkableIsMuted && attrs.Acknowledgement != AcknowledgementNone {
 			ackComment, err := client.fetchAcknowledgementComment(ctx, hostName, serviceName, attrs.AcknowledgementLastChange.Time())
 			if err != nil {
 				return fmt.Errorf("fetching acknowledgement comment for %q failed, %w", objectName, err)
@@ -275,17 +318,17 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ca
 			if err != nil {
 				return fmt.Errorf("failed to construct Event from Acknowledgement response, %w", err)
 			}
-		} else if isMuted(&objQueriesResult) {
+		} else if checkableIsMuted {
 			fakeEv, err = client.buildCommonEvent(ctx, hostName, serviceName)
 			if err != nil {
 				return fmt.Errorf("failed to construct checkable fake mute event: %w", err)
 			}
 
 			fakeEv.Type = event.TypeMute
-			if attrs.IsFlapping {
-				fakeEv.SetMute(true, "Checkable is flapping, but we missed the Icinga 2 FlappingStart event")
-			} else {
+			if attrs.DowntimeDepth != 0 {
 				fakeEv.SetMute(true, "Checkable is in downtime, but we missed the Icinga 2 DowntimeStart event")
+			} else {
+				fakeEv.SetMute(true, "Checkable is flapping, but we missed the Icinga 2 FlappingStart event")
 			}
 		} else {
 			// This could potentially produce numerous superfluous database (event table) entries if we generate such
