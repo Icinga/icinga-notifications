@@ -161,6 +161,7 @@ type HostServiceRuntimeAttributes struct {
 	Acknowledgement           int         `json:"acknowledgement"`
 	IsFlapping                bool        `json:"flapping"`
 	AcknowledgementLastChange UnixFloat   `json:"acknowledgement_last_change"`
+	EnableFlapping            bool        `json:"enable_flapping"`
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
@@ -350,6 +351,14 @@ type ObjectCreatedDeleted struct {
 	ObjectName string `json:"object_name"`
 	ObjectType string `json:"object_type"`
 	EventType  string `json:"type"`
+}
+
+// IcingaApplication represents the Icinga 2 API status endpoint query result of type IcingaApplication.
+// https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/#status-and-statistics
+type IcingaApplication struct {
+	App struct {
+		EnableFlapping bool `json:"enable_flapping"`
+	} `json:"app"`
 }
 
 // UnmarshalEventStreamResponse unmarshal a JSON response line from the Icinga 2 API Event Stream.
