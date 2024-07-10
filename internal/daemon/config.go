@@ -3,12 +3,18 @@ package daemon
 import (
 	"errors"
 	"github.com/creasty/defaults"
-	"github.com/goccy/go-yaml"
+	"github.com/icinga/icinga-go-library/config"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/utils"
 	"github.com/icinga/icinga-notifications/internal"
 	"os"
 	"time"
+)
+
+const (
+	ExitSuccess = 0
+	ExitFailure = 1
 )
 
 type ConfigFile struct {
@@ -28,58 +34,8 @@ func (c *ConfigFile) SetDefaults() {
 	}
 }
 
-// Assert interface compliance.
-var _ defaults.Setter = (*ConfigFile)(nil)
-
-// config holds the configuration state as a singleton. It is used from LoadConfig and Config
-var config *ConfigFile
-
-// LoadConfig loads the daemon config from given path. Call it only once when starting the daemon.
-func LoadConfig(path string) error {
-	if config != nil {
-		return errors.New("config already set")
-	}
-
-	cfg, err := fromFile(path)
-	if err != nil {
-		return err
-	}
-
-	config = cfg
-
-	return nil
-}
-
-// Config returns the config that was loaded while starting the daemon
-func Config() *ConfigFile {
-	return config
-}
-
-func fromFile(path string) (*ConfigFile, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	var c ConfigFile
-
-	if err := defaults.Set(&c); err != nil {
-		return nil, err
-	}
-
-	d := yaml.NewDecoder(f)
-	if err := d.Decode(&c); err != nil {
-		return nil, err
-	}
-
-	if err := c.Validate(); err != nil {
-		return nil, err
-	}
-
-	return &c, nil
-}
-
+// Validate implements the config.Validator interface.
+// Validates the entire daemon configuration on daemon startup.
 func (c *ConfigFile) Validate() error {
 	if err := c.Database.Validate(); err != nil {
 		return err
@@ -89,4 +45,59 @@ func (c *ConfigFile) Validate() error {
 	}
 
 	return nil
+}
+
+// Assert interface compliance.
+var (
+	_ defaults.Setter  = (*ConfigFile)(nil)
+	_ config.Validator = (*ConfigFile)(nil)
+)
+
+// Flags defines the CLI flags supported by Icinga Notifications.
+type Flags struct {
+	// Version decides whether to just print the version and exit.
+	Version bool `long:"version" description:"print version and exit"`
+	// Config is the path to the config file
+	Config string `short:"c" long:"config" description:"path to config file"`
+}
+
+// daemonConfig holds the configuration state as a singleton.
+// It is initialised by the ParseFlagsAndConfig func and exposed through the Config function.
+var daemonConfig *ConfigFile
+
+// Config returns the config that was loaded while starting the daemon.
+// Panics when ParseFlagsAndConfig was not called earlier.
+func Config() *ConfigFile {
+	if daemonConfig == nil {
+		panic("ERROR: daemon.Config() called before daemon.ParseFlagsAndConfig()")
+	}
+
+	return daemonConfig
+}
+
+// ParseFlagsAndConfig parses the CLI flags provided to the executable and tries to load the config from the YAML file.
+// Prints any error during parsing or config loading to os.Stderr and exits.
+func ParseFlagsAndConfig() {
+	flags := Flags{Config: internal.SysConfDir + "/icinga-notifications/config.yml"}
+	if err := config.ParseFlags(&flags); err != nil {
+		if errors.Is(err, config.ErrInvalidArgument) {
+			panic(err)
+		}
+
+		utils.PrintErrorThenExit(err, ExitFailure)
+	}
+
+	if flags.Version {
+		internal.Version.Print("Icinga Notifications")
+		os.Exit(ExitSuccess)
+	}
+
+	daemonConfig = new(ConfigFile)
+	if err := config.FromYAMLFile(flags.Config, daemonConfig); err != nil {
+		if errors.Is(err, config.ErrInvalidArgument) {
+			panic(err)
+		}
+
+		utils.PrintErrorThenExit(err, ExitFailure)
+	}
 }
