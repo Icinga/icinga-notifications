@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
-	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/utils"
@@ -16,45 +14,18 @@ import (
 	"github.com/icinga/icinga-notifications/internal/listener"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/okzk/sdnotify"
-	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 	"time"
 )
 
 func main() {
-	var configPath string
-	var showVersion bool
-
-	flag.StringVar(&configPath, "config", internal.SysConfDir+"/icinga-notifications/config.yml", "path to config file")
-	flag.BoolVar(&showVersion, "version", false, "print version")
-	flag.Parse()
-
-	if showVersion {
-		// reuse internal.Version.print() once the project name is configurable
-		fmt.Println("Icinga Notifications version:", internal.Version.Version)
-		fmt.Println()
-
-		fmt.Println("Build information:")
-		fmt.Printf("  Go version: %s (%s, %s)\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
-		if internal.Version.Commit != "" {
-			fmt.Println("  Git commit:", internal.Version.Commit)
-		}
-		return
-	}
-
-	err := daemon.LoadConfig(configPath)
-	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "cannot load config:", err)
-		os.Exit(1)
-	}
-
+	daemon.ParseFlagsAndConfig()
 	conf := daemon.Config()
 
 	logs, err := logging.NewLoggingFromConfig("icinga-notifications", conf.Logging)
 	if err != nil {
-		utils.PrintErrorThenExit(err, 1)
+		utils.PrintErrorThenExit(err, daemon.ExitFailure)
 	}
 
 	logger := logs.GetLogger()
