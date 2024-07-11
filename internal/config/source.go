@@ -3,8 +3,8 @@ package config
 import (
 	"context"
 	"github.com/icinga/icinga-go-library/types"
-	"github.com/jmoiron/sqlx"
-	"go.uber.org/zap"
+	"github.com/icinga/icinga-notifications/internal/config/baseconf"
+	"go.uber.org/zap/zapcore"
 )
 
 // SourceTypeIcinga2 represents the "icinga2" Source Type for Event Stream API sources.
@@ -12,7 +12,8 @@ const SourceTypeIcinga2 = "icinga2"
 
 // Source entry within the ConfigSet to describe a source.
 type Source struct {
-	ID   int64  `db:"id"`
+	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+
 	Type string `db:"type"`
 	Name string `db:"name"`
 
@@ -29,109 +30,31 @@ type Source struct {
 	Icinga2SourceCancel context.CancelFunc `db:"-" json:"-"`
 }
 
-// fieldEquals checks if this Source's database fields are equal to those of another Source.
-func (source *Source) fieldEquals(other *Source) bool {
-	boolEq := func(a, b types.Bool) bool { return (!a.Valid && !b.Valid) || (a == b) }
-	stringEq := func(a, b types.String) bool { return (!a.Valid && !b.Valid) || (a == b) }
-
-	return source.ID == other.ID &&
-		source.Type == other.Type &&
-		source.Name == other.Name &&
-		stringEq(source.ListenerPasswordHash, other.ListenerPasswordHash) &&
-		stringEq(source.Icinga2BaseURL, other.Icinga2BaseURL) &&
-		stringEq(source.Icinga2AuthUser, other.Icinga2AuthUser) &&
-		stringEq(source.Icinga2AuthPass, other.Icinga2AuthPass) &&
-		stringEq(source.Icinga2CAPem, other.Icinga2CAPem) &&
-		stringEq(source.Icinga2CommonName, other.Icinga2CommonName) &&
-		boolEq(source.Icinga2InsecureTLS, other.Icinga2InsecureTLS)
-}
-
-// stop this Source's worker; currently only Icinga Event Stream API Client.
-func (source *Source) stop() {
-	if source.Type == SourceTypeIcinga2 && source.Icinga2SourceCancel != nil {
-		source.Icinga2SourceCancel()
-		source.Icinga2SourceCancel = nil
-	}
-}
-
-func (r *RuntimeConfig) fetchSources(ctx context.Context, tx *sqlx.Tx) error {
-	var sourcePtr *Source
-	stmt := r.db.BuildSelectStmt(sourcePtr, sourcePtr)
-	r.logger.Debugf("Executing query %q", stmt)
-
-	var sources []*Source
-	if err := tx.SelectContext(ctx, &sources, stmt); err != nil {
-		r.logger.Errorln(err)
-		return err
-	}
-
-	sourcesById := make(map[int64]*Source)
-	for _, s := range sources {
-		sourceLogger := r.logger.With(
-			zap.Int64("id", s.ID),
-			zap.String("name", s.Name),
-			zap.String("type", s.Type),
-		)
-		if sourcesById[s.ID] != nil {
-			sourceLogger.Error("Ignoring duplicate config for source ID")
-			continue
-		}
-
-		sourcesById[s.ID] = s
-		sourceLogger.Debug("loaded source config")
-	}
-
-	if r.Sources != nil {
-		// mark no longer existing sources for deletion
-		for id := range r.Sources {
-			if _, ok := sourcesById[id]; !ok {
-				sourcesById[id] = nil
-			}
-		}
-	}
-
-	r.pending.Sources = sourcesById
-
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (source *Source) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddInt64("id", source.ID)
+	encoder.AddString("type", source.Type)
+	encoder.AddString("name", source.Name)
 	return nil
 }
 
+// applyPendingSources synchronizes changed sources.
 func (r *RuntimeConfig) applyPendingSources() {
-	if r.Sources == nil {
-		r.Sources = make(map[int64]*Source)
-	}
-
-	for id, pendingSource := range r.pending.Sources {
-		logger := r.logger.With(zap.Int64("id", id))
-		currentSource := r.Sources[id]
-
-		// Compare the pending source with an optional existing source; instruct the Event Source Client, if necessary.
-		if pendingSource == nil && currentSource != nil {
-			logger.Info("Source has been removed")
-
-			currentSource.stop()
-			delete(r.Sources, id)
-			continue
-		} else if pendingSource != nil && currentSource != nil {
-			if currentSource.fieldEquals(pendingSource) {
-				continue
+	incrementalApplyPending(
+		r,
+		&r.Sources, &r.configChange.Sources,
+		func(newElement *Source) error {
+			if newElement.Type == SourceTypeIcinga2 {
+				r.EventStreamLaunchFunc(newElement)
 			}
-
-			logger.Info("Source has been updated")
-			currentSource.stop()
-		} else if pendingSource != nil && currentSource == nil {
-			logger.Info("Source has been added")
-		} else {
-			// Neither an active nor a pending source?
-			logger.Error("Cannot applying pending configuration: neither an active nor a pending source")
-			continue
-		}
-
-		if pendingSource.Type == SourceTypeIcinga2 {
-			r.EventStreamLaunchFunc(pendingSource)
-		}
-
-		r.Sources[id] = pendingSource
-	}
-
-	r.pending.Sources = nil
+			return nil
+		},
+		nil,
+		func(delElement *Source) error {
+			if delElement.Type == SourceTypeIcinga2 && delElement.Icinga2SourceCancel != nil {
+				delElement.Icinga2SourceCancel()
+				delElement.Icinga2SourceCancel = nil
+			}
+			return nil
+		})
 }

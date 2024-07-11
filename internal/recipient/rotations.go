@@ -26,12 +26,16 @@ func (r *rotationResolver) update(rotations []*Rotation) {
 	// Group sortedByHandoff by priority using a temporary map with the priority as key.
 	prioMap := make(map[int32]*rotationsWithPriority)
 	for _, rotation := range rotations {
-		p := prioMap[rotation.Priority]
+		if !rotation.Priority.Valid {
+			continue
+		}
+
+		p := prioMap[rotation.Priority.Int32]
 		if p == nil {
 			p = &rotationsWithPriority{
-				priority: rotation.Priority,
+				priority: rotation.Priority.Int32,
 			}
-			prioMap[rotation.Priority] = p
+			prioMap[rotation.Priority.Int32] = p
 		}
 
 		p.sortedByHandoff = append(p.sortedByHandoff, rotation)

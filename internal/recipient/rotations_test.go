@@ -41,7 +41,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 		// Weekend rotation starting 2024, alternating between contacts contactWeekend2024a and contactWeekend2024b
 		{
 			ActualHandoff: types.UnixMilli(parse("2024-01-01")),
-			Priority:      0,
+			Priority:      sql.NullInt32{Int32: 0, Valid: true},
 			Members: []*RotationMember{
 				{
 					Contact: contactWeekend2024a,
@@ -71,7 +71,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 		// alternating between contacts contactWeekend2025a and contactWeekend2025b
 		{
 			ActualHandoff: types.UnixMilli(parse("2025-01-01")),
-			Priority:      0,
+			Priority:      sql.NullInt32{Int32: 0, Valid: true},
 			Members: []*RotationMember{
 				{
 					Contact: contactWeekend2025a,
@@ -101,7 +101,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 		// with an override for 12 to 14 o'clock with contactWeekdayNoon.
 		{
 			ActualHandoff: types.UnixMilli(parse("2024-01-01")),
-			Priority:      1,
+			Priority:      sql.NullInt32{Int32: 1, Valid: true},
 			Members: []*RotationMember{
 				{
 					Contact: contactWeekdayNoon,
@@ -117,7 +117,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 			},
 		}, {
 			ActualHandoff: types.UnixMilli(parse("2024-01-01")),
-			Priority:      2,
+			Priority:      sql.NullInt32{Int32: 2, Valid: true},
 			Members: []*RotationMember{
 				{
 					Contact: contactWeekday,

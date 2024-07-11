@@ -92,7 +92,11 @@ func (i *Incident) ID() int64 {
 }
 
 func (i *Incident) HasManager() bool {
-	for _, state := range i.Recipients {
+	for recipientKey, state := range i.Recipients {
+		if i.runtimeConfig.GetRecipient(recipientKey) == nil {
+			i.logger.Debugw("Incident refers unknown recipient key, might got deleted", zap.Inline(recipientKey))
+			continue
+		}
 		if state.Role == RoleManager {
 			return true
 		}
@@ -410,10 +414,6 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 	}
 
 	for _, r := range i.runtimeConfig.Rules {
-		if !r.IsActive.Valid || !r.IsActive.Bool {
-			continue
-		}
-
 		if _, ok := i.Rules[r.ID]; !ok {
 			matched, err := r.Eval(i.Object)
 			if err != nil {
@@ -474,8 +474,8 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 
 	for rID := range i.Rules {
 		r := i.runtimeConfig.Rules[rID]
-
-		if r == nil || !r.IsActive.Valid || !r.IsActive.Bool {
+		if r == nil {
+			i.logger.Debugw("Incident refers unknown rule, might got deleted", zap.Int64("rule_id", rID))
 			continue
 		}
 
@@ -525,6 +525,11 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, escalations []*rule.Escalation) error {
 	for _, escalation := range escalations {
 		r := i.runtimeConfig.Rules[escalation.RuleID]
+		if r == nil {
+			i.logger.Debugw("Incident refers unknown rule, might got deleted", zap.Int64("rule_id", escalation.RuleID))
+			continue
+		}
+
 		i.logger.Infow("Rule reached escalation", zap.Object("rule", r), zap.Object("escalation", escalation))
 
 		state := &EscalationState{RuleEscalationID: escalation.ID, TriggeredAt: types.UnixMilli(time.Now())}
@@ -570,6 +575,10 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifications []*NotificationEntry) error {
 	for _, notification := range notifications {
 		contact := i.runtimeConfig.Contacts[notification.ContactID]
+		if contact == nil {
+			i.logger.Debugw("Incident refers unknown contact, might got deleted", zap.Int64("contact_id", notification.ContactID))
+			continue
+		}
 
 		if i.notifyContact(contact, ev, notification.ChannelID) != nil {
 			notification.State = NotificationStateFailed
@@ -692,6 +701,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	for escalationID := range i.EscalationState {
 		escalation := i.runtimeConfig.GetRuleEscalation(escalationID)
 		if escalation == nil {
+			i.logger.Debugw("Incident refers unknown escalation, might got deleted", zap.Int64("escalation_id", escalationID))
 			continue
 		}
 
@@ -704,6 +714,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	for recipientKey, state := range i.Recipients {
 		r := i.runtimeConfig.GetRecipient(recipientKey)
 		if r == nil {
+			i.logger.Debugw("Incident refers unknown recipient key, might got deleted", zap.Inline(recipientKey))
 			continue
 		}
 
