@@ -4,16 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"net/url"
 )
 
 type Channel struct {
-	ID     int64  `db:"id"`
+	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+
 	Name   string `db:"name"`
 	Type   string `db:"type"`
 	Config string `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
@@ -25,6 +28,19 @@ type Channel struct {
 
 	pluginCtx       context.Context
 	pluginCtxCancel func()
+}
+
+// MarshalLogObject implements the zapcore.ObjectMarshaler interface.
+func (c *Channel) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddInt64("id", c.ID)
+	encoder.AddString("name", c.Name)
+	encoder.AddString("type", c.Type)
+	return nil
+}
+
+// IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
+func (c *Channel) IncrementalInitAndValidate() error {
+	return ValidateType(c.Type)
 }
 
 // newConfig helps to store the channel's updated properties

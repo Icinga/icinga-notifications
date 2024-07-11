@@ -2,7 +2,9 @@ package timeperiod
 
 import (
 	"database/sql"
+	"fmt"
 	"github.com/icinga/icinga-go-library/types"
+	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/pkg/errors"
 	"github.com/teambition/rrule-go"
 	"go.uber.org/zap/zapcore"
@@ -10,9 +12,17 @@ import (
 )
 
 type TimePeriod struct {
-	ID      int64    `db:"id"`
+	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+
 	Name    string   `db:"-"`
 	Entries []*Entry `db:"-"`
+}
+
+func (p *TimePeriod) IncrementalInitAndValidate() error {
+	if p.Name == "" {
+		p.Name = fmt.Sprintf("Time Period #%d", p.ID)
+	}
+	return nil
 }
 
 func (p *TimePeriod) TableName() string {
@@ -57,7 +67,8 @@ func (p *TimePeriod) NextTransition(base time.Time) time.Time {
 }
 
 type Entry struct {
-	ID               int64           `db:"id"`
+	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+
 	TimePeriodID     int64           `db:"timeperiod_id"`
 	StartTime        types.UnixMilli `db:"start_time"`
 	EndTime          types.UnixMilli `db:"end_time"`
@@ -69,6 +80,11 @@ type Entry struct {
 	rrule       *rrule.RRule
 }
 
+// IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
+func (e *Entry) IncrementalInitAndValidate() error {
+	return e.Init()
+}
+
 // TableName implements the contracts.TableNamer interface.
 func (e *Entry) TableName() string {
 	return "timeperiod_entry"
@@ -77,11 +93,15 @@ func (e *Entry) TableName() string {
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
 func (e *Entry) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("id", e.ID)
+	encoder.AddInt64("timeperiod_id", e.TimePeriodID)
 	encoder.AddTime("start", e.StartTime.Time())
 	encoder.AddTime("end", e.EndTime.Time())
 	encoder.AddString("timezone", e.Timezone)
 	if e.RRule.Valid {
 		encoder.AddString("rrule", e.RRule.String)
+	}
+	if e.RotationMemberID.Valid {
+		encoder.AddInt64("rotation_member_id", e.RotationMemberID.Int64)
 	}
 	return nil
 }

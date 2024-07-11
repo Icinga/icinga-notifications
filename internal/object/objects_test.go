@@ -21,11 +21,12 @@ func TestRestoreMutedObjects(t *testing.T) {
 	var sourceID int64
 	err := utils.RunInTx(ctx, db, func(tx *sqlx.Tx) error {
 		args := map[string]any{
-			"type": "notifications",
-			"name": "Icinga Notifications",
+			"type":       "notifications",
+			"name":       "Icinga Notifications",
+			"changed_at": 1720702049000,
 		}
 		// We can't use config.Source here unfortunately due to cyclic import error!
-		id, err := utils.InsertAndFetchId(ctx, tx, `INSERT INTO source (type, name) VALUES (:type, :name)`, args)
+		id, err := utils.InsertAndFetchId(ctx, tx, `INSERT INTO source (type, name, changed_at) VALUES (:type, :name, :changed_at)`, args)
 		require.NoError(t, err, "populating source table should not fail")
 
 		sourceID = id

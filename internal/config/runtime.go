@@ -6,11 +6,11 @@ import (
 	"errors"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
-	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"strconv"
@@ -29,8 +29,13 @@ type RuntimeConfig struct {
 	// This became necessary due to circular imports, either with the incident or icinga2 package.
 	EventStreamLaunchFunc func(source *Source)
 
-	// pending contains changes to config objects that are to be applied to the embedded live config.
-	pending ConfigSet
+	// configChange contains incremental changes to config objects to be merged into the live configuration.
+	//
+	// It will be both created and deleted within RuntimeConfig.UpdateFromDatabase. To keep track of the known state,
+	// the last known timestamp of each ConfigSet type is stored within configChangeTimestamps.
+	configChange           *ConfigSet
+	configChangeAvailable  bool
+	configChangeTimestamps map[string]types.UnixMilli
 
 	logs   *logging.Logging
 	logger *logging.Logger
@@ -48,6 +53,8 @@ func NewRuntimeConfig(
 	return &RuntimeConfig{
 		EventStreamLaunchFunc: esLaunch,
 
+		configChangeTimestamps: make(map[string]types.UnixMilli),
+
 		logs:   logs,
 		logger: logs.GetChildLogger("runtime-updates"),
 		db:     db,
@@ -63,19 +70,39 @@ type ConfigSet struct {
 	Schedules        map[int64]*recipient.Schedule
 	Rules            map[int64]*rule.Rule
 	Sources          map[int64]*Source
+
+	// The following fields contain intermediate values, necessary for the incremental config synchronization.
+	// Furthermore, they allow accessing intermediate tables as everything is referred by pointers.
+	groupMembers             map[recipient.GroupMemberKey]*recipient.GroupMember
+	timePeriodEntries        map[int64]*timeperiod.Entry
+	scheduleRotations        map[int64]*recipient.Rotation
+	scheduleRotationMembers  map[int64]*recipient.RotationMember
+	ruleEscalations          map[int64]*rule.Escalation
+	ruleEscalationRecipients map[int64]*rule.EscalationRecipient
 }
 
 func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context) error {
-	err := r.fetchFromDatabase(ctx)
-	if err != nil {
+	startTime := time.Now()
+	defer func() {
+		r.logger.Debugw("Finished configuration synchronization", zap.Duration("took", time.Since(startTime)))
+	}()
+
+	r.logger.Debug("Synchronizing configuration with database")
+
+	r.configChange = &ConfigSet{}
+	r.configChangeAvailable = false
+	defer func() { r.configChange = nil }()
+
+	if err := r.fetchFromDatabase(ctx); err != nil {
 		return err
 	}
 
 	r.applyPending()
-
-	err = r.debugVerify()
-	if err != nil {
-		panic(err)
+	if r.configChangeAvailable {
+		r.logger.Debug("Synchronizing applied configuration changes, verifying state")
+		if err := r.debugVerify(); err != nil {
+			r.logger.Fatalw("Newly synchronized configuration failed verification", zap.Error(err))
+		}
 	}
 
 	return nil
@@ -88,10 +115,8 @@ func (r *RuntimeConfig) PeriodicUpdates(ctx context.Context, interval time.Durat
 	for {
 		select {
 		case <-ticker.C:
-			r.logger.Debug("periodically updating config")
-			err := r.UpdateFromDatabase(ctx)
-			if err != nil {
-				r.logger.Errorw("periodic config update failed, continuing with previous config", zap.Error(err))
+			if err := r.UpdateFromDatabase(ctx); err != nil {
+				r.logger.Errorw("Periodic configuration synchronization failed", zap.Error(err))
 			}
 		case <-ctx.Done():
 			return
@@ -201,12 +226,6 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 }
 
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
-	r.logger.Debug("fetching configuration from database")
-	start := time.Now()
-
-	// Reset all pending state to start from a clean state.
-	r.pending = ConfigSet{}
-
 	tx, err := r.db.BeginTxx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  true,
@@ -217,42 +236,46 @@ func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
 	// The transaction is only used for reading, never has to be committed.
 	defer func() { _ = tx.Rollback() }()
 
-	updateFuncs := []func(ctx context.Context, tx *sqlx.Tx) error{
-		r.fetchChannels,
-		r.fetchContacts,
-		r.fetchContactAddresses,
-		r.fetchGroups,
-		r.fetchTimePeriods,
-		r.fetchSchedules,
-		r.fetchRules,
-		r.fetchSources,
+	fetchFns := []func() error{
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.Channels) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.Contacts) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.ContactAddresses) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.Groups) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.groupMembers) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.Schedules) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.scheduleRotations) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.scheduleRotationMembers) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.TimePeriods) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.timePeriodEntries) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.Rules) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.ruleEscalations) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.ruleEscalationRecipients) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.Sources) },
 	}
-	for _, f := range updateFuncs {
-		if err := f(ctx, tx); err != nil {
+	for _, f := range fetchFns {
+		if err := f(); err != nil {
 			return err
 		}
 	}
 
-	r.logger.Debugw("fetched configuration from database", zap.Duration("took", time.Since(start)))
-
 	return nil
 }
 
+// applyPending synchronizes all changes.
 func (r *RuntimeConfig) applyPending() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.logger.Debug("applying pending configuration")
-	start := time.Now()
-
-	r.applyPendingChannels()
-	r.applyPendingContacts()
-	r.applyPendingContactAddresses()
-	r.applyPendingGroups()
-	r.applyPendingTimePeriods()
-	r.applyPendingSchedules()
-	r.applyPendingRules()
-	r.applyPendingSources()
-
-	r.logger.Debugw("applied pending configuration", zap.Duration("took", time.Since(start)))
+	applyFns := []func(){
+		r.applyPendingChannels,
+		r.applyPendingContacts,
+		r.applyPendingGroups,
+		r.applyPendingSchedules,
+		r.applyPendingTimePeriods,
+		r.applyPendingRules,
+		r.applyPendingSources,
+	}
+	for _, f := range applyFns {
+		f()
+	}
 }
