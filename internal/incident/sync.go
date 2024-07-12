@@ -2,7 +2,6 @@ package incident
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
@@ -30,7 +29,7 @@ func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 		stmt, _ := i.db.BuildUpsertStmt(i)
 		_, err := tx.NamedExecContext(ctx, stmt, i)
 		if err != nil {
-			return fmt.Errorf("failed to upsert incident: %s", err)
+			return fmt.Errorf("failed to upsert incident: %w", err)
 		}
 	} else {
 		stmt := utils.BuildInsertStmtWithout(i.db, i, "id")
@@ -103,8 +102,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 						"Failed to insert recipient role changed incident history", zap.Object("escalation", escalation),
 						zap.String("recipients", r.String()), zap.Error(err),
 					)
-
-					return errors.New("failed to insert recipient role changed incident history")
+					return err
 				}
 			}
 			cr.Role = state.Role
@@ -117,8 +115,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 				"Failed to upsert incident recipient", zap.Object("escalation", escalation),
 				zap.String("recipient", r.String()), zap.Error(err),
 			)
-
-			return errors.New("failed to upsert incident recipient")
+			return err
 		}
 	}
 
@@ -165,8 +162,7 @@ func (i *Incident) generateNotifications(
 				i.logger.Errorw("Failed to insert incident notification history",
 					zap.String("contact", contact.FullName), zap.Bool("incident_muted", i.Object.IsMuted()),
 					zap.Error(err))
-
-				return nil, errors.New("cannot insert incident notification history")
+				return nil, err
 			}
 
 			if !suppress {

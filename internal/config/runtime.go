@@ -191,12 +191,12 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 
 	sourceIdRaw, sourceIdOk := strings.CutPrefix(user, "source-")
 	if !sourceIdOk {
-		logger.Debugw("Cannot extract source ID from HTTP basic auth username", zap.String("user-input", user))
+		logger.Debugw("Cannot extract source ID from HTTP basic auth username", zap.String("user_input", user))
 		return nil
 	}
 	sourceId, err := strconv.ParseInt(sourceIdRaw, 10, 64)
 	if err != nil {
-		logger.Debugw("Cannot convert extracted source Id to int", zap.String("user-input", user), zap.Error(err))
+		logger.Debugw("Cannot convert extracted source Id to int", zap.String("user_input", user), zap.Error(err))
 		return nil
 	}
 

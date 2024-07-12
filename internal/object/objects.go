@@ -69,7 +69,7 @@ func restoreObjectsFromQuery(ctx context.Context, db *database.DB, query string,
 			}
 		})
 
-		return errors.Wrap(err, "cannot restore muted objects without an active incident")
+		return errors.Wrap(err, "cannot restore objects")
 	})
 
 	g.Go(func() error {

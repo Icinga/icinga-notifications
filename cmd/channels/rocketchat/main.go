@@ -36,7 +36,7 @@ func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 	}
 
 	if roomId == "" {
-		return fmt.Errorf("contact user %s doesn't specify a rocketchat channel or username", req.Contact.FullName)
+		return fmt.Errorf("contact user %s does not specify a rocketchat channel or username", req.Contact.FullName)
 	}
 
 	message := struct {
@@ -64,7 +64,7 @@ func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(request)
 	if err != nil {
-		return fmt.Errorf("error while sending http request to rocketchat server: %s", err)
+		return fmt.Errorf("error while sending http request to rocketchat server: %w", err)
 	}
 
 	defer resp.Body.Close()

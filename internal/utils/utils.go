@@ -63,17 +63,17 @@ func InsertAndFetchId(ctx context.Context, tx *sqlx.Tx, stmt string, args any) (
 
 		err = preparedStmt.Get(&lastInsertId, args)
 		if err != nil {
-			return 0, fmt.Errorf("failed to insert entry for type %T: %s", args, err)
+			return 0, fmt.Errorf("failed to insert entry for type %T: %w", args, err)
 		}
 	} else {
 		result, err := tx.NamedExecContext(ctx, stmt, args)
 		if err != nil {
-			return 0, fmt.Errorf("failed to insert entry for type %T: %s", args, err)
+			return 0, fmt.Errorf("failed to insert entry for type %T: %w", args, err)
 		}
 
 		lastInsertId, err = result.LastInsertId()
 		if err != nil {
-			return 0, fmt.Errorf("failed to fetch last insert id for type %T: %s", args, err)
+			return 0, fmt.Errorf("failed to fetch last insert id for type %T: %w", args, err)
 		}
 	}
 

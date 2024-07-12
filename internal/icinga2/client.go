@@ -397,7 +397,7 @@ func (client *Client) startCatchupWorkers(delay time.Duration) (chan *catchupEve
 			if err != nil && !errors.Is(err, context.Canceled) {
 				client.Logger.Debugw("Catch-up-phase event worker failed",
 					zap.Stringer("worker", workerId),
-					zap.String("object type", objType),
+					zap.String("object_type", objType),
 					zap.Error(err))
 			}
 			return err
@@ -531,7 +531,7 @@ func (client *Client) worker() {
 					client.Logger.Debugw("Event to be replayed is not in cache", zap.Stringer("event", ev))
 				} else if ev.Time.Before(ts) {
 					client.Logger.Debugw("Skip replaying outdated Event Stream event", zap.Stringer("event", ev),
-						zap.Time("event timestamp", ev.Time), zap.Time("cache timestamp", ts))
+						zap.Time("event_timestamp", ev.Time), zap.Time("cache_timestamp", ts))
 					break
 				}
 
