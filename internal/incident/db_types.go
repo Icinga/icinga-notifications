@@ -43,14 +43,14 @@ func (c *ContactRow) Upsert() interface{} {
 // PgsqlOnConflictConstraint implements the database.PgsqlOnConflictConstrainter interface.
 func (c *ContactRow) PgsqlOnConflictConstraint() string {
 	if c.ContactID.Valid {
-		return "key_incident_contact_contact"
+		return "uk_incident_contact_incident_id_contact_id"
 	}
 
 	if c.GroupID.Valid {
-		return "key_incident_contact_contactgroup"
+		return "uk_incident_contact_incident_id_contactgroup_id"
 	}
 
-	return "key_incident_contact_schedule"
+	return "uk_incident_contact_incident_id_schedule_id"
 }
 
 // RuleRow represents a single incident rule database entry.
