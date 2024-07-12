@@ -40,7 +40,7 @@ func (launcher *Launcher) Launch(src *config.Source) {
 
 	if !launcher.isReady {
 		launcher.Logs.GetChildLogger("icinga2").
-			With(zap.Int64("source-id", src.ID)).
+			With(zap.Int64("source_id", src.ID)).
 			Debug("Postponing Event Stream Client Launch as Launcher is not ready yet")
 		launcher.waitingSources = append(launcher.waitingSources, src)
 		return
@@ -57,7 +57,7 @@ func (launcher *Launcher) Ready() {
 	launcher.isReady = true
 	for _, src := range launcher.waitingSources {
 		launcher.Logs.GetChildLogger("icinga2").
-			With(zap.Int64("source-id", src.ID)).
+			With(zap.Int64("source_id", src.ID)).
 			Debug("Launching postponed Event Stream Client")
 		launcher.launch(src)
 	}
@@ -66,7 +66,7 @@ func (launcher *Launcher) Ready() {
 
 // launch a new Icinga 2 Event Stream API Client based on the config.Source configuration.
 func (launcher *Launcher) launch(src *config.Source) {
-	logger := launcher.Logs.GetChildLogger("icinga2").With(zap.Int64("source-id", src.ID))
+	logger := launcher.Logs.GetChildLogger("icinga2").With(zap.Int64("source_id", src.ID))
 
 	if src.Type != config.SourceTypeIcinga2 ||
 		!src.Icinga2BaseURL.Valid ||
