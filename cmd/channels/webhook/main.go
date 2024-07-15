@@ -27,7 +27,7 @@ type Webhook struct {
 }
 
 func (ch *Webhook) GetInfo() *plugin.Info {
-	elements := []*plugin.ConfigOption{
+	configAttrs := plugin.ConfigOptions{
 		{
 			Name: "method",
 			Type: "string",
@@ -65,7 +65,7 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 				"en_US": "Go template applied to the current plugin.NotificationRequest to create an request body.",
 				"de_DE": "Go-Template über das zu verarbeitende plugin.NotificationRequest zum Erzeugen der mitgesendeten Anfragedaten.",
 			},
-			Default: `{{json .}}`,
+			Default: "{{json .}}",
 		},
 		{
 			Name: "response_status_codes",
@@ -82,11 +82,6 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 		},
 	}
 
-	configAttrs, err := json.Marshal(elements)
-	if err != nil {
-		panic(err)
-	}
-
 	return &plugin.Info{
 		Name:             "Webhook",
 		Version:          internal.Version.Version,
@@ -96,7 +91,12 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 }
 
 func (ch *Webhook) SetConfig(jsonStr json.RawMessage) error {
-	err := json.Unmarshal(jsonStr, ch)
+	err := plugin.PopulateDefaults(ch)
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal(jsonStr, ch)
 	if err != nil {
 		return err
 	}
