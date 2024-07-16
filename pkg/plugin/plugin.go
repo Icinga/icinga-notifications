@@ -22,7 +22,7 @@ const (
 	MethodSendNotification = "SendNotification"
 )
 
-// ConfigOption describes a config element of the channel form
+// ConfigOption describes a config element.
 type ConfigOption struct {
 	// Element name
 	Name string `json:"name"`
@@ -80,12 +80,23 @@ func (c ConfigOptions) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// Info contains plugin information.
+// Info contains channel plugin information.
 type Info struct {
-	Type             string        `db:"type" json:"-"`
-	Name             string        `db:"name" json:"name"`
-	Version          string        `db:"version" json:"version"`
-	Author           string        `db:"author" json:"author"`
+	// Type of the channel plugin.
+	//
+	// Not part of the JSON object. Will be set to the channel plugin file name before database insertion.
+	Type string `db:"type" json:"-"`
+
+	// Name of this channel plugin in a human-readable value.
+	Name string `db:"name" json:"name"`
+
+	// Version of this channel plugin.
+	Version string `db:"version" json:"version"`
+
+	// Author of this channel plugin.
+	Author string `db:"author" json:"author"`
+
+	// ConfigAttributes contains multiple ConfigOption(s) as JSON-encoded list.
 	ConfigAttributes ConfigOptions `db:"config_attrs" json:"config_attrs"`
 }
 
@@ -94,51 +105,93 @@ func (i *Info) TableName() string {
 	return "available_channel_type"
 }
 
+// Contact to receive notifications for the NotificationRequest.
 type Contact struct {
-	FullName  string     `json:"full_name"`
+	// FullName of a Contact as defined in Icinga Notifications.
+	FullName string `json:"full_name"`
+
+	// Addresses of a Contact with a type.
 	Addresses []*Address `json:"addresses"`
 }
 
+// Address to receive this notification. Each Contact might have multiple addresses.
 type Address struct {
-	Type    string `json:"type"`
+	// Type field matches the Info.Type, effectively being the channel plugin file name.
+	Type string `json:"type"`
+
+	// Address is the associated Type-specific address, e.g., an email address for type email.
 	Address string `json:"address"`
 }
 
+// Object which this NotificationRequest is all about, e.g., an Icinga 2 Host or Service object.
 type Object struct {
-	Name      string            `json:"name"`
-	Url       string            `json:"url"`
-	Tags      map[string]string `json:"tags"`
+	// Name depending on its source, may be "host!service" when from Icinga 2.
+	Name string `json:"name"`
+
+	// Url pointing to this Object, may be to Icinga Web.
+	Url string `json:"url"`
+
+	// Tags defining this Object, may be "host" and "service" when from Icinga 2.
+	Tags map[string]string `json:"tags"`
+
+	// ExtraTags attached, may be a host or service groups when form Icinga 2.
 	ExtraTags map[string]string `json:"extra_tags"`
 }
 
+// Incident of this NotificationRequest, grouping Events for this Object.
 type Incident struct {
-	Id       int64  `json:"id"`
-	Url      string `json:"url"`
+	// Id is the unique identifier for this Icinga Notifications Incident, allows linking related events.
+	Id int64 `json:"id"`
+
+	// Url pointing to the Icinga Notifications Web module's Incident page.
+	Url string `json:"url"`
+
+	// Severity of this Incident.
 	Severity string `json:"severity"`
 }
 
+// Event indicating this NotificationRequest.
 type Event struct {
-	Time     time.Time `json:"time"`
-	Type     string    `json:"type"`
-	Username string    `json:"username"`
-	Message  string    `json:"message"`
+	// Time when this event occurred, being encoded according to RFC 3339 when passed as JSON.
+	Time time.Time `json:"time"`
+
+	// Type of this event, e.g., a "state" change, "mute" or "unmute". See further ./internal/event/event.go
+	Type string `json:"type"`
+
+	// Username may contain a user triggering this event, depending on the event's source.
+	Username string `json:"username"`
+
+	// Message of this event, might be a check output when the related Object is an Icinga 2 object.
+	Message string `json:"message"`
 }
 
+// NotificationRequest is being sent to a channel plugin via Plugin.SendNotification to request notification dispatching.
 type NotificationRequest struct {
-	Contact  *Contact  `json:"contact"`
-	Object   *Object   `json:"object"`
+	// Contact to receive this NotificationRequest.
+	Contact *Contact `json:"contact"`
+
+	// Object associated with this NotificationRequest, e.g., an Icinga 2 Service Object.
+	Object *Object `json:"object"`
+
+	// Incident associated with this NotificationRequest.
 	Incident *Incident `json:"incident"`
-	Event    *Event    `json:"event"`
+
+	// Event being responsible for creating this NotificationRequest, e.g., a firing Icinga 2 Service Check.
+	Event *Event `json:"event"`
 }
 
+// Plugin defines necessary methods for a channel plugin.
+//
+// Those methods are being called via the internal JSON-RPC and allow channel interaction. Within the channel's main
+// function, the channel should be launched via RunPlugin.
 type Plugin interface {
-	// GetInfo returns the corresponding plugin *Info
+	// GetInfo returns the corresponding plugin *Info.
 	GetInfo() *Info
 
-	// SetConfig sets the plugin config, returns an error on failure
+	// SetConfig sets the plugin config, returns an error on failure.
 	SetConfig(jsonStr json.RawMessage) error
 
-	// SendNotification sends the notification, returns an error on failure
+	// SendNotification sends the notification, returns an error on failure.
 	SendNotification(req *NotificationRequest) error
 }
 
@@ -161,7 +214,10 @@ func PopulateDefaults(typePtr Plugin) error {
 	return json.Unmarshal(defaultConf, typePtr)
 }
 
-// RunPlugin reads the incoming stdin requests, processes and writes the responses to stdout
+// RunPlugin serves the RPC for a Channel Plugin.
+//
+// This function reads requests from stdin, calls the associated RPC method, and writes the responses to stdout. As this
+// function blocks, it should be called last in a channel plugin's main function.
 func RunPlugin(plugin Plugin) {
 	encoder := json.NewEncoder(os.Stdout)
 	decoder := json.NewDecoder(os.Stdin)
@@ -223,7 +279,9 @@ func RunPlugin(plugin Plugin) {
 	wg.Wait()
 }
 
-// FormatMessage formats a notification message and adds to the given io.Writer
+// FormatMessage formats a NotificationRequest message and adds to the given io.Writer.
+//
+// The created message is a multi-line message as one might expect it in an email.
 func FormatMessage(writer io.Writer, req *NotificationRequest) {
 	if req.Event.Message != "" {
 		msgTitle := "Comment"
