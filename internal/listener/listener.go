@@ -55,11 +55,10 @@ func (l *Listener) Run(ctx context.Context) error {
 	listenAddr := daemon.Config().Listen
 	l.logger.Infof("Starting listener on http://%s", listenAddr)
 	server := &http.Server{
-		Addr:         listenAddr,
-		Handler:      l,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  30 * time.Second,
+		Addr:        listenAddr,
+		Handler:     l,
+		ReadTimeout: 10 * time.Second,
+		IdleTimeout: 30 * time.Second,
 	}
 
 	serverErr := make(chan error)
