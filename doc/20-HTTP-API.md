@@ -35,7 +35,7 @@ curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-ev
   "type": "state",
   "severity": "crit",
   "username": "",
-  "message": "Something went somehwere very wrong."
+  "message": "Something went somewhere very wrong."
 }
 EOF
 ```
