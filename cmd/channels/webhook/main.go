@@ -39,7 +39,8 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 				"en_US": "HTTP request method used for the web request.",
 				"de_DE": "HTTP-Methode für die Anfrage.",
 			},
-			Default: "POST",
+			Default:  "POST",
+			Required: true,
 		},
 		{
 			Name: "url_template",
@@ -78,7 +79,8 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 				"en_US": "Comma separated list of expected HTTP response status code, e.g., 200,201,202,208,418",
 				"de_DE": "Kommaseparierte Liste erwarteter Status-Code der HTTP-Antwort, z.B.: 200,201,202,208,418",
 			},
-			Default: "200",
+			Default:  "200",
+			Required: true,
 		},
 	}
 
