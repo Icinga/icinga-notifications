@@ -115,24 +115,24 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 func (ch *Email) GetInfo() *plugin.Info {
 	configAttrs := plugin.ConfigOptions{
 		{
-			Name:     "host",
-			Type:     "string",
-			Required: true,
+			Name: "host",
+			Type: "string",
 			Label: map[string]string{
 				"en_US": "SMTP Host",
 				"de_DE": "SMTP Host",
 			},
+			Required: true,
 		},
 		{
-			Name:     "port",
-			Type:     "number",
-			Required: true,
+			Name: "port",
+			Type: "number",
 			Label: map[string]string{
 				"en_US": "SMTP Port",
 				"de_DE": "SMTP Port",
 			},
-			Min: types.Int{NullInt64: sql.NullInt64{Int64: 1, Valid: true}},
-			Max: types.Int{NullInt64: sql.NullInt64{Int64: 65535, Valid: true}},
+			Required: true,
+			Min:      types.Int{NullInt64: sql.NullInt64{Int64: 1, Valid: true}},
+			Max:      types.Int{NullInt64: sql.NullInt64{Int64: 65535, Valid: true}},
 		},
 		{
 			Name: "sender_name",
@@ -141,7 +141,8 @@ func (ch *Email) GetInfo() *plugin.Info {
 				"en_US": "Sender Name",
 				"de_DE": "Absendername",
 			},
-			Default: "Icinga",
+			Default:  "Icinga",
+			Required: true,
 		},
 		{
 			Name: "sender_mail",
@@ -150,7 +151,7 @@ func (ch *Email) GetInfo() *plugin.Info {
 				"en_US": "Sender Address",
 				"de_DE": "Absenderadresse",
 			},
-			Default: "icinga@example.com",
+			Required: true,
 		},
 		{
 			Name: "user",
@@ -158,6 +159,10 @@ func (ch *Email) GetInfo() *plugin.Info {
 			Label: map[string]string{
 				"en_US": "SMTP User",
 				"de_DE": "SMTP Benutzer",
+			},
+			Help: map[string]string{
+				"en_US": "When configuring an SMTP user, an SMTP password must also be set.",
+				"de_DE": "Das Setzen eines SMTP Benutzers erfordert ebenfalls ein SMTP Passwort.",
 			},
 		},
 		{

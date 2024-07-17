@@ -21,12 +21,12 @@ func TestEmail_SetConfig(t *testing.T) {
 		{
 			name:    "empty-json-obj-use-defaults",
 			jsonMsg: `{}`,
-			want:    &Email{SenderName: "Icinga", SenderMail: "icinga@example.com"},
+			want:    &Email{SenderName: "Icinga"},
 		},
 		{
 			name:    "sender-mail-null-equals-defaults",
 			jsonMsg: `{"sender_mail": null}`,
-			want:    &Email{SenderName: "Icinga", SenderMail: "icinga@example.com"},
+			want:    &Email{SenderName: "Icinga"},
 		},
 		{
 			name:    "sender-mail-overwrite",
