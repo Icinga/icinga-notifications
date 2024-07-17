@@ -14,6 +14,10 @@ import (
 	"text/template"
 )
 
+func main() {
+	plugin.RunPlugin(&Webhook{})
+}
+
 type Webhook struct {
 	Method              string `json:"method"`
 	URLTemplate         string `json:"url_template"`
@@ -163,8 +167,4 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
 	}
 
 	return nil
-}
-
-func main() {
-	plugin.RunPlugin(&Webhook{})
 }

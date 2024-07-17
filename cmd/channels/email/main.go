@@ -16,6 +16,10 @@ import (
 	"net/mail"
 )
 
+func main() {
+	plugin.RunPlugin(&Email{})
+}
+
 const (
 	EncryptionNone     = "none"
 	EncryptionStartTLS = "starttls"
@@ -30,86 +34,6 @@ type Email struct {
 	User       string `json:"user"`
 	Password   string `json:"password"`
 	Encryption string `json:"encryption"`
-}
-
-func main() {
-	plugin.RunPlugin(&Email{})
-}
-
-func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
-	var to []mail.Address
-	for _, address := range req.Contact.Addresses {
-		if address.Type == "email" {
-			to = append(to, mail.Address{Name: req.Contact.FullName, Address: address.Address})
-		}
-	}
-
-	if len(to) == 0 {
-		return fmt.Errorf("contact user %s does not have an e-mail address", req.Contact.FullName)
-	}
-
-	var msg bytes.Buffer
-	plugin.FormatMessage(&msg, req)
-
-	return enmime.Builder().
-		ToAddrs(to).
-		From(ch.SenderName, ch.SenderMail).
-		Subject(plugin.FormatSubject(req)).
-		Header("Message-Id", fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail)).
-		Text(msg.Bytes()).
-		Send(ch)
-}
-
-func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error {
-	var (
-		client *smtp.Client
-		err    error
-	)
-
-	switch ch.Encryption {
-	case EncryptionStartTLS:
-		client, err = smtp.DialStartTLS(ch.GetServer(), nil)
-	case EncryptionTLS:
-		client, err = smtp.DialTLS(ch.GetServer(), nil)
-	case EncryptionNone:
-		client, err = smtp.Dial(ch.GetServer())
-	default:
-		return fmt.Errorf("unsupported mail encryption type %q", ch.Encryption)
-	}
-	if err != nil {
-		return err
-	}
-	defer func() { _ = client.Close() }()
-
-	if ch.Password != "" {
-		if err = client.Auth(sasl.NewPlainClient("", ch.User, ch.Password)); err != nil {
-			return err
-		}
-	}
-
-	if err := client.SendMail(reversePath, recipients, bytes.NewReader(msg)); err != nil {
-		return err
-	}
-
-	return client.Quit()
-}
-
-func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
-	err := plugin.PopulateDefaults(ch)
-	if err != nil {
-		return err
-	}
-
-	err = json.Unmarshal(jsonStr, ch)
-	if err != nil {
-		return fmt.Errorf("failed to load config: %s %w", jsonStr, err)
-	}
-
-	if (ch.User == "") != (ch.Password == "") {
-		return fmt.Errorf("user and password fields must both be set or empty")
-	}
-
-	return nil
 }
 
 func (ch *Email) GetInfo() *plugin.Info {
@@ -197,6 +121,81 @@ func (ch *Email) GetInfo() *plugin.Info {
 	}
 }
 
-func (ch *Email) GetServer() string {
-	return net.JoinHostPort(ch.Host, ch.Port)
+func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
+	err := plugin.PopulateDefaults(ch)
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal(jsonStr, ch)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %s %w", jsonStr, err)
+	}
+
+	if (ch.User == "") != (ch.Password == "") {
+		return fmt.Errorf("user and password fields must both be set or empty")
+	}
+
+	return nil
+}
+
+func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
+	var to []mail.Address
+	for _, address := range req.Contact.Addresses {
+		if address.Type == "email" {
+			to = append(to, mail.Address{Name: req.Contact.FullName, Address: address.Address})
+		}
+	}
+
+	if len(to) == 0 {
+		return fmt.Errorf("contact user %s does not have an e-mail address", req.Contact.FullName)
+	}
+
+	var msg bytes.Buffer
+	plugin.FormatMessage(&msg, req)
+
+	return enmime.Builder().
+		ToAddrs(to).
+		From(ch.SenderName, ch.SenderMail).
+		Subject(plugin.FormatSubject(req)).
+		Header("Message-Id", fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail)).
+		Text(msg.Bytes()).
+		Send(ch)
+}
+
+// Send implements the enmime.Sender interface.
+func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error {
+	var (
+		client *smtp.Client
+		err    error
+	)
+
+	serverAddr := net.JoinHostPort(ch.Host, ch.Port)
+
+	switch ch.Encryption {
+	case EncryptionStartTLS:
+		client, err = smtp.DialStartTLS(serverAddr, nil)
+	case EncryptionTLS:
+		client, err = smtp.DialTLS(serverAddr, nil)
+	case EncryptionNone:
+		client, err = smtp.Dial(serverAddr)
+	default:
+		return fmt.Errorf("unsupported mail encryption type %q", ch.Encryption)
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = client.Close() }()
+
+	if ch.Password != "" {
+		if err = client.Auth(sasl.NewPlainClient("", ch.User, ch.Password)); err != nil {
+			return err
+		}
+	}
+
+	if err := client.SendMail(reversePath, recipients, bytes.NewReader(msg)); err != nil {
+		return err
+	}
+
+	return client.Quit()
 }
