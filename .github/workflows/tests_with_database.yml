@@ -71,7 +71,12 @@ jobs:
 
       - name: Run tests
         timeout-minutes: 10
-        run: go test -v -timeout 5m ./...
+        # By default, multiple packages may be tested in parallel in different
+        # processes. Passing -p 1 reduces this to one process to prevent test
+        # cases in different packages from accessing the same database. Note
+        # that t.Parallel() only affects parallelism within one process, i.e.
+        # within the tests of one package.
+        run: go test -v -timeout 5m -p 1 ./...
 
   postgresql:
     name: PostgreSQL ${{ matrix.version }}
@@ -125,4 +130,9 @@ jobs:
 
       - name: Run tests
         timeout-minutes: 10
-        run: go test -v -timeout 5m ./...
+        # By default, multiple packages may be tested in parallel in different
+        # processes. Passing -p 1 reduces this to one process to prevent test
+        # cases in different packages from accessing the same database. Note
+        # that t.Parallel() only affects parallelism within one process, i.e.
+        # within the tests of one package.
+        run: go test -v -timeout 5m -p 1 ./...
