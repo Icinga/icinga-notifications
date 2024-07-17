@@ -11,14 +11,62 @@ import (
 	"time"
 )
 
+func main() {
+	plugin.RunPlugin(&RocketChat{})
+}
+
 type RocketChat struct {
 	URL    string `json:"url"`
 	UserID string `json:"user_id"`
 	Token  string `json:"token"`
 }
 
-func main() {
-	plugin.RunPlugin(&RocketChat{})
+func (ch *RocketChat) GetInfo() *plugin.Info {
+	configAttrs := plugin.ConfigOptions{
+		{
+			Name: "url",
+			Type: "string",
+			Label: map[string]string{
+				"en_US": "Rocket.Chat URL",
+				"de_DE": "Rocket.Chat URL",
+			},
+			Required: true,
+		},
+		{
+			Name: "user_id",
+			Type: "string",
+			Label: map[string]string{
+				"en_US": "User ID",
+				"de_DE": "Benutzer ID",
+			},
+			Required: true,
+		},
+		{
+			Name: "token",
+			Type: "secret",
+			Label: map[string]string{
+				"en_US": "Personal Access Token",
+				"de_DE": "Persönliches Zugangstoken",
+			},
+			Required: true,
+		},
+	}
+
+	return &plugin.Info{
+		Name:             "Rocket.Chat",
+		Version:          internal.Version.Version,
+		Author:           "Icinga GmbH",
+		ConfigAttributes: configAttrs,
+	}
+}
+
+func (ch *RocketChat) SetConfig(jsonStr json.RawMessage) error {
+	err := plugin.PopulateDefaults(ch)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(jsonStr, ch)
 }
 
 func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
@@ -74,52 +122,4 @@ func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 	}
 
 	return nil
-}
-
-func (ch *RocketChat) SetConfig(jsonStr json.RawMessage) error {
-	err := plugin.PopulateDefaults(ch)
-	if err != nil {
-		return err
-	}
-
-	return json.Unmarshal(jsonStr, ch)
-}
-
-func (ch *RocketChat) GetInfo() *plugin.Info {
-	configAttrs := plugin.ConfigOptions{
-		{
-			Name: "url",
-			Type: "string",
-			Label: map[string]string{
-				"en_US": "Rocket.Chat URL",
-				"de_DE": "Rocket.Chat URL",
-			},
-			Required: true,
-		},
-		{
-			Name: "user_id",
-			Type: "string",
-			Label: map[string]string{
-				"en_US": "User ID",
-				"de_DE": "Benutzer ID",
-			},
-			Required: true,
-		},
-		{
-			Name: "token",
-			Type: "secret",
-			Label: map[string]string{
-				"en_US": "Personal Access Token",
-				"de_DE": "Persönliches Zugangstoken",
-			},
-			Required: true,
-		},
-	}
-
-	return &plugin.Info{
-		Name:             "Rocket.Chat",
-		Version:          internal.Version.Version,
-		Author:           "Icinga GmbH",
-		ConfigAttributes: configAttrs,
-	}
 }
