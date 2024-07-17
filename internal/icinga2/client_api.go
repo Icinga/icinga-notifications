@@ -301,6 +301,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ca
 		}
 
 		fakeEv.Message = attrs.LastCheckResult.Output
+		ackEvent := *fakeEv
 		select {
 		case catchupEventCh <- &catchupEventMsg{eventMsg: &eventMsg{fakeEv, attrs.LastStateChange.Time()}}:
 			if fakeEv.Type == event.TypeUnmute {
@@ -325,7 +326,7 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ca
 				select {
 				// Retry the AckSet event so that the author of the ack is set as the incident
 				// manager if there was no existing incident before the above state change event.
-				case catchupEventCh <- &catchupEventMsg{eventMsg: &eventMsg{fakeEv, attrs.LastStateChange.Time()}}:
+				case catchupEventCh <- &catchupEventMsg{eventMsg: &eventMsg{&ackEvent, attrs.LastStateChange.Time()}}:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
