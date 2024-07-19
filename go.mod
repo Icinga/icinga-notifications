@@ -26,7 +26,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
-	github.com/goccy/go-yaml v1.11.3 // indirect
+	github.com/goccy/go-yaml v1.12.0 // indirect
 	github.com/gogs/chardet v0.0.0-20211120154057-b7413eaefb8f // indirect
 	github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056 // indirect
 	github.com/jessevdk/go-flags v1.5.0 // indirect
