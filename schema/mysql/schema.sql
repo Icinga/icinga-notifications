@@ -448,7 +448,7 @@ CREATE INDEX idx_incident_history_time_type ON incident_history(time, type) COMM
 CREATE TABLE browser_session (
     php_session_id varchar(256) NOT NULL,
     username varchar(254) NOT NULL COLLATE utf8mb4_unicode_ci,
-    user_agent varchar(4096) NOT NULL,
+    user_agent text NOT NULL,
     authenticated_at bigint NOT NULL,
 
     CONSTRAINT pk_browser_session PRIMARY KEY (php_session_id)
