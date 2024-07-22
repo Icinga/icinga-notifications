@@ -1,3 +1,5 @@
+# The address of the Icinga Notifications HTTP listener to be bound to.
+# This can be configured in many different ways, as listed below.
 #listen: "localhost:5680" # default
 #listen: ":5680" # any interface
 #listen: "192.0.2.1:5680"
@@ -6,20 +8,46 @@
 # Set credentials for some debug endpoints provided via HTTP. If not set, these are disabled.
 #debug-password: "put-something-secret-here"
 
+# The base Icinga Web 2 URL being used as the base URL for all object, notification and event URLs.
 icingaweb2-url: http://localhost/icingaweb2/
+
+# Directory containing all executable Icinga Notifications channel plugins.
+# By default, all of Icinga Notifications built-in channel plugins are installed in the directory below.
 #channels-dir: /usr/libexec/icinga-notifications/channels
-api-timeout: 1m
 
+# The Icinga 2 API request timeout defined as a duration string.
+# Note, this timeout does not apply to the Icinga 2 event streams, but to those other API endpoints like /v1/objects
+# used to occasionally retrieve some additional information of a Checkable.
+# A duration string is a sequence of decimal numbers and a unit suffix, such as "20s".
+# Valid units are "ms", "s", "m", "h".
+#api-timeout: 1m
+
+# Connection configuration for the database where Icinga Notifications stores configuration and historical data.
+# This is also the database used in Icinga Notifications Web to view and work with the data.
 database:
-  type: pgsql
-  host: /run/postgresql
-  #host: localhost
-  #port: 5432
-  user: notifications
-  database: notifications
-  #password: notifications
+  # Database type. Either 'mysql' for MySQL or 'pgsql' for PostgreSQL.
+  # Defaults to 'mysql'.
+#  type: mysql
 
-logging:
+  # Database host or absolute Unix socket path.
+  host: localhost
+
+  # Database port. By default, the MySQL or PostgreSQL port, depending on the database type.
+#  port:
+
+  # Database name.
+  database: notifications
+
+  # Database user.
+  user: notifications
+
+  # Database password.
+  password: CHANGEME
+
+# Icinga Notifications logs its activities at various severity levels and any errors that occur either
+# on the console or in systemd's journal. The latter is used automatically when running under systemd.
+# In any case, the default log level is 'info'.
+# logging:
   # Default logging level. Can be set to 'fatal', 'error', 'warn', 'info' or 'debug'.
   # If not set, defaults to 'info'.
   #level: info
@@ -35,8 +63,10 @@ logging:
   #interval: 20s
 
   # Map of component-logging level pairs to define a different log level than the default value for each component.
-  options:
+#  options:
+    #channel:
     #database:
-    runtime-updates: info
-    #listener:
+    #icinga2:
     #incident:
+    #listener:
+    #runtime-updates:
