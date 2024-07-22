@@ -493,7 +493,7 @@ COMMENT ON INDEX idx_incident_history_time_type IS 'Incident History ordered by 
 CREATE TABLE browser_session (
     php_session_id varchar(256) NOT NULL,
     username citext NOT NULL,
-    user_agent varchar(4096) NOT NULL,
+    user_agent text NOT NULL,
     authenticated_at bigint NOT NULL,
 
     CONSTRAINT pk_browser_session PRIMARY KEY (php_session_id),
