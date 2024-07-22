@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"go.uber.org/zap"
@@ -212,17 +213,28 @@ func (client *Client) fetchCheckable(ctx context.Context, host, service string) 
 	return &objQueriesResults[0], nil
 }
 
+// errMissingAcknowledgementComment is an error indicating that no Comment for an Acknowledgement exists.
+//
+// This error should only be wrapped and returned from the fetchAcknowledgementComment method and only if no Comment was
+// found. For other errors, like network errors, this error must not be used.
+var errMissingAcknowledgementComment = errors.New("found no acknowledgement comment")
+
 // fetchAcknowledgementComment fetches an Acknowledgement Comment for a Host (empty service) or for a Service at a Host.
 //
 // Unfortunately, there is no direct link between ACK'ed Host or Service objects and their acknowledgement Comment. The
 // closest we can do, is query for Comments with the Acknowledgement Service Type and the host/service name. In addition,
-// the Host's resp. Service's AcknowledgementLastChange field has NOT the same timestamp as the Comment; there is a
+// the Host's or Service's AcknowledgementLastChange field has NOT the same timestamp as the Comment; there is a
 // difference of some milliseconds. As there might be even multiple ACK comments, we have to find the closest one.
+//
+// Please note that not every Acknowledgement has a Comment. It is possible to delete the Comment, while still having an
+// active Acknowledgement. Thus, if no Comment was found, a wrapped errMissingAcknowledgementComment is returned.
 func (client *Client) fetchAcknowledgementComment(ctx context.Context, host, service string, ackTime time.Time) (*Comment, error) {
 	// comment.entry_type = 4 is an Acknowledgement comment; Comment.EntryType
+	objectName := host
 	filterExpr := "comment.entry_type == 4 && comment.host_name == comment_host_name"
 	filterVars := map[string]string{"comment_host_name": host}
 	if service != "" {
+		objectName += "!" + service
 		filterExpr += " && comment.service_name == comment_service_name"
 		filterVars["comment_service_name"] = service
 	}
@@ -237,7 +249,7 @@ func (client *Client) fetchAcknowledgementComment(ctx context.Context, host, ser
 	}
 
 	if len(objQueriesResults) == 0 {
-		return nil, fmt.Errorf("found no ACK Comments for %q with %v", filterExpr, filterVars)
+		return nil, fmt.Errorf("%w for %q at all", errMissingAcknowledgementComment, objectName)
 	}
 
 	slices.SortFunc(objQueriesResults, func(a, b ObjectQueriesResult[Comment]) int {
@@ -246,7 +258,7 @@ func (client *Client) fetchAcknowledgementComment(ctx context.Context, host, ser
 		return cmp.Compare(distA, distB)
 	})
 	if objQueriesResults[0].Attrs.EntryTime.Time().Sub(ackTime).Abs() > time.Second {
-		return nil, fmt.Errorf("found no ACK Comment for %q with %v close to %v", filterExpr, filterVars, ackTime)
+		return nil, fmt.Errorf("%w for %q near %v", errMissingAcknowledgementComment, objectName, ackTime)
 	}
 
 	return &objQueriesResults[0].Attrs, nil
@@ -306,17 +318,38 @@ func (client *Client) checkMissedChanges(ctx context.Context, objType string, ca
 		var fakeEv *event.Event
 		if checkableIsMuted && attrs.Acknowledgement != AcknowledgementNone {
 			ackComment, err := client.fetchAcknowledgementComment(ctx, hostName, serviceName, attrs.AcknowledgementLastChange.Time())
-			if err != nil {
-				return fmt.Errorf("fetching acknowledgement comment for %q failed, %w", objectName, err)
-			}
+			if errors.Is(err, errMissingAcknowledgementComment) {
+				// Unfortunately, there is no Acknowledgement object in Icinga 2, but only related runtime attributes
+				// attached to Host or Service objects. Those attributes contain no authorship. The only way to link an
+				// acknowledgement to a contact, when being fetched through the Config Objects API, is to find a
+				// matching Comment object, which contains an author field.
+				//
+				// This is not the case for the Event Stream API, where AcknowledgementSet has an author field.
+				//
+				// However, when no author is present, the Acknowledgement Event cannot be processed. Eventually, the
+				// Incident.processAcknowledgementEvent method will fail hard.
 
-			ack := &Acknowledgement{Host: hostName, Service: serviceName, Author: ackComment.Author, Comment: ackComment.Text}
-			// We do not need to fake ACK set events as they are handled correctly by an incident and any
-			// redundant/successive ACK set events are discarded accordingly.
-			ack.EventType = typeAcknowledgementSet
-			fakeEv, err = client.buildAcknowledgementEvent(ctx, ack)
-			if err != nil {
-				return fmt.Errorf("failed to construct Event from Acknowledgement response, %w", err)
+				client.Logger.Infow("Cannot find the comment for an acknowledgement, creating a generic muted event",
+					zap.String("object", objectName), zap.NamedError("reason", err))
+
+				fakeEv, err = client.buildCommonEvent(ctx, hostName, serviceName)
+				if err != nil {
+					return fmt.Errorf("failed to construct checkable fake unmute event: %w", err)
+				}
+
+				fakeEv.Type = event.TypeMute
+				fakeEv.SetMute(true, "Checkable is acknowledged, but we could not find its corresponding comment")
+			} else if err != nil {
+				return fmt.Errorf("fetching acknowledgement comment for %q failed, %w", objectName, err)
+			} else {
+				ack := &Acknowledgement{Host: hostName, Service: serviceName, Author: ackComment.Author, Comment: ackComment.Text}
+				// We do not need to fake ACK set events as they are handled correctly by an incident and any
+				// redundant/successive ACK set events are discarded accordingly.
+				ack.EventType = typeAcknowledgementSet
+				fakeEv, err = client.buildAcknowledgementEvent(ctx, ack)
+				if err != nil {
+					return fmt.Errorf("failed to construct Event from Acknowledgement response, %w", err)
+				}
 			}
 		} else if checkableIsMuted {
 			fakeEv, err = client.buildCommonEvent(ctx, hostName, serviceName)
