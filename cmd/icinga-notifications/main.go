@@ -23,7 +23,7 @@ func main() {
 	daemon.ParseFlagsAndConfig()
 	conf := daemon.Config()
 
-	logs, err := logging.NewLoggingFromConfig("icinga-notifications", conf.Logging)
+	logs, err := logging.NewLoggingFromConfig("notifications", conf.Logging)
 	if err != nil {
 		utils.PrintErrorThenExit(err, daemon.ExitFailure)
 	}
