@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
@@ -133,7 +134,10 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
 	err = incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
-	if err != nil {
+	if errors.Is(err, event.ErrSuperfluousStateChange) || errors.Is(err, event.ErrSuperfluousMuteUnmuteEvent) {
+		abort(http.StatusNotAcceptable, &ev, "%v", err)
+		return
+	} else if err != nil {
 		l.logger.Errorw("Failed to successfully process event", zap.Stringer("event", &ev), zap.Error(err))
 		abort(http.StatusInternalServerError, &ev, "event could not be processed successfully, see server logs for details")
 		return
