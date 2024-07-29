@@ -8,7 +8,7 @@ require (
 	github.com/emersion/go-smtp v0.21.3
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/icinga/icinga-go-library v0.3.0
+	github.com/icinga/icinga-go-library v0.3.1
 	github.com/jhillyerd/enmime v1.2.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/okzk/sdnotify v0.0.0-20180710141335-d9becc38acbd
