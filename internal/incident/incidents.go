@@ -3,6 +3,9 @@ package incident
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/icinga/icinga-go-library/com"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
@@ -16,8 +19,6 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	"sync"
-	"time"
 )
 
 var (
