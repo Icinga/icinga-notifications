@@ -20,9 +20,6 @@ import (
 	"time"
 )
 
-type ruleID = int64
-type escalationID = int64
-
 type Incident struct {
 	ID          int64           `db:"id"`
 	ObjectID    types.Binary    `db:"object_id"`
@@ -32,8 +29,8 @@ type Incident struct {
 
 	Object *object.Object `db:"-"`
 
-	EscalationState map[escalationID]*EscalationState `db:"-"`
-	Rules           map[ruleID]struct{}               `db:"-"`
+	EscalationState map[int64]*EscalationState        `db:"-"`
+	Rules           map[int64]struct{}                `db:"-"`
 	Recipients      map[recipient.Key]*RecipientState `db:"-"`
 
 	// timer calls RetriggerEscalations the next time any escalation could be reached on the incident.
@@ -64,8 +61,8 @@ type Incident struct {
 func NewIncident(obj *object.Object, runtimeConfig *config.RuntimeConfig) *Incident {
 	i := &Incident{
 		Object:          obj,
-		EscalationState: map[escalationID]*EscalationState{},
-		Rules:           map[ruleID]struct{}{},
+		EscalationState: map[int64]*EscalationState{},
+		Rules:           map[int64]struct{}{},
 		Recipients:      map[recipient.Key]*RecipientState{},
 		Resources:       config.MakeResources(runtimeConfig, "incident"),
 	}
@@ -171,13 +168,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 			return err
 		}
 
-		// Re-evaluate escalations based on the newly evaluated rules.
-		escalations, err := i.evaluateEscalations(ev.Time)
-		if err != nil {
-			return err
-		}
-
-		if err := i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
+		if err := i.triggerEscalations(ctx, tx, ev, i.evaluateEscalations(ev.Time)); err != nil {
 			return err
 		}
 	case baseEv.TypeAcknowledgementSet:
@@ -227,12 +218,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		return
 	}
 
-	escalations, err := i.evaluateEscalations(ev.Time)
-	if err != nil {
-		i.Logger.Errorw("Reevaluating time-based escalations failed", zap.Error(err))
-		return
-	}
-
+	escalations := i.evaluateEscalations(ev.Time)
 	if len(escalations) == 0 {
 		i.Logger.Debug("Reevaluated escalations, no new escalations triggered")
 		return
@@ -240,7 +226,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 
 	var notifications []*NotificationEntry
 	ctx := context.Background()
-	err = i.DB.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
+	err := i.DB.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
 		err := ev.Sync(ctx, tx, i.DB, i.Object.ID)
 		if err != nil {
 			return err
@@ -465,13 +451,14 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 	return nil
 }
 
-// evaluateEscalations evaluates this incidents rule escalations to be triggered if they aren't already.
-// Returns the newly evaluated escalations to be triggered or an error on database failure.
-func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation, error) {
-	if i.EscalationState == nil {
-		i.EscalationState = make(map[int64]*EscalationState)
-	}
-
+// evaluateEscalations evaluates all the escalations of the current incident's rules and returns the ones that matched.
+//
+// It also sets up a timer to re-evaluate the escalations when necessary, for example when an escalation
+// condition is based on the incident age and the incident is not old enough yet to match that condition.
+//
+// Note that this function does not trigger the matched escalations, it only evaluates them and returns
+// the ones that matched. It's the caller's responsibility to trigger them afterwards.
+func (i *Incident) evaluateEscalations(eventTime time.Time) config.RuleEntries {
 	// Escalations are reevaluated now, reset any existing timer, if there might be future time-based escalations,
 	// this function will start a new timer.
 	if i.timer != nil {
@@ -481,63 +468,59 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 	}
 
 	filterContext := &rule.EscalationFilter{IncidentAge: eventTime.Sub(i.StartedAt.Time()), IncidentSeverity: i.Severity}
+	escalations := make(config.RuleEntries)
 
-	var escalations []*rule.Escalation
-	retryAfter := rule.RetryNever
+	// EvaluateRuleEntries only returns an error if one of the provided callback hooks returns
+	// an error or the OnError handler returns false, and since none of our callbacks return an
+	// error nor false, we can safely discard the return value here.
+	_ = escalations.Evaluate(i.Resources, filterContext, i.Rules, config.EvalOptions{
+		// Prevent reevaluation of an already triggered escalation via the pre run hook.
+		OnPreEvaluate: func(escalation *rule.Escalation) bool {
+			return i.EscalationState == nil || i.EscalationState[escalation.ID] == nil
+		},
+		OnError: func(escalation *rule.Escalation, err error) bool {
+			r := i.RuntimeConfig.Rules[escalation.RuleID]
+			i.Logger.Warnw("Failed to evaluate escalation condition", zap.Object("rule", r),
+				zap.Object("escalation", escalation), zap.Error(err))
+			return true
+		},
+		OnAllConfigEvaluated: func(retryAfter time.Duration) {
+			if retryAfter != rule.RetryNever {
+				// The retryAfter duration is relative to the incident duration represented by the escalation filter,
+				// i.e. if an incident is 15m old and an escalation rule evaluates incident_age>=1h the retryAfter
+				// would contain 45m (1h - incident age (15m)). Therefore, we have to use the event time instead of
+				// the incident start time here.
+				nextEvalAt := eventTime.Add(retryAfter)
 
-	for rID := range i.Rules {
-		r := i.RuntimeConfig.Rules[rID]
-		if r == nil {
-			i.Logger.Debugw("Incident refers unknown rule, might got deleted", zap.Int64("rule_id", rID))
-			continue
-		}
+				i.Logger.Infow("Scheduling escalation reevaluation", zap.Duration("after", retryAfter), zap.Time("at", nextEvalAt))
+				i.timer = time.AfterFunc(retryAfter, func() {
+					i.Logger.Info("Reevaluating escalations")
 
-		// Check if new escalation stages are reached
-		for _, escalation := range r.Escalations {
-			if _, ok := i.EscalationState[escalation.ID]; !ok {
-				matched, err := escalation.Eval(filterContext)
-				if err != nil {
-					i.Logger.Warnw(
-						"Failed to evaluate escalation condition", zap.Object("rule", r),
-						zap.Object("escalation", escalation), zap.Error(err),
-					)
-				} else if !matched {
-					incidentAgeFilter := filterContext.ReevaluateAfter(escalation.Condition)
-					retryAfter = min(retryAfter, incidentAgeFilter)
-				} else {
-					escalations = append(escalations, escalation)
-				}
+					i.RetriggerEscalations(&event.Event{
+						Time: nextEvalAt,
+						Event: baseEv.Event{
+							Type:    baseEv.TypeIncidentAge,
+							Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt.Time())),
+						},
+					})
+				})
 			}
-		}
-	}
+		},
+	})
 
-	if retryAfter != rule.RetryNever {
-		// The retryAfter duration is relative to the incident duration represented by the escalation filter,
-		// i.e. if an incident is 15m old and an escalation rule evaluates incident_age>=1h the retryAfter would
-		// contain 45m (1h - incident age (15m)). Therefore, we have to use the event time instead of the incident
-		// start time here.
-		nextEvalAt := eventTime.Add(retryAfter)
-
-		i.Logger.Infow("Scheduling escalation reevaluation", zap.Duration("after", retryAfter), zap.Time("at", nextEvalAt))
-		i.timer = time.AfterFunc(retryAfter, func() {
-			i.Logger.Info("Reevaluating escalations")
-
-			i.RetriggerEscalations(&event.Event{
-				Time: nextEvalAt,
-				Event: baseEv.Event{
-					Type:    baseEv.TypeIncidentAge,
-					Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt.Time())),
-				},
-			})
-		})
-	}
-
-	return escalations, nil
+	return escalations
 }
 
-// triggerEscalations triggers the given escalations and generates incident history items for each of them.
-// Returns an error on database failure.
-func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, escalations []*rule.Escalation) error {
+// triggerEscalations triggers the given escalations for the current incident.
+//
+// For each escalation, it creates an [EscalationState] entry, generates an [EscalationTriggered]
+// history entry and adds the escalation recipients to the incident recipients cache. If any of these
+// operations fail, the function returns an error and stops processing further escalations.
+func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, escalations config.RuleEntries) error {
+	if i.EscalationState == nil {
+		i.EscalationState = make(map[int64]*EscalationState)
+	}
+
 	for _, escalation := range escalations {
 		r := i.RuntimeConfig.Rules[escalation.RuleID]
 		if r == nil {
