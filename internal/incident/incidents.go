@@ -103,7 +103,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 
 						escalation := i.runtimeConfig.GetRuleEscalation(state.RuleEscalationID)
 						if escalation != nil {
-							i.Rules[escalation.RuleID] = struct{}{}
+							i.Rules[escalation.RuleID] = true
 						}
 					})
 					if err != nil {

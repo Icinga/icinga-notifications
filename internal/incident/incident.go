@@ -21,7 +21,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type ruleID = int64
 type escalationID = int64
 
 type Incident struct {
@@ -34,7 +33,6 @@ type Incident struct {
 	Object *object.Object `db:"-"`
 
 	EscalationState map[escalationID]*EscalationState `db:"-"`
-	Rules           map[ruleID]struct{}               `db:"-"`
 	Recipients      map[recipient.Key]*RecipientState `db:"-"`
 
 	// timer calls RetriggerEscalations the next time any escalation could be reached on the incident.
@@ -53,6 +51,10 @@ type Incident struct {
 	logger        *zap.SugaredLogger
 	runtimeConfig *config.RuntimeConfig
 
+	// config.Evaluable encapsulates all evaluable configuration types, such as rule.Rule, rule.Entry etc.
+	// It is embedded to enable direct access to its members.
+	*config.Evaluable
+
 	sync.Mutex
 }
 
@@ -64,8 +66,8 @@ func NewIncident(
 		Object:          obj,
 		logger:          logger,
 		runtimeConfig:   runtimeConfig,
+		Evaluable:       config.NewEvaluable(),
 		EscalationState: map[escalationID]*EscalationState{},
-		Rules:           map[ruleID]struct{}{},
 		Recipients:      map[recipient.Key]*RecipientState{},
 	}
 
@@ -169,20 +171,30 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 			}
 		}
 
-		// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
-		// to be checked again, these rules already matched and stay effective for the ongoing incident.
-		err = i.evaluateRules(ctx, tx, ev.ID)
+		// Check if any (additional) rules match this object. Incident filter rules are stateful, which means that
+		// once they have been matched, they remain effective for the ongoing incident and never need to be rechecked.
+		err := i.EvaluateRules(i.runtimeConfig, i.Object, config.EvalOptions[*rule.Rule, any]{
+			OnPreEvaluate: func(r *rule.Rule) bool { return true }, // This might change in the future!
+			OnFilterMatch: func(r *rule.Rule) error { return i.onFilterRuleMatch(ctx, r, tx, ev) },
+			OnError: func(r *rule.Rule, err error) bool {
+				i.logger.Warnw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
+
+				// We don't want to stop evaluating the remaining rules just because one of them couldn't be evaluated.
+				return true
+			},
+		})
 		if err != nil {
 			return err
 		}
+
+		// Reset the evaluated escalations when leaving this function while holding the incident lock,
+		// otherwise the pointers could be invalidated in the meantime and lead to unexpected behaviour.
+		defer func() { i.RuleEntries = make(map[int64]*rule.Escalation) }()
 
 		// Re-evaluate escalations based on the newly evaluated rules.
-		escalations, err := i.evaluateEscalations(ev.Time)
-		if err != nil {
-			return err
-		}
+		i.evaluateEscalations(ev.Time)
 
-		if err := i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
+		if err := i.triggerEscalations(ctx, tx, ev); err != nil {
 			return err
 		}
 	case event.TypeAcknowledgementSet:
@@ -232,20 +244,19 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		return
 	}
 
-	escalations, err := i.evaluateEscalations(ev.Time)
-	if err != nil {
-		i.logger.Errorw("Reevaluating time-based escalations failed", zap.Error(err))
-		return
-	}
+	// Reset the evaluated escalations when leaving this function while holding the incident lock,
+	// otherwise the pointers could be invalidated in the meantime and lead to unexpected behaviour.
+	defer func() { i.RuleEntries = make(map[int64]*rule.Escalation) }()
 
-	if len(escalations) == 0 {
+	i.evaluateEscalations(ev.Time)
+	if len(i.RuleEntries) == 0 {
 		i.logger.Debug("Reevaluated escalations, no new escalations triggered")
 		return
 	}
 
 	var notifications []*NotificationEntry
 	ctx := context.Background()
-	err = i.db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
+	err := i.db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
 		err := ev.Sync(ctx, tx, i.db, i.Object.ID)
 		if err != nil {
 			return err
@@ -255,12 +266,12 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 			return fmt.Errorf("cannot insert incident event to the database: %w", err)
 		}
 
-		if err = i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
+		if err = i.triggerEscalations(ctx, tx, ev); err != nil {
 			return err
 		}
 
 		channels := make(rule.ContactChannels)
-		for _, escalation := range escalations {
+		for _, escalation := range i.RuleEntries {
 			channels.LoadFromEscalationRecipients(escalation, ev.Time, i.isRecipientNotifiable)
 		}
 
@@ -388,54 +399,38 @@ func (i *Incident) handleMuteUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.
 	return hr.Sync(ctx, i.db, tx)
 }
 
-// evaluateRules evaluates all the configured rules for this *incident.Object and
-// generates history entries for each matched rule.
-// Returns error on database failure.
-func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64) error {
-	if i.Rules == nil {
-		i.Rules = make(map[int64]struct{})
+// onFilterRuleMatch records a database entry in the `incident_rule` table that refers to the specified rule.Rule.
+// In addition, it generates a RuleMatched Incident History and synchronises it with the database.
+//
+// This function should only be used as an OnFilterMatch handler that is passed to the Evaluable#EvaluateRules
+// function, which only fires when the event rule filter matches on the current Incident Object.
+//
+// Returns an error if it fails to persist the database entries.
+func (i *Incident) onFilterRuleMatch(ctx context.Context, r *rule.Rule, tx *sqlx.Tx, ev *event.Event) error {
+	i.logger.Infow("Rule matches", zap.Object("rule", r))
+
+	if err := i.AddRuleMatched(ctx, tx, r); err != nil {
+		i.logger.Errorw("Failed to upsert incident rule", zap.Object("rule", r), zap.Error(err))
+		return err
 	}
 
-	for _, r := range i.runtimeConfig.Rules {
-		if _, ok := i.Rules[r.ID]; !ok {
-			matched, err := r.Eval(i.Object)
-			if err != nil {
-				i.logger.Warnw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
-			}
-
-			if err != nil || !matched {
-				continue
-			}
-
-			i.Rules[r.ID] = struct{}{}
-			i.logger.Infow("Rule matches", zap.Object("rule", r))
-
-			err = i.AddRuleMatched(ctx, tx, r)
-			if err != nil {
-				i.logger.Errorw("Failed to upsert incident rule", zap.Object("rule", r), zap.Error(err))
-				return err
-			}
-
-			hr := &HistoryRow{
-				IncidentID: i.Id,
-				Time:       types.UnixMilli(time.Now()),
-				EventID:    types.MakeInt(eventID, types.TransformZeroIntToNull),
-				RuleID:     types.MakeInt(r.ID, types.TransformZeroIntToNull),
-				Type:       RuleMatched,
-			}
-			if err := hr.Sync(ctx, i.db, tx); err != nil {
-				i.logger.Errorw("Failed to insert rule matched incident history", zap.Object("rule", r), zap.Error(err))
-				return err
-			}
-		}
+	hr := &HistoryRow{
+		IncidentID: i.Id,
+		Time:       types.UnixMilli(time.Now()),
+		EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
+		RuleID:     types.MakeInt(r.ID, types.TransformZeroIntToNull),
+		Type:       RuleMatched,
+	}
+	if err := hr.Sync(ctx, i.db, tx); err != nil {
+		i.logger.Errorw("Failed to insert rule matched incident history", zap.Object("rule", r), zap.Error(err))
+		return err
 	}
 
 	return nil
 }
 
 // evaluateEscalations evaluates this incidents rule escalations to be triggered if they aren't already.
-// Returns the newly evaluated escalations to be triggered or an error on database failure.
-func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation, error) {
+func (i *Incident) evaluateEscalations(eventTime time.Time) {
 	if i.EscalationState == nil {
 		i.EscalationState = make(map[int64]*EscalationState)
 	}
@@ -450,61 +445,51 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 
 	filterContext := &rule.EscalationFilter{IncidentAge: eventTime.Sub(i.StartedAt.Time()), IncidentSeverity: i.Severity}
 
-	var escalations []*rule.Escalation
-	retryAfter := rule.RetryNever
-
-	for rID := range i.Rules {
-		r := i.runtimeConfig.Rules[rID]
-		if r == nil {
-			i.logger.Debugw("Incident refers unknown rule, might got deleted", zap.Int64("rule_id", rID))
-			continue
-		}
-
-		// Check if new escalation stages are reached
-		for _, escalation := range r.Escalations {
-			if _, ok := i.EscalationState[escalation.ID]; !ok {
-				matched, err := escalation.Eval(filterContext)
-				if err != nil {
-					i.logger.Warnw(
-						"Failed to evaluate escalation condition", zap.Object("rule", r),
-						zap.Object("escalation", escalation), zap.Error(err),
-					)
-				} else if !matched {
-					incidentAgeFilter := filterContext.ReevaluateAfter(escalation.Condition)
-					retryAfter = min(retryAfter, incidentAgeFilter)
-				} else {
-					escalations = append(escalations, escalation)
-				}
+	// EvaluateRuleEntries only returns an error if one of the provided callback hooks returns
+	// an error or the OnError handler returns false, and since none of our callbacks return an
+	// error nor false, we can safely discard the return value here.
+	_ = i.EvaluateRuleEntries(i.runtimeConfig, filterContext, config.EvalOptions[*rule.Escalation, any]{
+		// Prevent reevaluation of an already triggered escalation via the pre run hook.
+		OnPreEvaluate: func(escalation *rule.Escalation) bool { return i.EscalationState[escalation.ID] == nil },
+		OnError: func(escalation *rule.Escalation, err error) bool {
+			r := i.runtimeConfig.Rules[escalation.RuleID]
+			i.logger.Warnw("Failed to evaluate escalation condition", zap.Object("rule", r),
+				zap.Object("escalation", escalation), zap.Error(err))
+			return true
+		},
+		OnAllConfigEvaluated: func(result any) {
+			retryAfter, ok := result.(time.Duration)
+			if !ok {
+				i.logger.Errorw("Unexpected result type from escalation evaluation", zap.Any("result", result))
+				return
 			}
-		}
-	}
 
-	if retryAfter != rule.RetryNever {
-		// The retryAfter duration is relative to the incident duration represented by the escalation filter,
-		// i.e. if an incident is 15m old and an escalation rule evaluates incident_age>=1h the retryAfter would
-		// contain 45m (1h - incident age (15m)). Therefore, we have to use the event time instead of the incident
-		// start time here.
-		nextEvalAt := eventTime.Add(retryAfter)
+			if result != rule.RetryNever {
+				// The retryAfter duration is relative to the incident duration represented by the escalation filter,
+				// i.e. if an incident is 15m old and an escalation rule evaluates incident_age>=1h the retryAfter
+				// would contain 45m (1h - incident age (15m)). Therefore, we have to use the event time instead of
+				// the incident start time here.
+				nextEvalAt := eventTime.Add(retryAfter)
 
-		i.logger.Infow("Scheduling escalation reevaluation", zap.Duration("after", retryAfter), zap.Time("at", nextEvalAt))
-		i.timer = time.AfterFunc(retryAfter, func() {
-			i.logger.Info("Reevaluating escalations")
+				i.logger.Infow("Scheduling escalation reevaluation", zap.Duration("after", retryAfter), zap.Time("at", nextEvalAt))
+				i.timer = time.AfterFunc(retryAfter, func() {
+					i.logger.Info("Reevaluating escalations")
 
-			i.RetriggerEscalations(&event.Event{
-				Time:    nextEvalAt,
-				Type:    event.TypeIncidentAge,
-				Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt.Time())),
-			})
-		})
-	}
-
-	return escalations, nil
+					i.RetriggerEscalations(&event.Event{
+						Time:    nextEvalAt,
+						Type:    event.TypeIncidentAge,
+						Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt.Time())),
+					})
+				})
+			}
+		},
+	})
 }
 
 // triggerEscalations triggers the given escalations and generates incident history items for each of them.
 // Returns an error on database failure.
-func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, escalations []*rule.Escalation) error {
-	for _, escalation := range escalations {
+func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
+	for _, escalation := range i.RuleEntries {
 		r := i.runtimeConfig.Rules[escalation.RuleID]
 		if r == nil {
 			i.logger.Debugw("Incident refers unknown rule, might got deleted", zap.Int64("rule_id", escalation.RuleID))
