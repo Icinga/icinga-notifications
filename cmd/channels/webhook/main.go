@@ -13,7 +13,9 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
+	"github.com/icinga/icinga-go-library/config"
 	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-notifications/internal"
@@ -25,16 +27,24 @@ func main() {
 }
 
 type Webhook struct {
-	Method              string `json:"method"`
-	URLTemplate         string `json:"url_template"`
-	RequestBodyTemplate string `json:"request_body_template"`
-	ResponseStatusCodes string `json:"response_status_codes"`
+	Method                 string `json:"method"`
+	URLTemplate            string `json:"url_template"`
+	RequestHeadersTemplate string `json:"request_headers_template"`
+	RequestBodyTemplate    string `json:"request_body_template"`
+	ResponseStatusCodes    string `json:"response_status_codes"`
+	TlsConfig              bool   `json:"tls_config"`
+	TlsServerName          string `json:"tls_server_name"`
+	TlsCert                string `json:"tls_cert"`
+	TlsKey                 string `json:"tls_key"`
+	TlsCa                  string `json:"tls_ca"`
+	TlsInsecure            bool   `json:"tls_insecure"`
 
-	tmplUrl         *template.Template
-	tmplRequestBody *template.Template
-
-	respStatusCodes []int
-	mu              sync.Mutex // Protects access to the Webhook struct fields during concurrent RPC calls.
+	tmplUrl            *template.Template
+	tmplRequestHeaders map[string]*template.Template
+	tmplRequestBody    *template.Template
+	respStatusCodes    []int
+	httpTransport      http.RoundTripper
+	mu                 sync.Mutex // Protects access to the Webhook struct fields during concurrent RPC calls.
 
 	// rpcCtx and rpcEp are used to make RPC calls back to Icinga Notifications.
 	rpcCtx context.Context
@@ -77,8 +87,20 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 			Required: true,
 		},
 		{
+			Name: "request_headers_template",
+			Type: "text",
+			Label: map[string]string{
+				"en_US": "Request Header Template",
+				"de_DE": "Request Header-Template",
+			},
+			Help: map[string]string{
+				"en_US": "Line-separated 'HTTP-HEADER:TEMPLATE' entries, where TEMPLATE is a Go template over the current plugin.NotificationRequest.",
+				"de_DE": "Zeilengetrennte 'HTTP-HEADER:TEMPLATE' Einträge, wobei TEMPLATE ein Go-Template über das zu verarbeitende plugin.NotificationRequest ist.",
+			},
+		},
+		{
 			Name: "request_body_template",
-			Type: "string",
+			Type: "text",
 			Label: map[string]string{
 				"en_US": "Request Body Template",
 				"de_DE": "Anfragedaten-Template",
@@ -102,6 +124,85 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 			},
 			Default:  "200",
 			Required: true,
+		},
+		{
+			Name: "tls_config",
+			Type: "bool",
+			Label: map[string]string{
+				"en_US": "TLS Config",
+				"de_DE": "TLS-Einstellungen",
+			},
+			Help: map[string]string{
+				"en_US": "Customized TLS configuration.",
+				"de_DE": "TLS-Einstellungen anpassen.",
+			},
+			Children: []plugin.ChildOption{
+				{
+					Name: "tls_server_name",
+					Type: "string",
+					Label: map[string]string{
+						"en_US": "TLS Server Name",
+						"de_DE": "TLS-Servername",
+					},
+					Help: map[string]string{
+						"en_US": "Use this server name for the TLS handshake instead of those from the URL.",
+						"de_DE": "Verwende diesen Servernamen anstelle den aus der URL für den TLS-Handshake.",
+					},
+					ParentValues: []any{true},
+				},
+				{
+					Name: "tls_cert",
+					Type: "text",
+					Label: map[string]string{
+						"en_US": "TLS Client Certificate",
+						"de_DE": "TLS Client-Zertifikat",
+					},
+					Help: map[string]string{
+						"en_US": "If set, use this client certificate. Either a file path to a PEM file or a PEM block. Requires TLS Client Key.",
+						"de_DE": "Falls gesetzt, verwende dieses Client-Zertifikat. Entweder ein Dateipfad zu einer PEM-Datei oder ein PEM-Block. Benötigt TLS Client-Schlüssel.",
+					},
+					ParentValues: []any{true},
+				},
+				{
+					Name: "tls_key",
+					Type: "text",
+					Label: map[string]string{
+						"en_US": "TLS Client Key",
+						"de_DE": "TLS Client-Schlüssel",
+					},
+					Help: map[string]string{
+						"en_US": "If set, use this client key. Either a file path to a PEM file or a PEM block.",
+						"de_DE": "Falls gesetzt, verwende diesen Client-Schlüssel. Entweder ein Dateipfad zu einer PEM-Datei oder ein PEM-Block.",
+					},
+					ParentValues: []any{true},
+				},
+				{
+					Name: "tls_ca",
+					Type: "text",
+					Label: map[string]string{
+						"en_US": "TLS CA Certificate",
+						"de_DE": "TLS CA-Zertifikat",
+					},
+					Help: map[string]string{
+						"en_US": "If set, use a custom CA instead of the OS CA store. Either a file path to a PEM file or a PEM block.",
+						"de_DE": "Falls gesetzt, verwende diese CA anstelle des OS CA-Stores. Entweder ein Dateipfad zu einer PEM-Datei oder ein PEM-Block.",
+					},
+					ParentValues: []any{true},
+				},
+				{
+					Name: "tls_insecure",
+					Type: "bool",
+					Label: map[string]string{
+						"en_US": "No TLS Verification",
+						"de_DE": "Keine TLS-Verifizierung",
+					},
+					Help: map[string]string{
+						"en_US": "Skip TLS verification. This might be insecure!",
+						"de_DE": "Führe keine TLS-Verifizierung durch. Dies vermag unsicher zu sein!",
+					},
+					ParentValues: []any{true},
+				},
+			},
 		},
 	}
 
@@ -141,6 +242,31 @@ func (ch *Webhook) SetConfig(jsonStr json.RawMessage) error {
 		return fmt.Errorf("cannot parse URL template: %w", err)
 	}
 
+	tmpWh.tmplRequestHeaders = make(map[string]*template.Template)
+	for reqHeaderEntry := range strings.SplitSeq(tmpWh.RequestHeadersTemplate, "\n") {
+		reqHeaderEntry = strings.TrimSpace(reqHeaderEntry)
+		if reqHeaderEntry == "" {
+			continue
+		}
+
+		key, tmplValue, found := strings.Cut(reqHeaderEntry, ":")
+		if !found {
+			return fmt.Errorf("cannot process invalid Request Header pair %q", reqHeaderEntry)
+		}
+
+		key, tmplValue = strings.TrimSpace(key), strings.TrimSpace(tmplValue)
+		if key == "" {
+			return fmt.Errorf("cannot process Request Header pair %q with an empty key", reqHeaderEntry)
+		}
+
+		tmpl, err := template.New("request_header_" + key).Funcs(tmplFuncs).Parse(tmplValue)
+		if err != nil {
+			return fmt.Errorf("cannot parse Request Header pair %q as a template: %w", reqHeaderEntry, err)
+		}
+
+		tmpWh.tmplRequestHeaders[key] = tmpl
+	}
+
 	tmpWh.tmplRequestBody, err = template.New("request_body").Funcs(tmplFuncs).Parse(tmpWh.RequestBodyTemplate)
 	if err != nil {
 		return fmt.Errorf("cannot parse Request Body template: %w", err)
@@ -156,17 +282,46 @@ func (ch *Webhook) SetConfig(jsonStr json.RawMessage) error {
 		tmpWh.respStatusCodes[i] = respStatusCode
 	}
 
+	if tmpWh.TlsConfig {
+		baseTlsConf := config.TLS{
+			Enable:   true,
+			Cert:     tmpWh.TlsCert,
+			Key:      tmpWh.TlsKey,
+			Ca:       tmpWh.TlsCa,
+			Insecure: tmpWh.TlsInsecure,
+		}
+		tlsConf, err := baseTlsConf.MakeConfig(tmpWh.TlsServerName)
+		if err != nil {
+			return fmt.Errorf("cannot create TLS configuration: %w", err)
+		}
+
+		httpTransport := http.DefaultTransport.(*http.Transport).Clone() //nolint:forcetypeassert
+		httpTransport.TLSClientConfig = tlsConf
+		tmpWh.httpTransport = httpTransport
+	} else {
+		tmpWh.httpTransport = http.DefaultTransport
+	}
+
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
 
 	ch.Method = tmpWh.Method
 	ch.URLTemplate = tmpWh.URLTemplate
+	ch.RequestHeadersTemplate = tmpWh.RequestHeadersTemplate
 	ch.RequestBodyTemplate = tmpWh.RequestBodyTemplate
 	ch.ResponseStatusCodes = tmpWh.ResponseStatusCodes
+	ch.TlsConfig = tmpWh.TlsConfig
+	ch.TlsServerName = tmpWh.TlsServerName
+	ch.TlsCert = tmpWh.TlsCert
+	ch.TlsKey = tmpWh.TlsKey
+	ch.TlsCa = tmpWh.TlsCa
+	ch.TlsInsecure = tmpWh.TlsInsecure
 
 	ch.tmplUrl = tmpWh.tmplUrl
+	ch.tmplRequestHeaders = tmpWh.tmplRequestHeaders
 	ch.tmplRequestBody = tmpWh.tmplRequestBody
 	ch.respStatusCodes = tmpWh.respStatusCodes
+	ch.httpTransport = tmpWh.httpTransport
 
 	return nil
 }
@@ -175,8 +330,13 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
 	ch.mu.Lock()
 	method := ch.Method
 	tmplUrl := ch.tmplUrl
+	tmplRequestHeaders := ch.tmplRequestHeaders
 	tmplRequestBody := ch.tmplRequestBody
 	respStatusCodes := ch.respStatusCodes
+	httpClient := &http.Client{
+		Transport: ch.httpTransport,
+		Timeout:   10 * time.Second,
+	}
 	ch.mu.Unlock()
 
 	var urlBuff, reqBodyBuff, respBuffer bytes.Buffer
@@ -191,7 +351,17 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
 	if err != nil {
 		return err
 	}
-	httpResp, err := http.DefaultClient.Do(httpReq) // #nosec G704 -- no SSRF, trusted user input
+
+	httpReq.Header.Set("User-Agent", "icinga-notifications-webhook/"+internal.Version.Version)
+	for key, tmplValue := range tmplRequestHeaders {
+		var valueBuff bytes.Buffer
+		if err := tmplValue.Execute(&valueBuff, req); err != nil {
+			return fmt.Errorf("cannot execute Request Header template for key %q: %w", key, err)
+		}
+		httpReq.Header.Set(key, valueBuff.String())
+	}
+
+	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return err
 	}
