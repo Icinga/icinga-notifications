@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -12,8 +14,10 @@ import (
 	"sync"
 	"text/template"
 
+	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-notifications/internal"
+	"go.uber.org/zap/zapcore"
 )
 
 func main() {
@@ -31,6 +35,16 @@ type Webhook struct {
 
 	respStatusCodes []int
 	mu              sync.Mutex // Protects access to the Webhook struct fields during concurrent RPC calls.
+
+	// rpcCtx and rpcEp are used to make RPC calls back to Icinga Notifications.
+	rpcCtx context.Context
+	rpcEp  *jsonrpc.Endpoint
+}
+
+// ReceiveEndpoint implements the [plugin.RPCEndpointReceiver] interface.
+func (ch *Webhook) ReceiveEndpoint(ctx context.Context, ep *jsonrpc.Endpoint) {
+	ch.rpcCtx = ctx
+	ch.rpcEp = ep
 }
 
 func (ch *Webhook) GetInfo() *plugin.Info {
@@ -165,7 +179,7 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
 	respStatusCodes := ch.respStatusCodes
 	ch.mu.Unlock()
 
-	var urlBuff, reqBodyBuff bytes.Buffer
+	var urlBuff, reqBodyBuff, respBuffer bytes.Buffer
 	if err := tmplUrl.Execute(&urlBuff, req); err != nil {
 		return fmt.Errorf("cannot execute URL template: %w", err)
 	}
@@ -181,10 +195,29 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
 	if err != nil {
 		return err
 	}
-	_, _ = io.Copy(io.Discard, httpResp.Body)
-	_ = httpResp.Body.Close()
+
+	defer func() {
+		_, _ = io.Copy(io.Discard, httpResp.Body)
+		_ = httpResp.Body.Close()
+	}()
 
 	if !slices.Contains(respStatusCodes, httpResp.StatusCode) {
+		// Limit response to 1 MiB as it will be logged; rest is going to be discarded.
+		limitedRespReader := io.LimitReader(httpResp.Body, 1024*1024)
+		if _, err := io.Copy(&respBuffer, limitedRespReader); err != nil {
+			return fmt.Errorf("cannot read response: %w", err)
+		}
+
+		err := ch.rpcEp.NotifyLog(
+			ch.rpcCtx,
+			zapcore.ErrorLevel,
+			"Received unexpected HTTP Response Code",
+			"status_code", httpResp.StatusCode,
+			"body", respBuffer.String())
+		if err != nil {
+			slog.ErrorContext(ch.rpcCtx, "Failed to log HTTP response body", "error", err)
+		}
+
 		return fmt.Errorf("unaccepted HTTP response status code %d not in %v",
 			httpResp.StatusCode, respStatusCodes)
 	}
