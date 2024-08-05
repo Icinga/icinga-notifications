@@ -10,9 +10,9 @@ import (
 	"net/url"
 )
 
-// makeNotificationRequest generates a *plugin.NotificationRequest for the provided event.
+// MakeNotificationRequest generates a *plugin.NotificationRequest for the provided event.
 // Fails fatally when fails to parse the Icinga Web 2 url.
-func (i *Incident) makeNotificationRequest(ev *event.Event) *plugin.NotificationRequest {
+func (i *Incident) MakeNotificationRequest(ev *event.Event) *plugin.NotificationRequest {
 	baseUrl, err := url.Parse(daemon.Config().Icingaweb2URL)
 	if err != nil {
 		i.Logger.Panicw("Failed to parse Icinga Web 2 URL", zap.String("url", daemon.Config().Icingaweb2URL), zap.Error(err))

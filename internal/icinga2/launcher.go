@@ -13,7 +13,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
-	"github.com/icinga/icinga-notifications/internal/incident"
+	"github.com/icinga/icinga-notifications/internal/events"
 	"go.uber.org/zap"
 	"net/http"
 	"sync"
@@ -129,7 +129,7 @@ func (launcher *Launcher) launch(src *config.Source) {
 		CallbackFn: func(ev *event.Event) {
 			l := logger.With(zap.Stringer("event", ev))
 
-			err := incident.ProcessEvent(subCtx, launcher.Db, launcher.Logs, launcher.RuntimeConfig, ev)
+			err := events.Process(subCtx, launcher.Db, launcher.Logs, launcher.RuntimeConfig, ev)
 			switch {
 			case errors.Is(err, event.ErrSuperfluousStateChange):
 				l.Debugw("Stopped processing event with superfluous state change", zap.Error(err))
