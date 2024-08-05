@@ -40,15 +40,15 @@ type EvalOptions[T, U any] struct {
 // Evaluable manages an evaluable config types in a centralised and structured way.
 // An evaluable config is a config type that allows to evaluate filter expressions in some way.
 type Evaluable struct {
-	Rules       map[int64]bool             `db:"-"`
-	RuleEntries map[int64]*rule.Escalation `db:"-" json:"-"`
+	Rules       map[int64]bool        `db:"-"`
+	RuleEntries map[int64]*rule.Entry `db:"-" json:"-"`
 }
 
 // NewEvaluable returns a fully initialised and ready to use Evaluable type.
 func NewEvaluable() *Evaluable {
 	return &Evaluable{
 		Rules:       make(map[int64]bool),
-		RuleEntries: make(map[int64]*rule.Escalation),
+		RuleEntries: make(map[int64]*rule.Entry),
 	}
 }
 
@@ -95,7 +95,7 @@ func (e *Evaluable) EvaluateRules(r *RuntimeConfig, filterable filter.Filterable
 // possible special cases.
 //
 // Returns an error if any of the provided callbacks return an error, otherwise always nil.
-func (e *Evaluable) EvaluateRuleEntries(r *RuntimeConfig, filterable filter.Filterable, options EvalOptions[*rule.Escalation, any]) error {
+func (e *Evaluable) EvaluateRuleEntries(r *RuntimeConfig, filterable filter.Filterable, options EvalOptions[*rule.Entry, any]) error {
 	retryAfter := rule.RetryNever
 
 	for ruleID := range e.Rules {
@@ -105,7 +105,7 @@ func (e *Evaluable) EvaluateRuleEntries(r *RuntimeConfig, filterable filter.Filt
 			continue
 		}
 
-		for _, entry := range ru.Escalations {
+		for _, entry := range ru.Entries {
 			if options.OnPreEvaluate != nil && !options.OnPreEvaluate(entry) {
 				continue
 			}

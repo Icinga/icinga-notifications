@@ -11,7 +11,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/utils"
-	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -98,10 +97,10 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 						i.EscalationState[state.RuleEscalationID] = state
 
 						// Restore the incident rule matching the current escalation state if any.
-						i.runtimeConfig.RLock()
-						defer i.runtimeConfig.RUnlock()
+						i.RuntimeConfig.RLock()
+						defer i.RuntimeConfig.RUnlock()
 
-						escalation := i.runtimeConfig.GetRuleEscalation(state.RuleEscalationID)
+						escalation := i.RuntimeConfig.GetRuleEntry(state.RuleEscalationID)
 						if escalation != nil {
 							i.Rules[escalation.RuleID] = true
 						}
@@ -121,7 +120,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 					for _, i := range incidentsById {
 						i.Object = object.GetFromCache(i.ObjectID)
 						i.isMuted = i.Object.IsMuted()
-						i.logger = logger.With(zap.String("object", i.Object.DisplayName()),
+						i.Logger = logger.With(zap.String("object", i.Object.DisplayName()),
 							zap.String("incident", i.String()))
 
 						currentIncidentsMu.Lock()
@@ -195,68 +194,4 @@ func GetCurrentIncidents() map[int64]*Incident {
 		m[incident.ID] = incident
 	}
 	return m
-}
-
-// ProcessEvent from an event.Event.
-//
-// This function first gets this Event's object.Object and its incident.Incident. Then, after performing some safety
-// checks, it calls the Incident.ProcessEvent method.
-//
-// The returned error might be wrapped around event.ErrSuperfluousStateChange.
-func ProcessEvent(
-	ctx context.Context,
-	db *database.DB,
-	logs *logging.Logging,
-	runtimeConfig *config.RuntimeConfig,
-	ev *event.Event,
-) error {
-	var wasObjectMuted bool
-	if obj := object.GetFromCache(object.ID(ev.SourceId, ev.Tags)); obj != nil {
-		wasObjectMuted = obj.IsMuted()
-	}
-
-	obj, err := object.FromEvent(ctx, db, ev)
-	if err != nil {
-		return fmt.Errorf("cannot sync event object: %w", err)
-	}
-
-	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
-	currentIncident, err := GetCurrent(
-		ctx,
-		db,
-		obj,
-		logs.GetChildLogger("incident"),
-		runtimeConfig,
-		createIncident)
-	if err != nil {
-		return fmt.Errorf("cannot get current incident for %q: %w", obj.DisplayName(), err)
-	}
-
-	if currentIncident == nil {
-		switch {
-		case ev.Severity == event.SeverityNone:
-			// We need to ignore superfluous mute and unmute events here, as would be the case with an existing
-			// incident, otherwise the event stream catch-up phase will generate useless events after each
-			// Icinga 2 reload and overwhelm the database with the very same mute/unmute events.
-			if wasObjectMuted && ev.Type == event.TypeMute {
-				return event.ErrSuperfluousMuteUnmuteEvent
-			} else if !wasObjectMuted && ev.Type == event.TypeUnmute {
-				return event.ErrSuperfluousMuteUnmuteEvent
-			}
-
-			// There is no active incident, but the event appears to be relevant, so try to persist it in the DB.
-			err = utils.RunInTx(ctx, db, func(tx *sqlx.Tx) error { return ev.Sync(ctx, tx, db, obj.ID) })
-			if err != nil {
-				return errors.New("cannot sync non-state event to the database")
-			}
-
-			return nil
-		case ev.Severity != event.SeverityOK:
-			panic(fmt.Sprintf("cannot process event %v with a non-OK state %v without a known incident", ev, ev.Severity))
-		default:
-			return fmt.Errorf("%w: ok state event from source %d", event.ErrSuperfluousStateChange, ev.SourceId)
-		}
-	}
-
-	return currentIncident.ProcessEvent(ctx, ev)
 }
