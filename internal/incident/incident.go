@@ -80,6 +80,12 @@ func (i *Incident) String() string {
 	return fmt.Sprintf("#%d", i.ID)
 }
 
+// RefreshIsMuted refreshes the current incident isMuted flag.
+// Please note that you always have to call this method while holding the incident lock.
+func (i *Incident) RefreshIsMuted() {
+	i.isMuted = i.Object.IsMuted()
+}
+
 func (i *Incident) HasManager() bool {
 	for recipientKey, state := range i.Recipients {
 		if i.RuntimeConfig.GetRecipient(recipientKey) == nil {
@@ -106,14 +112,16 @@ func (i *Incident) IsNotifiable(role ContactRole) bool {
 	return role > RoleRecipient
 }
 
-// ProcessEvent processes the given event for the current incident in an own transaction.
-func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
-	i.Lock()
-	defer i.Unlock()
-
-	i.RuntimeConfig.RLock()
-	defer i.RuntimeConfig.RUnlock()
-
+// ProcessEvent processes the given event for the current incident.
+//
+// ProcessEvent will perform all the necessary actions for the current incident and execute any database queries
+// within the provided transaction. However, this method does not trigger any notifications by itself and must be
+// generated/triggered manually via the GenerateNotifications method.
+//
+// Please note that you always have to call this method while holding the incident and config.RuntimeConfig lock.
+//
+// Returns an error when it fails to successfully process the specified event.
+func (i *Incident) ProcessEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
 	// These event types are not like the others used to mute an object/incident, such as DowntimeStart, which
 	// uniquely identify themselves why an incident is being muted, but are rather super generic types, and as
 	// such, we are ignoring superfluous ones that don't have any effect on that incident.
@@ -125,22 +133,9 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		return event.ErrSuperfluousMuteUnmuteEvent
 	}
 
-	tx, err := i.DB.BeginTxx(ctx, nil)
-	if err != nil {
-		i.Logger.Errorw("Cannot start a db transaction", zap.Error(err))
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if err = ev.Sync(ctx, tx, i.DB, i.Object.ID); err != nil {
-		i.Logger.Errorw("Failed to insert event and fetch its ID", zap.String("event", ev.String()), zap.Error(err))
-		return err
-	}
-
 	isNew := i.StartedAt.Time().IsZero()
 	if isNew {
-		err = i.processIncidentOpenedEvent(ctx, tx, ev)
-		if err != nil {
+		if err := i.processIncidentOpenedEvent(ctx, tx, ev); err != nil {
 			return err
 		}
 
@@ -164,9 +159,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 			return err
 		}
 
-		if err := i.triggerEscalations(ctx, tx, ev, i.evaluateEscalations(ev.Time)); err != nil {
-			return err
-		}
+		return i.triggerEscalations(ctx, tx, ev, i.evaluateEscalations(ev.Time))
 	case baseEv.TypeAcknowledgementSet:
 		if err := i.processAcknowledgementEvent(ctx, tx, ev); err != nil {
 			if errors.Is(err, errSuperfluousAckEvent) {
@@ -179,20 +172,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 	}
 
-	notifications, err := i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
-	if err != nil {
-		return err
-	}
-
-	if err = tx.Commit(); err != nil {
-		i.Logger.Errorw("Cannot commit db transaction", zap.Error(err))
-		return err
-	}
-
-	// We've just committed the DB transaction and can safely update the incident muted flag.
-	i.isMuted = i.Object.IsMuted()
-
-	return notification.NotifyContacts(ctx, &i.Resources, i.MakeNotificationRequest(ev), notifications)
+	return nil
 }
 
 // RetriggerEscalations tries to re-evaluate the escalations and notify contacts.
@@ -236,7 +216,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 			channels.LoadFromEntryRecipients(escalation, ev.Time, i.isRecipientNotifiable)
 		}
 
-		notifications, err = i.generateNotifications(ctx, tx, ev, channels)
+		notifications, err = i.GenerateNotifications(ctx, tx, ev, channels)
 		return err
 	})
 	if err != nil {
@@ -605,8 +585,8 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 	return nil
 }
 
-// getRecipientsChannel returns all the configured channels of the current incident and escalation recipients.
-func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
+// GetRecipientsChannel returns all the configured channels of the current incident and escalation recipients.
+func (i *Incident) GetRecipientsChannel(t time.Time) rule.ContactChannels {
 	contactChs := make(rule.ContactChannels)
 	// Load all escalations recipients channels
 	for escalationID := range i.EscalationState {

@@ -114,3 +114,25 @@ func ParseFlagsAndConfig() {
 		utils.PrintErrorThenExit(err, ExitFailure)
 	}
 }
+
+// InitTestConfig initialises the global daemon config instance and applies the defaults.
+// This should be used for unit tests only.
+func InitTestConfig() error {
+	daemonConfig = new(ConfigFile)
+	if err := defaults.Set(daemonConfig); err != nil {
+		return err
+	}
+	if err := defaults.Set(&daemonConfig.Database); err != nil {
+		return err
+	}
+	if err := defaults.Set(&daemonConfig.Logging); err != nil {
+		return err
+	}
+
+	parsedUrl, err := url.Parse("http://localhost/icingaweb2")
+	if err != nil {
+		return fmt.Errorf("can't parse test icingaweb2-url: %w", err)
+	}
+	daemonConfig.IcingaWeb2UrlParsed = parsedUrl
+	return nil
+}

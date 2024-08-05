@@ -125,12 +125,12 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 	return err
 }
 
-// generateNotifications generates incident notification histories of the given recipients.
+// GenerateNotifications generates incident notification histories of the given recipients.
 //
 // This function will just insert notification.StateSuppressed incident histories and return an empty slice if
 // the current Object is muted, otherwise a slice of pending *NotificationEntry(ies) that can be used to update
 // the corresponding histories after the actual notifications have been sent out.
-func (i *Incident) generateNotifications(
+func (i *Incident) GenerateNotifications(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	ev *event.Event,
