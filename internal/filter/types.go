@@ -5,15 +5,15 @@ import (
 )
 
 // LogicalOp is a type used for grouping the logical operators of a filter string.
-type LogicalOp string
+type LogicalOp byte
 
 const (
 	// None represents a filter chain type that matches when none of its ruleset matches.
-	None LogicalOp = "!"
+	None LogicalOp = '!'
 	// All represents a filter chain type that matches when all of its ruleset matches.
-	All LogicalOp = "&"
+	All LogicalOp = '&'
 	// Any represents a filter chain type that matches when at least one of its ruleset matches.
-	Any LogicalOp = "|"
+	Any LogicalOp = '|'
 )
 
 // Chain is a filter type that wraps other filter rules and itself.
