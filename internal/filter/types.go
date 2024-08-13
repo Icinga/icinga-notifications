@@ -18,7 +18,6 @@ const (
 
 // Chain is a filter type that wraps other filter rules and itself.
 // Therefore, it implements the Filter interface to allow it to be part of its ruleset.
-// It supports also adding and popping filter rules individually.
 type Chain struct {
 	op    LogicalOp // The filter chain operator to be used to evaluate the rules
 	rules []Filter
