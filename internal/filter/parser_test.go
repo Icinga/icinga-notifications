@@ -492,3 +492,30 @@ func FuzzParser(f *testing.F) {
 		}
 	})
 }
+
+func BenchmarkParser(b *testing.B) {
+	expr := "foo=bar&bar!=foo&column=value"
+	// Add more complexity to the expression by nesting conditions
+	for i := 0; i < 100; i++ {
+		switch i % 4 {
+		case 0:
+			expr = "(" + expr + "&col" + string(rune('A'+(i%26))) + "=val" + string(rune('a'+(i%26))) + ")"
+		case 1:
+			expr = "!(" + expr + "|col" + string(rune('A'+(i%26))) + "!=val" + string(rune('a'+(i%26))) + ")"
+		case 2:
+			expr = "(" + expr + "|col" + string(rune('A'+(i%26))) + ">=val" + string(rune('a'+(i%26))) + ")"
+		case 3:
+			expr = "!(" + expr + "&col" + string(rune('A'+(i%26))) + "<=val" + string(rune('a'+(i%26))) + ")"
+		}
+	}
+	expr += "&" + strings.Repeat("x~y*|", 50) + "z~*w*|!((foo=bar|baz!=qux)&(!(alpha=beta)|gamma<=delta))"
+	b.Logf("Benchmarking filter expression: %s", expr)
+
+	b.ReportAllocs() // Report allocations statistics
+
+	for b.Loop() {
+		if _, err := Parse(expr); err != nil {
+			b.Fatalf("Failed to parse filter expression: %s", err)
+		}
+	}
+}
