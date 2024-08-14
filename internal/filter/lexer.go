@@ -1,4 +1,4 @@
-//go:generate goyacc -v parser.output -o parser.go parser.y
+//go:generate goyacc -l -v parser.output -o parser.go parser.y
 
 package filter
 
