@@ -1,8 +1,7 @@
 name: Go
 
 on:
-  push:
-    branches: [ main ]
+  push: {}
   pull_request: {}
 
 permissions:
