@@ -269,8 +269,22 @@ func (o *Object) EvalExists(key string) bool {
 func ID(source int64, tags map[string]string) types.Binary {
 	h := sha256.New()
 
+	// The following conversion of an i <- int64\uint64 should not be an overflow in this case.
+	//
+	// First, some IDs should not be able to be negative as their PostgreSQL type is unsigned as well. More important,
+	// we are not interested in the number itself, but its binary representation. So the overflow is of no issue.
+	//
+	// Take the following example of a negative int64 number.
+	//
+	//	var x = int64(-100)
+	//	var xu = uint64(x)
+	//	var xui  = int64(xu)
+	// 	fmt.Printf("%[1]d,%[1]x\t%[2]d,%[2]x\t%[3]d,%[3]x", x, xu, xui)
+	//
+	// Resulting in "100,-64  18446744073709551516,ffffffffffffff9c  -100,-64", effectively the same number.
+
 	sourceBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(sourceBytes, uint64(source))
+	binary.BigEndian.PutUint64(sourceBytes, uint64(source)) //nolint:gosec //  G115, comment above
 	h.Write(sourceBytes)
 
 	type KV struct {
