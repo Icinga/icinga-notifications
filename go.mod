@@ -3,7 +3,7 @@ module github.com/icinga/icinga-notifications
 go 1.22
 
 require (
-	github.com/creasty/defaults v1.7.0
+	github.com/creasty/defaults v1.8.0
 	github.com/emersion/go-sasl v0.0.0-20231106173351-e73c9f7bad43
 	github.com/emersion/go-smtp v0.21.3
 	github.com/google/uuid v1.6.0
