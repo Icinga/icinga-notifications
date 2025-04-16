@@ -115,7 +115,7 @@ func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 		return fmt.Errorf("error while sending http request to rocketchat server: %w", err)
 	}
 
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(resp.Status)

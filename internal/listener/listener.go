@@ -245,16 +245,16 @@ func (l *Listener) DumpSchedules(w http.ResponseWriter, r *http.Request) {
 	defer l.runtimeConfig.RUnlock()
 
 	for _, schedule := range l.runtimeConfig.Schedules {
-		fmt.Fprintf(w, "[id=%d] %q:\n", schedule.ID, schedule.Name)
+		_, _ = fmt.Fprintf(w, "[id=%d] %q:\n", schedule.ID, schedule.Name)
 
 		// Iterate in 30 minute steps as this is the granularity Icinga Notifications Web allows in the configuration.
 		// Truncation to seconds happens only for a more readable output.
 		step := 30 * time.Minute
 		start := time.Now().Truncate(time.Second)
 		for t := start; t.Before(start.Add(48 * time.Hour)); t = t.Add(step) {
-			fmt.Fprintf(w, "\t%v: %v\n", t, schedule.GetContactsAt(t))
+			_, _ = fmt.Fprintf(w, "\t%v: %v\n", t, schedule.GetContactsAt(t))
 		}
 
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
 }
