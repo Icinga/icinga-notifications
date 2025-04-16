@@ -23,7 +23,7 @@ func TestRestoreMutedObjects(t *testing.T) {
 		args := map[string]any{
 			"type":       "notifications",
 			"name":       "Icinga Notifications",
-			"changed_at": 1720702049000,
+			"changed_at": int64(1720702049000),
 		}
 		// We can't use config.Source here unfortunately due to cyclic import error!
 		id, err := utils.InsertAndFetchId(ctx, tx, `INSERT INTO source (type, name, changed_at) VALUES (:type, :name, :changed_at)`, args)
