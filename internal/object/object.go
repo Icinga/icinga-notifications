@@ -265,9 +265,15 @@ func (o *Object) EvalExists(key string) bool {
 	return ok
 }
 
+// ID generates a stable identifier based on a source ID and tags.
+//
 // TODO: the return value of this function must be stable like forever
 func ID(source int64, tags map[string]string) types.Binary {
 	h := sha256.New()
+
+	if source < 0 {
+		panic(fmt.Sprintf("source value %d is negative", source))
+	}
 
 	sourceBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(sourceBytes, uint64(source))

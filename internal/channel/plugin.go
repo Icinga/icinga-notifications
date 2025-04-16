@@ -35,7 +35,7 @@ func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
 
 	logger.Debugw("Starting new channel plugin process", zap.String("path", file))
 
-	cmd := exec.Command(file)
+	cmd := exec.Command(file) //#nosec G204 -- plugins are launched from dynamic paths
 
 	started := false
 	var childIOPipes []io.Closer

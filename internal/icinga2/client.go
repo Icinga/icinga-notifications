@@ -505,7 +505,7 @@ func (client *Client) worker() {
 		case catchupMsg, ok := <-catchupEventCh:
 			// Process an incoming event
 			if ok && catchupMsg.error == nil {
-				client.CallbackFn(catchupMsg.eventMsg.event)
+				client.CallbackFn(catchupMsg.event)
 				catchupCacheUpdate(catchupMsg.eventMsg)
 				break
 			}

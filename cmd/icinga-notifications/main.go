@@ -36,7 +36,7 @@ func main() {
 	if err != nil {
 		logger.Fatalf("Cannot create database connection from config: %+v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
