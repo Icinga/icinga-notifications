@@ -62,9 +62,12 @@ func incrementalFetch[
 		stmtArgs []any
 	)
 	if hasChangedAt {
-		stmtLogger = stmtLogger.With(zap.Time("changed_at", changedAt.Time()))
-		stmt += ` WHERE "changed_at" > ?`
-		stmtArgs = []any{changedAt}
+		const threshold = 3 * time.Second
+		filter := time.Now().Add(-threshold)
+
+		stmtLogger = stmtLogger.With(zap.Time("changed_at", changedAt.Time()), zap.Duration("threshold", threshold))
+		stmt += ` WHERE "changed_at" > ? AND "changed_at" < ?`
+		stmtArgs = []any{changedAt, types.UnixMilli(filter)}
 	}
 
 	stmt = r.db.Rebind(stmt + ` ORDER BY "changed_at"`)
