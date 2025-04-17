@@ -9,6 +9,7 @@ import (
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
+	"iter"
 	"slices"
 	"strings"
 )
@@ -149,11 +150,7 @@ func ToDBInt(value int64) types.Int {
 //
 // This function returns a func yielding key-value-pairs from a given map in the order of their keys, if their type
 // is cmp.Ordered.
-//
-// Please note that currently - being at Go 1.22 - rangefuncs are still an experimental feature and cannot be directly
-// used unless compiled with `GOEXPERIMENT=rangefunc`. However, they can still be invoked normally.
-// https://go.dev/wiki/RangefuncExperiment
-func IterateOrderedMap[K cmp.Ordered, V any](m map[K]V) func(func(K, V) bool) {
+func IterateOrderedMap[K cmp.Ordered, V any](m map[K]V) iter.Seq2[K, V] {
 	keys := make([]K, 0, len(m))
 	for key := range m {
 		keys = append(keys, key)
