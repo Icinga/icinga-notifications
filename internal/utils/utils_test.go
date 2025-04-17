@@ -36,18 +36,10 @@ func TestIterateOrderedMap(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var outKeys []int
-
-			// Either run with GOEXPERIMENT=rangefunc or wait for rangefuncs to land in the next Go release.
-			// for k, _ := range IterateOrderedMap(tt.in) {
-			// 	outKeys = append(outKeys, k)
-			// }
-
-			// In the meantime, it can be invoked as follows.
-			IterateOrderedMap(tt.in)(func(k int, v string) bool {
+			for k, v := range IterateOrderedMap(tt.in) {
 				assert.Equal(t, tt.in[k], v)
 				outKeys = append(outKeys, k)
-				return true
-			})
+			}
 
 			assert.Equal(t, tt.outKeys, outKeys)
 		})
