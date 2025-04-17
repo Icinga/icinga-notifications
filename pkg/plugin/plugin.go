@@ -299,17 +299,15 @@ func FormatMessage(writer io.Writer, req *NotificationRequest) {
 	}
 	_, _ = fmt.Fprintf(writer, "Object: %s\n\n", req.Object.Url)
 	_, _ = writer.Write([]byte("Tags:\n"))
-	utils.IterateOrderedMap(req.Object.Tags)(func(k, v string) bool {
+	for k, v := range utils.IterateOrderedMap(req.Object.Tags) {
 		_, _ = fmt.Fprintf(writer, "%s: %s\n", k, v)
-		return true
-	})
+	}
 
 	if len(req.Object.ExtraTags) > 0 {
 		_, _ = writer.Write([]byte("\nExtra Tags:\n"))
-		utils.IterateOrderedMap(req.Object.ExtraTags)(func(k, v string) bool {
+		for k, v := range utils.IterateOrderedMap(req.Object.ExtraTags) {
 			_, _ = fmt.Fprintf(writer, "%s: %s\n", k, v)
-			return true
-		})
+		}
 	}
 
 	_, _ = fmt.Fprintf(writer, "\nIncident: %s", req.Incident.Url)
