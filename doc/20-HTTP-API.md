@@ -43,6 +43,7 @@ EOF
 ## Debugging Endpoints
 
 There are multiple endpoints for dumping specific configurations.
+All of them are prefixed by `/debug`.
 To use those, the `debug-password` must be set and supplied via HTTP Basic Authentication next to an arbitrary username.
 
 ### Dump Config
@@ -50,7 +51,7 @@ To use those, the `debug-password` must be set and supplied via HTTP Basic Authe
 The database-stored configuration from Icinga Notifications current viewpoint can be dumped as JSON.
 
 ```
-curl -v -u ':debug-password' 'http://localhost:5680/dump-config'
+curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-config'
 ```
 
 ### Dump Incidents
@@ -58,7 +59,7 @@ curl -v -u ':debug-password' 'http://localhost:5680/dump-config'
 The current incidents can be dumped as JSON.
 
 ```
-curl -v -u ':debug-password' 'http://localhost:5680/dump-incidents'
+curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-incidents'
 ```
 
 ### Dump Schedules
@@ -66,5 +67,5 @@ curl -v -u ':debug-password' 'http://localhost:5680/dump-incidents'
 All schedules with their assignee can be dumped in a human-readable form.
 
 ```
-curl -v -u ':debug-password' 'http://localhost:5680/dump-schedules'
+curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-schedules'
 ```

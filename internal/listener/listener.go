@@ -34,10 +34,14 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 		logs:          logs,
 		runtimeConfig: runtimeConfig,
 	}
+
+	debugMux := http.NewServeMux()
+	debugMux.HandleFunc("/dump-config", l.DumpConfig)
+	debugMux.HandleFunc("/dump-incidents", l.DumpIncidents)
+	debugMux.HandleFunc("/dump-schedules", l.DumpSchedules)
+
+	l.mux.Handle("/debug/", http.StripPrefix("/debug", l.requireDebugAuth(debugMux)))
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
-	l.mux.HandleFunc("/dump-config", l.DumpConfig)
-	l.mux.HandleFunc("/dump-incidents", l.DumpIncidents)
-	l.mux.HandleFunc("/dump-schedules", l.DumpSchedules)
 	return l
 }
 
@@ -150,38 +154,38 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	_, _ = fmt.Fprintln(w)
 }
 
-// checkDebugPassword checks if the valid debug password was provided. If there is no password configured or the
-// supplied password is incorrect, it sends an error code and returns false. True is returned if access is allowed.
-func (l *Listener) checkDebugPassword(w http.ResponseWriter, r *http.Request) bool {
-	expectedPassword := daemon.Config().DebugPassword
-	if expectedPassword == "" {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = fmt.Fprintln(w, "config dump disables, no debug-password set in config")
+// requireDebugAuth is a middleware that checks if the valid debug password was provided. If there is no password
+// configured or the supplied password is incorrect, it sends an error code and does not redirect the request.
+func (l *Listener) requireDebugAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		expectedPassword := daemon.Config().DebugPassword
+		if expectedPassword == "" {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = fmt.Fprintln(w, "config dump disabled, no debug-password set in config")
 
-		return false
-	}
+			return
+		}
 
-	_, providedPassword, _ := r.BasicAuth()
-	if subtle.ConstantTimeCompare([]byte(expectedPassword), []byte(providedPassword)) != 1 {
-		l.logger.Warnw("Unauthorized request", zap.String("url", r.RequestURI))
+		_, providedPassword, _ := r.BasicAuth()
+		if subtle.ConstantTimeCompare([]byte(expectedPassword), []byte(providedPassword)) != 1 {
+			l.logger.Warnw("Unauthorized request", zap.String("url", r.RequestURI))
 
-		w.Header().Set("WWW-Authenticate", `Basic realm="debug"`)
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = fmt.Fprintln(w, "please provide the debug-password as basic auth credentials (user is ignored)")
-		return false
-	}
+			w.Header().Set("WWW-Authenticate", `Basic realm="debug"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = fmt.Fprintln(w, "please provide the debug-password as basic auth credentials (user is ignored)")
+			return
+		}
 
-	return true
+		next.ServeHTTP(w, r)
+	})
 }
 
+// DumpConfig is used as /debug prefixed endpoint to dump the current live configuration of the daemon.
+// The authorization has to be done beforehand.
 func (l *Listener) DumpConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		_, _ = fmt.Fprintln(w, "GET required")
-		return
-	}
-
-	if !l.checkDebugPassword(w, r) {
 		return
 	}
 
@@ -190,14 +194,11 @@ func (l *Listener) DumpConfig(w http.ResponseWriter, r *http.Request) {
 	_ = enc.Encode(&l.runtimeConfig.ConfigSet)
 }
 
+// DumpIncidents is used as /debug prefixed endpoint to dump all incidents. The authorization has to be done beforehand.
 func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		_, _ = fmt.Fprintln(w, "GET required")
-		return
-	}
-
-	if !l.checkDebugPassword(w, r) {
 		return
 	}
 
@@ -230,14 +231,11 @@ func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
 	_ = enc.Encode(encodedIncidents)
 }
 
+// DumpSchedules is used as /debug prefixed endpoint to dump all schedules. The authorization has to be done beforehand.
 func (l *Listener) DumpSchedules(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		_, _ = fmt.Fprintln(w, "GET required")
-		return
-	}
-
-	if !l.checkDebugPassword(w, r) {
 		return
 	}
 
