@@ -3,14 +3,15 @@ package incident
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
-	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"time"
 )
 
 // Upsert implements the contracts.Upserter interface.
@@ -32,8 +33,8 @@ func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 			return fmt.Errorf("failed to upsert incident: %w", err)
 		}
 	} else {
-		stmt := utils.BuildInsertStmtWithout(i.db, i, "id")
-		incidentId, err := utils.InsertAndFetchId(ctx, tx, stmt, i)
+		stmt := database.BuildInsertStmtWithout(i.db, i, "id")
+		incidentId, err := database.InsertObtainID(ctx, tx, stmt, i)
 		if err != nil {
 			return err
 		}
@@ -89,7 +90,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 
 				hr := &HistoryRow{
 					IncidentID:       i.Id,
-					EventID:          utils.ToDBInt(eventId),
+					EventID:          types.MakeInt(eventId, types.TransformZeroIntToNull),
 					Key:              cr.Key,
 					Time:             types.UnixMilli(time.Now()),
 					Type:             RecipientRoleChanged,
@@ -147,12 +148,12 @@ func (i *Incident) generateNotifications(
 			hr := &HistoryRow{
 				IncidentID:        i.Id,
 				Key:               recipient.ToKey(contact),
-				EventID:           utils.ToDBInt(ev.ID),
+				EventID:           types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 				Time:              types.UnixMilli(time.Now()),
 				Type:              Notified,
-				ChannelID:         utils.ToDBInt(chID),
+				ChannelID:         types.MakeInt(chID, types.TransformZeroIntToNull),
 				NotificationState: NotificationStatePending,
-				Message:           utils.ToDBString(ev.Message),
+				Message:           types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 			}
 			if suppress {
 				hr.NotificationState = NotificationStateSuppressed

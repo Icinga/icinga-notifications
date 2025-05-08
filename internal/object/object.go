@@ -12,7 +12,6 @@ import (
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
-	"github.com/icinga/icinga-notifications/internal/utils"
 	"regexp"
 	"sort"
 	"strings"
@@ -37,7 +36,7 @@ func New(db *database.DB, ev *event.Event) *Object {
 		SourceID:  ev.SourceId,
 		Name:      ev.Name,
 		db:        db,
-		URL:       utils.ToDBString(ev.URL),
+		URL:       types.MakeString(ev.URL, types.TransformEmptyStringToNull),
 		Tags:      ev.Tags,
 		ExtraTags: ev.ExtraTags,
 	}
@@ -85,10 +84,10 @@ func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, 
 
 		newObject.ExtraTags = ev.ExtraTags
 		newObject.Name = ev.Name
-		newObject.URL = utils.ToDBString(ev.URL)
+		newObject.URL = types.MakeString(ev.URL, types.TransformEmptyStringToNull)
 		if ev.Mute.Valid {
 			if ev.Mute.Bool {
-				newObject.MuteReason = utils.ToDBString(ev.MuteReason)
+				newObject.MuteReason = types.MakeString(ev.MuteReason, types.TransformEmptyStringToNull)
 			} else {
 				// The ongoing event unmutes the object, so reset the mute reason to null.
 				newObject.MuteReason = types.String{}

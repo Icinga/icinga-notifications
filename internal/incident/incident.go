@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -13,11 +16,8 @@ import (
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
-	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"sync"
-	"time"
 )
 
 type ruleID = int64
@@ -252,7 +252,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 
 	var notifications []*NotificationEntry
 	ctx := context.Background()
-	err = utils.RunInTx(ctx, i.db, func(tx *sqlx.Tx) error {
+	err = i.db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
 		err := ev.Sync(ctx, tx, i.db, i.Object.ID)
 		if err != nil {
 			return err
@@ -298,12 +298,12 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 	hr := &HistoryRow{
 		IncidentID:  i.Id,
-		EventID:     utils.ToDBInt(ev.ID),
+		EventID:     types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Time:        types.UnixMilli(time.Now()),
 		Type:        IncidentSeverityChanged,
 		NewSeverity: newSeverity,
 		OldSeverity: oldSeverity,
-		Message:     utils.ToDBString(ev.Message),
+		Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 	}
 
 	if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -319,7 +319,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 		hr = &HistoryRow{
 			IncidentID: i.Id,
-			EventID:    utils.ToDBInt(ev.ID),
+			EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 			Time:       i.RecoveredAt,
 			Type:       Closed,
 		}
@@ -357,9 +357,9 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 		IncidentID:  i.Id,
 		Type:        Opened,
 		Time:        types.UnixMilli(ev.Time),
-		EventID:     utils.ToDBInt(ev.ID),
+		EventID:     types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		NewSeverity: i.Severity,
-		Message:     utils.ToDBString(ev.Message),
+		Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 	}
 
 	if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -377,7 +377,7 @@ func (i *Incident) handleMuteUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.
 		return nil
 	}
 
-	hr := &HistoryRow{IncidentID: i.Id, EventID: utils.ToDBInt(ev.ID), Time: types.UnixMilli(time.Now())}
+	hr := &HistoryRow{IncidentID: i.Id, EventID: types.MakeInt(ev.ID, types.TransformZeroIntToNull), Time: types.UnixMilli(time.Now())}
 	logger := i.logger.With(zap.String("event", ev.String()))
 	if i.Object.IsMuted() {
 		hr.Type = Muted
@@ -388,7 +388,7 @@ func (i *Incident) handleMuteUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.
 	} else {
 		hr.Type = Unmuted
 		// On the other hand, if an object is unmuted, its mute reason is already reset, and we can't access it anymore.
-		hr.Message = utils.ToDBString(ev.MuteReason)
+		hr.Message = types.MakeString(ev.MuteReason, types.TransformEmptyStringToNull)
 		logger.Infow("Unmuting incident", zap.String("reason", ev.MuteReason))
 	}
 
@@ -426,8 +426,8 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 			hr := &HistoryRow{
 				IncidentID: i.Id,
 				Time:       types.UnixMilli(time.Now()),
-				EventID:    utils.ToDBInt(eventID),
-				RuleID:     utils.ToDBInt(r.ID),
+				EventID:    types.MakeInt(eventID, types.TransformZeroIntToNull),
+				RuleID:     types.MakeInt(r.ID, types.TransformZeroIntToNull),
 				Type:       RuleMatched,
 			}
 			if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -534,9 +534,9 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 		hr := &HistoryRow{
 			IncidentID:       i.Id,
 			Time:             state.TriggeredAt,
-			EventID:          utils.ToDBInt(ev.ID),
-			RuleEscalationID: utils.ToDBInt(state.RuleEscalationID),
-			RuleID:           utils.ToDBInt(r.ID),
+			EventID:          types.MakeInt(ev.ID, types.TransformZeroIntToNull),
+			RuleEscalationID: types.MakeInt(state.RuleEscalationID, types.TransformZeroIntToNull),
+			RuleID:           types.MakeInt(r.ID, types.TransformZeroIntToNull),
 			Type:             EscalationTriggered,
 		}
 
@@ -649,12 +649,12 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 	hr := &HistoryRow{
 		IncidentID:       i.Id,
 		Key:              recipientKey,
-		EventID:          utils.ToDBInt(ev.ID),
+		EventID:          types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Type:             RecipientRoleChanged,
 		Time:             types.UnixMilli(time.Now()),
 		NewRecipientRole: newRole,
 		OldRecipientRole: oldRole,
-		Message:          utils.ToDBString(ev.Message),
+		Message:          types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 	}
 
 	if err := hr.Sync(ctx, i.db, tx); err != nil {
