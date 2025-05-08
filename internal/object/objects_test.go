@@ -6,7 +6,6 @@ import (
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/testutils"
-	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,20 +18,20 @@ func TestRestoreMutedObjects(t *testing.T) {
 	db := testutils.GetTestDB(ctx, t)
 
 	var sourceID int64
-	err := utils.RunInTx(ctx, db, func(tx *sqlx.Tx) error {
+	err := db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
 		args := map[string]any{
 			"type":       "notifications",
 			"name":       "Icinga Notifications",
 			"changed_at": int64(1720702049000),
 		}
 		// We can't use config.Source here unfortunately due to cyclic import error!
-		id, err := utils.InsertAndFetchId(ctx, tx, `INSERT INTO source (type, name, changed_at) VALUES (:type, :name, :changed_at)`, args)
+		id, err := database.InsertObtainID(ctx, tx, `INSERT INTO source (type, name, changed_at) VALUES (:type, :name, :changed_at)`, args)
 		require.NoError(t, err, "populating source table should not fail")
 
 		sourceID = id
 		return nil
 	})
-	require.NoError(t, err, "utils.RunInTx() should not fail")
+	require.NoError(t, err, "db.ExecTx should not fail")
 
 	ClearCache()
 
