@@ -21,7 +21,7 @@ or install [from source](02-Installation.md.d/From-Source.md).
 
 ## Setting up the Database
 
-A MySQL (≥5.7.9), MariaDB (≥10.2.2), or PostgreSQL (≥9.6) database is required to run Icinga Notifications.
+A MySQL (≥5.7.22), MariaDB (≥10.5.0), or PostgreSQL (≥9.6) database is required to run Icinga Notifications.
 Please follow the steps listed for your target database,
 which guide you through setting up the database and user and importing the schema.
 
