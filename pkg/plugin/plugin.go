@@ -22,6 +22,42 @@ const (
 	MethodSendNotification = "SendNotification"
 )
 
+// Bool is a very special bool with a custom json.Unmarshaler to handle JSON booleans and Icinga Web boolean.
+//
+// Icinga Web stores booleans sometimes as a string, being either "y" or "n". This might be useful and expected for
+// SQL database usages, but it also happens for channel plugins.
+//
+// https://github.com/Icinga/icinga-notifications-web/issues/267
+type Bool bool
+
+// UnmarshalJSON implements json.Unmarshaler for true/false/"y"/"n" to a boolean.
+func (b *Bool) UnmarshalJSON(bytes []byte) error {
+	var anyOut any
+	if err := json.Unmarshal(bytes, &anyOut); err != nil {
+		return err
+	}
+
+	switch anyOut := anyOut.(type) {
+	case bool:
+		*b = Bool(anyOut)
+
+	case string:
+		switch anyOut {
+		case "y":
+			*b = true
+		case "n":
+			*b = false
+		default:
+			return fmt.Errorf("cannot use %q as a bool", anyOut)
+		}
+
+	default:
+		return fmt.Errorf("cannot convert type %T to bool", anyOut)
+	}
+
+	return nil
+}
+
 // ConfigOption describes a config element.
 type ConfigOption struct {
 	// Element name
@@ -30,6 +66,8 @@ type ConfigOption struct {
 	// Element type:
 	//
 	//  string = text, number = number, bool = checkbox, text = textarea, option = select, options = select[multiple], secret = password
+	//
+	// Note that "bool = checkbox" might result in a string being used for configuration. Use the plugin.Bool type.
 	Type string `json:"type"`
 
 	// Element label map. Locale in the standard format (language_REGION) as key and corresponding label as value.
@@ -218,6 +256,8 @@ func PopulateDefaults(typePtr Plugin) error {
 //
 // This function reads requests from stdin, calls the associated RPC method, and writes the responses to stdout. As this
 // function blocks, it should be called last in a channel plugin's main function.
+//
+// Each request will be processed in its own goroutine. Thus, there might be concurrent Plugin.SendNotification calls.
 func RunPlugin(plugin Plugin) {
 	encoder := json.NewEncoder(os.Stdout)
 	decoder := json.NewDecoder(os.Stdin)
