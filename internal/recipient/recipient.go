@@ -3,7 +3,6 @@ package recipient
 import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/types"
-	"github.com/icinga/icinga-notifications/internal/utils"
 	"go.uber.org/zap/zapcore"
 	"time"
 )
@@ -55,11 +54,11 @@ func (r Key) MarshalText() (text []byte, err error) {
 func ToKey(r Recipient) Key {
 	switch v := r.(type) {
 	case *Contact:
-		return Key{ContactID: utils.ToDBInt(v.ID)}
+		return Key{ContactID: types.MakeInt(v.ID, types.TransformZeroIntToNull)}
 	case *Group:
-		return Key{GroupID: utils.ToDBInt(v.ID)}
+		return Key{GroupID: types.MakeInt(v.ID, types.TransformZeroIntToNull)}
 	case *Schedule:
-		return Key{ScheduleID: utils.ToDBInt(v.ID)}
+		return Key{ScheduleID: types.MakeInt(v.ID, types.TransformZeroIntToNull)}
 	default:
 		panic(fmt.Sprintf("unexpected recipient type: %T", r))
 	}
