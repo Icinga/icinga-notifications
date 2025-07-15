@@ -6,7 +6,6 @@ import (
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
-	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -92,7 +91,7 @@ func (h *HistoryRow) TableName() string {
 // Sync persists the current state of this history to the database and retrieves the just inserted history ID.
 // Returns error when failed to execute the query.
 func (h *HistoryRow) Sync(ctx context.Context, db *database.DB, tx *sqlx.Tx) error {
-	historyId, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, h, "id"), h)
+	historyId, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, h, "id"), h)
 	if err != nil {
 		return err
 	}

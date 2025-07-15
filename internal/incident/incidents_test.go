@@ -9,7 +9,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/testutils"
-	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,14 +30,14 @@ func TestLoadOpenIncidents(t *testing.T) {
 	source.ChangedAt = types.UnixMilli(time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC))
 	source.Deleted = types.Bool{Bool: false, Valid: true}
 
-	err := utils.RunInTx(ctx, db, func(tx *sqlx.Tx) error {
-		id, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, source, "id"), source)
+	err := db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
+		id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, source, "id"), source)
 		require.NoError(t, err, "populating source table should not fail")
 
 		source.ID = id
 		return nil
 	})
-	require.NoError(t, err, "utils.RunInTx() should not fail")
+	require.NoError(t, err, "db.ExecTx should not fail")
 
 	// Reduce the default placeholders per statement to a meaningful number, so that we can
 	// test some parallelism when loading the incidents.

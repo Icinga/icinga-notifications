@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/types"
-	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"time"
 )
@@ -176,7 +175,7 @@ func (e *Event) Sync(ctx context.Context, tx *sqlx.Tx, db *database.DB, objectId
 	}
 
 	eventRow := NewEventRow(e, objectId)
-	eventID, err := utils.InsertAndFetchId(ctx, tx, utils.BuildInsertStmtWithout(db, eventRow, "id"), eventRow)
+	eventID, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, eventRow, "id"), eventRow)
 	if err == nil {
 		e.ID = eventID
 	}
@@ -206,11 +205,11 @@ func NewEventRow(e *Event, objectId types.Binary) *EventRow {
 	return &EventRow{
 		Time:       types.UnixMilli(e.Time),
 		ObjectID:   objectId,
-		Type:       utils.ToDBString(e.Type),
+		Type:       types.MakeString(e.Type, types.TransformEmptyStringToNull),
 		Severity:   e.Severity,
-		Username:   utils.ToDBString(e.Username),
-		Message:    utils.ToDBString(e.Message),
+		Username:   types.MakeString(e.Username, types.TransformEmptyStringToNull),
+		Message:    types.MakeString(e.Message, types.TransformEmptyStringToNull),
 		Mute:       e.Mute,
-		MuteReason: utils.ToDBString(e.MuteReason),
+		MuteReason: types.MakeString(e.MuteReason, types.TransformEmptyStringToNull),
 	}
 }

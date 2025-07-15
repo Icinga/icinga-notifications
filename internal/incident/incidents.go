@@ -245,7 +245,7 @@ func ProcessEvent(
 			}
 
 			// There is no active incident, but the event appears to be relevant, so try to persist it in the DB.
-			err = utils.RunInTx(ctx, db, func(tx *sqlx.Tx) error { return ev.Sync(ctx, tx, db, obj.ID) })
+			err = db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error { return ev.Sync(ctx, tx, db, obj.ID) })
 			if err != nil {
 				return errors.New("cannot sync non-state event to the database")
 			}
