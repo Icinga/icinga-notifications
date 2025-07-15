@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/creasty/defaults v1.8.0
+	github.com/davecgh/go-spew v1.1.1
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
 	github.com/emersion/go-smtp v0.23.0
 	github.com/google/uuid v1.6.0
@@ -24,7 +25,6 @@ require (
 	filippo.io/edwards25519 v1.1.0 // indirect
 	github.com/caarlos0/env/v11 v11.3.1 // indirect
 	github.com/cention-sany/utf7 v0.0.0-20170124080048-26cad61bd60a // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/goccy/go-yaml v1.13.0 // indirect
@@ -45,5 +45,8 @@ require (
 	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
+	golang.org/x/tools v0.34.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+tool golang.org/x/tools/cmd/goyacc

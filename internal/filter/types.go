@@ -5,23 +5,31 @@ import (
 )
 
 // LogicalOp is a type used for grouping the logical operators of a filter string.
-type LogicalOp string
+type LogicalOp byte
 
 const (
 	// None represents a filter chain type that matches when none of its ruleset matches.
-	None LogicalOp = "!"
+	None LogicalOp = '!'
 	// All represents a filter chain type that matches when all of its ruleset matches.
-	All LogicalOp = "&"
+	All LogicalOp = '&'
 	// Any represents a filter chain type that matches when at least one of its ruleset matches.
-	Any LogicalOp = "|"
+	Any LogicalOp = '|'
 )
 
 // Chain is a filter type that wraps other filter rules and itself.
 // Therefore, it implements the Filter interface to allow it to be part of its ruleset.
-// It supports also adding and popping filter rules individually.
 type Chain struct {
 	op    LogicalOp // The filter chain operator to be used to evaluate the rules
 	rules []Filter
+}
+
+func NewChain(op LogicalOp, rules ...Filter) (*Chain, error) {
+	switch op {
+	case None, All, Any:
+		return &Chain{rules: rules, op: op}, nil
+	default:
+		return nil, fmt.Errorf("invalid logical operator provided: %q", op)
+	}
 }
 
 // Eval evaluates the filter rule sets recursively based on their operator type.
@@ -103,6 +111,17 @@ type Condition struct {
 	op     CompOperator
 	column string
 	value  string
+}
+
+// NewCondition initiates a new Condition instance from the given data.
+// Returns error if invalid CompOperator is provided.
+func NewCondition(column string, op CompOperator, value string) (Filter, error) {
+	switch op {
+	case Equal, UnEqual, Like, UnLike, LessThan, LessThanEqual, GreaterThan, GreaterThanEqual:
+		return &Condition{op: op, column: column, value: value}, nil
+	default:
+		return nil, fmt.Errorf("invalid comparison operator provided: %q", op)
+	}
 }
 
 // Eval evaluates this Condition based on its operator.
