@@ -3,15 +3,11 @@ package channel
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
-	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
-	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"net/url"
 )
 
 type Channel struct {
@@ -158,42 +154,33 @@ func (c *Channel) Restart() {
 	c.restartCh <- newConfig{c.Type, c.Config}
 }
 
-// Notify prepares and sends the notification request, returns a non-error on fails, nil on success
-func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *event.Event, icingaweb2Url string) error {
+// Notify sends the provided notification request to the given *recipient.Contact.
+// If the *plugin.Contact field of the specified *plugin.NotificationRequest is not set, it
+// automatically determines the contact addresses and sets the notification request contact accordingly.
+//
+// Returns an error in all the following cases:
+//   - if the *plugin.Event of the provided notification request is not set,
+//   - the *plugin.Object of the provided notification request is not set,
+//   - trying to send a state change event without an associated *plugin.Incident,
+//   - the corresponding plugin of this channel cannot be started successfully,
+//   - or fails to successfully deliver the request to the corresponding recipient address(es).
+func (c *Channel) Notify(req *plugin.NotificationRequest) error {
+	if req.Event == nil {
+		return errors.New("invalid notification request: Event is nil")
+	}
+	if req.Object == nil {
+		return errors.New("invalid notification request: Object is nil")
+	}
+	if req.Contact == nil {
+		return errors.New("invalid notification request: Contact is nil")
+	}
+	if req.Incident == nil && req.Event.Type == event.TypeState {
+		return errors.New("invalid notification request: cannot send state notification without an incident")
+	}
+
 	p := c.getPlugin()
 	if p == nil {
 		return errors.New("plugin could not be started")
-	}
-
-	contactStruct := &plugin.Contact{FullName: contact.FullName}
-	for _, addr := range contact.Addresses {
-		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
-	}
-
-	baseUrl, _ := url.Parse(icingaweb2Url)
-	incidentUrl := baseUrl.JoinPath("/notifications/incident")
-	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID())
-	object := i.IncidentObject()
-
-	req := &plugin.NotificationRequest{
-		Contact: contactStruct,
-		Object: &plugin.Object{
-			Name:      object.DisplayName(),
-			Url:       ev.URL,
-			Tags:      object.Tags,
-			ExtraTags: object.ExtraTags,
-		},
-		Incident: &plugin.Incident{
-			Id:       i.ID(),
-			Url:      incidentUrl.String(),
-			Severity: i.SeverityString(),
-		},
-		Event: &plugin.Event{
-			Time:     ev.Time,
-			Type:     ev.Type,
-			Username: ev.Username,
-			Message:  ev.Message,
-		},
 	}
 
 	return p.SendNotification(req)
