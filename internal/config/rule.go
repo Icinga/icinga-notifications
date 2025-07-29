@@ -39,7 +39,6 @@ func (r *RuntimeConfig) applyPendingRules() {
 			}
 
 			// ObjectFilter{,Expr} are being initialized by config.IncrementalConfigurableInitAndValidatable.
-			curElement.ObjectFilter = update.ObjectFilter
 			curElement.ObjectFilterExpr = update.ObjectFilterExpr
 
 			return nil

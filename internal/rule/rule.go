@@ -3,7 +3,6 @@ package rule
 import (
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
-	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"go.uber.org/zap/zapcore"
@@ -16,21 +15,20 @@ type Rule struct {
 	Name             string                 `db:"name"`
 	TimePeriod       *timeperiod.TimePeriod `db:"-"`
 	TimePeriodID     types.Int              `db:"timeperiod_id"`
-	ObjectFilter     filter.Filter          `db:"-"`
 	ObjectFilterExpr types.String           `db:"object_filter"`
 	Escalations      map[int64]*Escalation  `db:"-"`
 }
 
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
 func (r *Rule) IncrementalInitAndValidate() error {
-	if r.ObjectFilterExpr.Valid {
-		f, err := filter.Parse(r.ObjectFilterExpr.String)
-		if err != nil {
-			return err
-		}
+	// if r.ObjectFilterExpr.Valid {
+	// 	f, err := filter.Parse(r.ObjectFilterExpr.String)
+	// 	if err != nil {
+	// 		return err
+	// 	}
 
-		r.ObjectFilter = f
-	}
+	// 	r.ObjectFilter = f
+	// }
 
 	return nil
 }
@@ -48,16 +46,6 @@ func (r *Rule) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	}
 
 	return nil
-}
-
-// Eval evaluates the configured object filter for the provided filterable.
-// Returns always true if the current rule doesn't have a configured object filter.
-func (r *Rule) Eval(filterable filter.Filterable) (bool, error) {
-	if r.ObjectFilter == nil {
-		return true, nil
-	}
-
-	return r.ObjectFilter.Eval(filterable)
 }
 
 // ContactChannels stores a set of channel IDs for each set of individual contacts.
