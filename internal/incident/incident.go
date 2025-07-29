@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"time"
-
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -18,6 +15,10 @@ import (
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 )
 
 type ruleID = int64
@@ -178,7 +179,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 
 		// Check if any (additional) rules match this object. Filters of rules that already have a state don't have
 		// to be checked again, these rules already matched and stay effective for the ongoing incident.
-		err = i.evaluateRules(ctx, tx, ev.ID)
+		err = i.evaluateRules(ctx, tx, ev)
 		if err != nil {
 			return err
 		}
@@ -398,26 +399,36 @@ func (i *Incident) handleMuteUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.
 // evaluateRules evaluates all the configured rules for this *incident.Object and
 // generates history entries for each matched rule.
 // Returns error on database failure.
-func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64) error {
+func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
 	if i.Rules == nil {
 		i.Rules = make(map[int64]struct{})
 	}
 
+	ruleIdsStr, ok := ev.ExtraTags["rules"]
+	if !ok {
+		return errors.New("event has no rules extra tag marker")
+	}
+	ruleIdsArr := strings.Split(ruleIdsStr, ",")
+
+	ruleIds := make(map[ruleID]struct{})
+	for _, idStr := range ruleIdsArr {
+		idInt, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			return fmt.Errorf("cannot parse %q from rules as int64", idStr)
+		}
+		ruleIds[idInt] = struct{}{}
+	}
+
 	for _, r := range i.runtimeConfig.Rules {
+		if _, ok := ruleIds[r.ID]; !ok {
+			continue
+		}
+
 		if _, ok := i.Rules[r.ID]; !ok {
-			matched, err := r.Eval(i.Object)
-			if err != nil {
-				i.logger.Warnw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
-			}
-
-			if err != nil || !matched {
-				continue
-			}
-
 			i.Rules[r.ID] = struct{}{}
 			i.logger.Infow("Rule matches", zap.Object("rule", r))
 
-			err = i.AddRuleMatched(ctx, tx, r)
+			err := i.AddRuleMatched(ctx, tx, r)
 			if err != nil {
 				i.logger.Errorw("Failed to upsert incident rule", zap.Object("rule", r), zap.Error(err))
 				return err
@@ -426,7 +437,7 @@ func (i *Incident) evaluateRules(ctx context.Context, tx *sqlx.Tx, eventID int64
 			hr := &HistoryRow{
 				IncidentID: i.Id,
 				Time:       types.UnixMilli(time.Now()),
-				EventID:    types.MakeInt(eventID, types.TransformZeroIntToNull),
+				EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 				RuleID:     types.MakeInt(r.ID, types.TransformZeroIntToNull),
 				Type:       RuleMatched,
 			}
