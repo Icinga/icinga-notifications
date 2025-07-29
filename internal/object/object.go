@@ -9,12 +9,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
-	"regexp"
-	"sort"
-	"strings"
 )
 
 type Object struct {
@@ -184,84 +183,6 @@ func (o *Object) String() string {
 	}
 
 	return b.String()
-}
-
-func (o *Object) EvalEqual(key string, value string) (bool, error) {
-	tagVal, ok := o.Tags[key]
-	if ok && tagVal == value {
-		return true, nil
-	}
-
-	tagVal, ok = o.ExtraTags[key]
-	if ok && tagVal == value {
-		return true, nil
-	}
-
-	return false, nil
-}
-
-// EvalLike returns true when the objects tag/value matches the filter.Conditional value.
-func (o *Object) EvalLike(key string, value string) (bool, error) {
-	segments := strings.Split(value, "*")
-	builder := &strings.Builder{}
-	for _, segment := range segments {
-		if segment == "" {
-			builder.WriteString(".*")
-		}
-
-		builder.WriteString(regexp.QuoteMeta(segment))
-	}
-
-	regex := regexp.MustCompile("^" + builder.String() + "$")
-	tagVal, ok := o.Tags[key]
-	if ok && regex.MatchString(tagVal) {
-		return true, nil
-	}
-
-	tagVal, ok = o.ExtraTags[key]
-	if ok && regex.MatchString(tagVal) {
-		return true, nil
-	}
-
-	return false, nil
-}
-
-func (o *Object) EvalLess(key string, value string) (bool, error) {
-	tagVal, ok := o.Tags[key]
-	if ok && tagVal < value {
-		return true, nil
-	}
-
-	tagVal, ok = o.ExtraTags[key]
-	if ok && tagVal < value {
-		return true, nil
-	}
-
-	return false, nil
-}
-
-func (o *Object) EvalLessOrEqual(key string, value string) (bool, error) {
-	tagVal, ok := o.Tags[key]
-	if ok && tagVal <= value {
-		return true, nil
-	}
-
-	tagVal, ok = o.ExtraTags[key]
-	if ok && tagVal <= value {
-		return true, nil
-	}
-
-	return false, nil
-}
-
-func (o *Object) EvalExists(key string) bool {
-	_, ok := o.Tags[key]
-	if ok {
-		return true
-	}
-
-	_, ok = o.ExtraTags[key]
-	return ok
 }
 
 // ID generates a stable identifier based on a source ID and tags.
