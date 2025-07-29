@@ -13,6 +13,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
+	"github.com/icinga/icinga-notifications/internal/rule"
 	"go.uber.org/zap"
 	"net/http"
 	"time"
@@ -39,9 +40,11 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 	debugMux.HandleFunc("/dump-config", l.DumpConfig)
 	debugMux.HandleFunc("/dump-incidents", l.DumpIncidents)
 	debugMux.HandleFunc("/dump-schedules", l.DumpSchedules)
+	debugMux.HandleFunc("/dump-rules", l.DumpRules)
 
 	l.mux.Handle("/debug/", http.StripPrefix("/debug", l.requireDebugAuth(debugMux)))
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
+	l.mux.HandleFunc("/event-rules", l.RulesForFilters)
 	return l
 }
 
@@ -82,7 +85,45 @@ func (l *Listener) Run(ctx context.Context) error {
 	}
 }
 
-func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
+// getRuleVersion returns the latest rule version.
+//
+// Technically, the rule version is an encoded string representation of the latest changed_at value from each rule.
+// Being an implementation detail, it might change over time. For the moment, a simple equality check is enough.
+func (l *Listener) getRuleVersion() string {
+	l.runtimeConfig.RLock()
+	defer l.runtimeConfig.RUnlock()
+
+	var latest time.Time
+	for _, r := range l.runtimeConfig.Rules {
+		if t := r.ChangedAt.Time(); t.After(latest) {
+			latest = t
+		}
+	}
+
+	if latest.IsZero() {
+		return "NA"
+	}
+
+	return fmt.Sprintf("%x", latest.UnixNano())
+}
+
+// sourceFromAuthOrAbort extracts a *config.Source from the HTTP Basic Auth. If the credentials are wrong, (nil, false) is
+// returned and 401 was written back to the response writer.
+func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (*config.Source, bool) {
+	if authUser, authPass, authOk := r.BasicAuth(); authOk {
+		src := l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
+		if src != nil {
+			return src, true
+		}
+	}
+
+	w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications"`)
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = fmt.Fprintln(w, "please provide the debug-password as basic auth credentials (user is ignored)")
+	return nil, false
+}
+
+func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	// abort the current connection by sending the status code and an error both to the log and back to the client.
 	abort := func(statusCode int, ev *event.Event, format string, a ...any) {
 		msg := format
@@ -99,24 +140,37 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		logger.Debugw("Abort listener submitted event processing")
 	}
 
-	if req.Method != http.MethodPost {
+	if r.Method != http.MethodPost {
 		abort(http.StatusMethodNotAllowed, nil, "POST required")
 		return
 	}
 
-	var source *config.Source
-	if authUser, authPass, authOk := req.BasicAuth(); authOk {
-		source = l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
+	source, validAuth := l.sourceFromAuthOrAbort(w, r)
+	if !validAuth {
+		return
 	}
-	if source == nil {
-		w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications"`)
-		abort(http.StatusUnauthorized, nil, "HTTP authorization required")
+
+	ruleIdsStr := r.Header.Get("X-Rule-Ids")
+	ruleVersion := r.Header.Get("X-Rule-Version")
+
+	if latestRuleVersion := l.getRuleVersion(); ruleVersion != latestRuleVersion {
+		abort(http.StatusFailedDependency,
+			nil,
+			"X-Rule-Version %q does not match %q, refetch rules",
+			ruleVersion,
+			latestRuleVersion)
+		return
+	}
+
+	// TODO: parse and verify ruleIdsStr
+	if ruleIdsStr == "" {
+		// Case for empty X-Rule-Ids where the event was just sent to check if new rules are available (previous if).
+		abort(http.StatusNoContent, nil, "dismissed event due to empty X-Rule-Ids")
 		return
 	}
 
 	var ev event.Event
-	err := json.NewDecoder(req.Body).Decode(&ev)
-	if err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
 		abort(http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
 		return
 	}
@@ -136,8 +190,11 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	ev.ExtraTags = make(map[string]string)
+	ev.ExtraTags["rules"] = ruleIdsStr
+
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
-	err = incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
+	err := incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
 	if errors.Is(err, event.ErrSuperfluousStateChange) || errors.Is(err, event.ErrSuperfluousMuteUnmuteEvent) {
 		abort(http.StatusNotAcceptable, &ev, "%v", err)
 		return
@@ -149,9 +206,18 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	l.logger.Infow("Successfully processed event", zap.String("event", ev.String()))
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusAccepted)
 	_, _ = fmt.Fprintln(w, "event processed successfully")
 	_, _ = fmt.Fprintln(w)
+}
+
+func (l *Listener) RulesForFilters(w http.ResponseWriter, r *http.Request) {
+	_, validAuth := l.sourceFromAuthOrAbort(w, r)
+	if !validAuth {
+		return
+	}
+
+	l.DumpRules(w, r)
 }
 
 // requireDebugAuth is a middleware that checks if the valid debug password was provided. If there is no password
@@ -255,4 +321,29 @@ func (l *Listener) DumpSchedules(w http.ResponseWriter, r *http.Request) {
 
 		_, _ = fmt.Fprintln(w)
 	}
+}
+
+// DumpRules is used as /debug prefixed endpoint to dump all rules. The authorization has to be done beforehand.
+func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = fmt.Fprintln(w, "GET required")
+		return
+	}
+
+	type Response struct {
+		Version string
+		Rules   map[int64]*rule.Rule
+	}
+
+	var resp Response
+	resp.Version = l.getRuleVersion()
+
+	l.runtimeConfig.RLock()
+	resp.Rules = l.runtimeConfig.Rules
+	l.runtimeConfig.RUnlock()
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(resp)
 }
