@@ -248,10 +248,6 @@ func (r *RuntimeConfig) debugVerifyRule(id int64, rule *rule.Rule) error {
 		}
 	}
 
-	if rule.ObjectFilterExpr.Valid && rule.ObjectFilter == nil {
-		return fmt.Errorf("rule has a ObjectFilterExpr but ObjectFilter is nil")
-	}
-
 	for escalationID, escalation := range rule.Escalations {
 		if escalation == nil {
 			return fmt.Errorf("rule.Escalations[%d] is nil", escalationID)
