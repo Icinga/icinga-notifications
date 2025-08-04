@@ -62,15 +62,11 @@ func TestRestoreMutedObjects(t *testing.T) {
 			assert.Equal(t, o.URL, objFromCache.URL, "objects url should match")
 
 			assert.Equal(t, o.Tags, objFromCache.Tags, "objects tags should match")
-			assert.Equal(t, o.ExtraTags, objFromCache.ExtraTags, "objects tags should match")
 		}
 
 		// Purge all newly created objects and their relations not mes up local database tests.
 		_, err = db.NamedExecContext(ctx, `DELETE FROM object_id_tag WHERE object_id = :id`, o)
 		assert.NoError(t, err, "deleting object id tags should not fail")
-
-		_, err = db.NamedExecContext(ctx, `DELETE FROM object_extra_tag WHERE object_id = :id`, o)
-		assert.NoError(t, err, "deleting object extra tags should not fail")
 
 		_, err = db.NamedExecContext(ctx, `DELETE FROM object WHERE id = :id`, o)
 		assert.NoError(t, err, "deleting object should not fail")
@@ -87,10 +83,6 @@ func makeObject(ctx context.Context, db *database.DB, t *testing.T, sourceID int
 		Tags: map[string]string{ // Always generate unique object tags not to produce same object ID!
 			"host":    testutils.MakeRandomString(t),
 			"service": testutils.MakeRandomString(t),
-		},
-		ExtraTags: map[string]string{
-			"hostgroup/database-server": "",
-			"servicegroup/webserver":    "",
 		},
 	}
 
