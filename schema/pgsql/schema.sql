@@ -233,28 +233,15 @@ CREATE INDEX idx_timeperiod_entry_changed_at ON timeperiod_entry(changed_at);
 
 CREATE TABLE source (
     id bigserial,
-    -- The type "icinga2" is special and requires (at least some of) the icinga2_ prefixed columns.
     type text NOT NULL,
     name citext NOT NULL,
     -- will likely need a distinguishing value for multiple sources of the same type in the future, like for example
     -- the Icinga DB environment ID for Icinga 2 sources
 
     -- The column listener_password_hash is type-dependent.
-    -- If type is not "icinga2", listener_password_hash is required to limit API access for incoming connections
-    -- to the Listener. The username will be "source-${id}", allowing early verification.
-    listener_password_hash text,
-
-    -- Following columns are for the "icinga2" type.
-    -- At least icinga2_base_url, icinga2_auth_user, and icinga2_auth_pass are required - see CHECK below.
-    icinga2_base_url text,
-    icinga2_auth_user text,
-    icinga2_auth_pass text,
-    -- icinga2_ca_pem specifies a custom CA to be used in the PEM format, if not NULL.
-    icinga2_ca_pem text,
-    -- icinga2_common_name requires Icinga 2's certificate to hold this Common Name if not NULL. This allows using a
-    -- differing Common Name - maybe an Icinga 2 Endpoint object name - from the FQDN within icinga2_base_url.
-    icinga2_common_name text,
-    icinga2_insecure_tls boolenum NOT NULL DEFAULT 'n',
+    -- This column is required to limit API access for incoming connections to the Listener.
+    -- The username will be "source-${id}", allowing early verification.
+    listener_password_hash text NOT NULL,
 
     changed_at bigint NOT NULL,
     deleted boolenum NOT NULL DEFAULT 'n',
@@ -262,8 +249,7 @@ CREATE TABLE source (
     -- The hash is a PHP password_hash with PASSWORD_DEFAULT algorithm, defaulting to bcrypt. This check roughly ensures
     -- that listener_password_hash can only be populated with bcrypt hashes.
     -- https://icinga.com/docs/icinga-web/latest/doc/20-Advanced-Topics/#manual-user-creation-for-database-authentication-backend
-    CONSTRAINT ck_source_bcrypt_listener_password_hash CHECK (listener_password_hash IS NULL OR listener_password_hash LIKE '$2y$%'),
-    CONSTRAINT ck_source_icinga2_has_config CHECK (type != 'icinga2' OR (icinga2_base_url IS NOT NULL AND icinga2_auth_user IS NOT NULL AND icinga2_auth_pass IS NOT NULL)),
+    CONSTRAINT ck_source_bcrypt_listener_password_hash CHECK (listener_password_hash LIKE '$2y$%'),
 
     CONSTRAINT pk_source PRIMARY KEY (id)
 );
