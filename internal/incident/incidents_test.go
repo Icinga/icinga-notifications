@@ -23,9 +23,9 @@ func TestLoadOpenIncidents(t *testing.T) {
 
 	// Insert a dummy source for our test cases!
 	source := config.Source{
-		Type:               "notifications",
-		Name:               "Icinga Notifications",
-		Icinga2InsecureTLS: types.Bool{Bool: false, Valid: true},
+		Type:                 "notifications",
+		Name:                 "Icinga Notifications",
+		ListenerPasswordHash: types.MakeString("$2y$"), // Needed to pass the database constraint.
 	}
 	source.ChangedAt = types.UnixMilli(time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC))
 	source.Deleted = types.Bool{Bool: false, Valid: true}

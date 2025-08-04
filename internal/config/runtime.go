@@ -25,10 +25,6 @@ type RuntimeConfig struct {
 	// Accessing it requires a lock that is obtained with RLock() and released with RUnlock().
 	ConfigSet
 
-	// EventStreamLaunchFunc is a callback to launch an Event Stream API Client.
-	// This became necessary due to circular imports, either with the incident or icinga2 package.
-	EventStreamLaunchFunc func(source *Source)
-
 	// configChange contains incremental changes to config objects to be merged into the live configuration.
 	//
 	// It will be both created and deleted within RuntimeConfig.UpdateFromDatabase. To keep track of the known state,
@@ -46,13 +42,10 @@ type RuntimeConfig struct {
 }
 
 func NewRuntimeConfig(
-	esLaunch func(source *Source),
 	logs *logging.Logging,
 	db *database.DB,
 ) *RuntimeConfig {
 	return &RuntimeConfig{
-		EventStreamLaunchFunc: esLaunch,
-
 		configChangeTimestamps: make(map[string]types.UnixMilli),
 
 		logs:   logs,
