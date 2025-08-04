@@ -61,7 +61,6 @@ func restoreObjectsFromQuery(ctx context.Context, db *database.DB, query string,
 		err := utils.ExecAndApply[Object](ctx, db, query, args, func(o *Object) {
 			o.db = db
 			o.Tags = map[string]string{}
-			o.ExtraTags = map[string]string{}
 
 			select {
 			case objects <- o:
@@ -99,15 +98,7 @@ func restoreObjectsFromQuery(ctx context.Context, db *database.DB, query string,
 					if err != nil {
 						return errors.Wrap(err, "cannot restore objects ID tags")
 					}
-
-					// Restore object extra tags matching the given object ids
-					err = utils.ForEachRow[ExtraTagRow](ctx, db, "object_id", ids, func(et *ExtraTagRow) {
-						objectsMap[et.ObjectId.String()].ExtraTags[et.Tag] = et.Value
-					})
-					if err != nil {
-						return errors.Wrap(err, "cannot restore objects extra tags")
-					}
-
+	
 					cacheMu.Lock()
 					defer cacheMu.Unlock()
 

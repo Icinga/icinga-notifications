@@ -131,59 +131,13 @@ func (client *Client) buildCommonEvent(ctx context.Context, host, service string
 		}
 	}
 
-	extraTags, err := client.fetchExtraTagsFor(ctx, host, service)
-	if err != nil {
-		return nil, err
-	}
-
 	return &event.Event{
-		Time:      time.Now(),
-		SourceId:  client.EventSourceId,
-		Name:      eventName,
-		URL:       eventUrl.String(),
-		Tags:      eventTags,
-		ExtraTags: extraTags,
+		Time:     time.Now(),
+		SourceId: client.EventSourceId,
+		Name:     eventName,
+		URL:      eventUrl.String(),
+		Tags:     eventTags,
 	}, nil
-}
-
-// fetchExtraTagsFor fetches event extra tags for the given Host/Service name.
-//
-// If there are already existing extra tags in the cache, this function will just return those, otherwise
-// it will fetch the groups from the Icinga 2 API, map them to the event extra tags, add them to the client
-// Cache store and return them.
-//
-// Returns an error if it fails to successfully fetch the host/service groups from the API.
-func (client *Client) fetchExtraTagsFor(ctx context.Context, host, service string) (map[string]string, error) {
-	objectName := host
-	if service != "" {
-		objectName = host + "!" + service
-	}
-	if extraTags, ok := client.eventExtraTagsCache.Get(objectName); ok {
-		return extraTags, nil
-	}
-
-	extraTags := make(map[string]string)
-	queryResult, err := client.fetchCheckable(ctx, host, "")
-	if err != nil {
-		return nil, err
-	}
-	for _, hostGroup := range queryResult.Attrs.Groups {
-		extraTags["hostgroup/"+hostGroup] = ""
-	}
-
-	if service != "" {
-		queryResult, err := client.fetchCheckable(ctx, host, service)
-		if err != nil {
-			return nil, err
-		}
-		for _, serviceGroup := range queryResult.Attrs.Groups {
-			extraTags["servicegroup/"+serviceGroup] = ""
-		}
-	}
-
-	client.eventExtraTagsCache.Add(objectName, extraTags)
-
-	return extraTags, nil
 }
 
 // deleteExtraTagsCacheFor deletes any existing event extra tags of the given Object from the cache store.

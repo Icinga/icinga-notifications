@@ -30,10 +30,9 @@ type Event struct {
 	Time     time.Time `json:"-"`
 	SourceId int64     `json:"-"`
 
-	Name      string            `json:"name"`
-	URL       string            `json:"url"`
-	Tags      map[string]string `json:"tags"`
-	ExtraTags map[string]string `json:"extra_tags"`
+	Name string            `json:"name"`
+	URL  string            `json:"url"`
+	Tags map[string]string `json:"tags"`
 
 	Type     string   `json:"type"`
 	Severity Severity `json:"severity"`
@@ -75,14 +74,6 @@ func (e *Event) Validate() error {
 	for tag := range e.Tags {
 		if len(tag) > 255 {
 			return fmt.Errorf("invalid event: tag %q is too long, at most 255 chars allowed, %d given", tag, len(tag))
-		}
-	}
-
-	for tag := range e.ExtraTags {
-		if len(tag) > 255 {
-			return fmt.Errorf(
-				"invalid event: extra tag %q is too long, at most 255 chars allowed, %d given", tag, len(tag),
-			)
 		}
 	}
 
@@ -164,14 +155,6 @@ func (e *Event) FullString() string {
 	_, _ = fmt.Fprintf(&b, "  URL: %q\n", e.URL)
 	_, _ = fmt.Fprintf(&b, "  ID Tags:\n")
 	for tag, value := range e.Tags {
-		_, _ = fmt.Fprintf(&b, "    %q", tag)
-		if value != "" {
-			_, _ = fmt.Fprintf(&b, " = %q", value)
-		}
-		_, _ = fmt.Fprintf(&b, "\n")
-	}
-	_, _ = fmt.Fprintf(&b, "  Extra Tags:\n")
-	for tag, value := range e.ExtraTags {
 		_, _ = fmt.Fprintf(&b, "    %q", tag)
 		if value != "" {
 			_, _ = fmt.Fprintf(&b, " = %q", value)
