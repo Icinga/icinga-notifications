@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
+	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/contracts"
@@ -28,7 +29,7 @@ type Incident struct {
 	ObjectID    types.Binary    `db:"object_id"`
 	StartedAt   types.UnixMilli `db:"started_at"`
 	RecoveredAt types.UnixMilli `db:"recovered_at"`
-	Severity    event.Severity  `db:"severity"`
+	Severity    baseEv.Severity `db:"severity"`
 
 	Object *object.Object `db:"-"`
 
@@ -79,8 +80,8 @@ func (i *Incident) IncidentObject() *object.Object {
 	return i.Object
 }
 
-func (i *Incident) SeverityString() string {
-	return i.Severity.String()
+func (i *Incident) IncidentSeverity() baseEv.Severity {
+	return i.Severity
 }
 
 func (i *Incident) String() string {
@@ -128,10 +129,10 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	// These event types are not like the others used to mute an object/incident, such as DowntimeStart, which
 	// uniquely identify themselves why an incident is being muted, but are rather super generic types, and as
 	// such, we are ignoring superfluous ones that don't have any effect on that incident.
-	if i.isMuted && ev.Type == event.TypeMute {
+	if i.isMuted && ev.Type == baseEv.TypeMute {
 		i.logger.Debugw("Ignoring superfluous mute event", zap.String("event", ev.String()))
 		return event.ErrSuperfluousMuteUnmuteEvent
-	} else if !i.isMuted && ev.Type == event.TypeUnmute {
+	} else if !i.isMuted && ev.Type == baseEv.TypeUnmute {
 		i.logger.Debugw("Ignoring superfluous unmute event", zap.String("event", ev.String()))
 		return event.ErrSuperfluousMuteUnmuteEvent
 	}
@@ -169,7 +170,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 
 	switch ev.Type {
-	case event.TypeState:
+	case baseEv.TypeState:
 		if !isNew {
 			if err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
 				return err
@@ -189,7 +190,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		if err := i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
 			return err
 		}
-	case event.TypeAcknowledgementSet:
+	case baseEv.TypeAcknowledgementSet:
 		if err := i.processAcknowledgementEvent(ctx, tx, ev); err != nil {
 			if errors.Is(err, errSuperfluousAckEvent) {
 				// That ack error type indicates that the acknowledgement author was already a manager, thus
@@ -308,7 +309,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		return err
 	}
 
-	if newSeverity == event.SeverityOK {
+	if newSeverity == baseEv.SeverityOK {
 		i.RecoveredAt = types.UnixMilli(time.Now())
 		i.logger.Info("All sources recovered, closing incident")
 
@@ -499,9 +500,11 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 			i.logger.Info("Reevaluating escalations")
 
 			i.RetriggerEscalations(&event.Event{
-				Time:    nextEvalAt,
-				Type:    event.TypeIncidentAge,
-				Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt.Time())),
+				Time: nextEvalAt,
+				Event: &baseEv.Event{
+					Type:    baseEv.TypeIncidentAge,
+					Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt.Time())),
+				},
 			})
 		})
 	}
@@ -600,7 +603,7 @@ func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, ch
 	}
 
 	i.logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type),
-		zap.Int64("channel_id", chID), zap.String("event_type", ev.Type))
+		zap.Int64("channel_id", chID), zap.String("event_type", ev.Type.String()))
 
 	err := ch.Notify(contact, i, ev, daemon.Config().Icingaweb2URL)
 	if err != nil {
@@ -609,7 +612,7 @@ func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, ch
 	}
 
 	i.logger.Infow("Successfully sent a notification via channel plugin", zap.String("type", ch.Type),
-		zap.String("contact", contact.FullName), zap.String("event_type", ev.Type))
+		zap.String("contact", contact.FullName), zap.String("event_type", ev.Type.String()))
 
 	return nil
 }
