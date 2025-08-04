@@ -266,15 +266,6 @@ CREATE TABLE object_id_tag (
     CONSTRAINT fk_object_id_tag_object FOREIGN KEY (object_id) REFERENCES object(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-CREATE TABLE object_extra_tag (
-    object_id binary(32) NOT NULL,
-    tag varchar(255) NOT NULL,
-    value text NOT NULL,
-
-    CONSTRAINT pk_object_extra_tag PRIMARY KEY (object_id, tag),
-    CONSTRAINT fk_object_extra_tag_object FOREIGN KEY (object_id) REFERENCES object(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
-
 CREATE TABLE event (
     id bigint NOT NULL AUTO_INCREMENT,
     time bigint NOT NULL,

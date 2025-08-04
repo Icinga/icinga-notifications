@@ -299,15 +299,6 @@ CREATE TABLE object_id_tag (
     CONSTRAINT fk_object_id_tag_object FOREIGN KEY (object_id) REFERENCES object(id)
 );
 
-CREATE TABLE object_extra_tag (
-    object_id bytea NOT NULL,
-    tag varchar(255) NOT NULL,
-    value text NOT NULL,
-
-    CONSTRAINT pk_object_extra_tag PRIMARY KEY (object_id, tag),
-    CONSTRAINT fk_object_extra_tag_object FOREIGN KEY (object_id) REFERENCES object(id)
-);
-
 CREATE TYPE event_type AS ENUM (
     'acknowledgement-cleared',
     'acknowledgement-set',
