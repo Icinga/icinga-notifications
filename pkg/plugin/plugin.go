@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-go-library/utils"
-	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/pkg/rpc"
 	"io"
 	"log"
@@ -144,7 +144,7 @@ type Incident struct {
 	Url string `json:"url"`
 
 	// Severity of this Incident.
-	Severity string `json:"severity"`
+	Severity event.Severity `json:"severity"`
 }
 
 // Event indicating this NotificationRequest.
@@ -153,7 +153,7 @@ type Event struct {
 	Time time.Time `json:"time"`
 
 	// Type of this event, e.g., a "state" change, "mute" or "unmute". See further ./internal/event/event.go
-	Type string `json:"type"`
+	Type event.Type `json:"type"`
 
 	// Username may contain a user triggering this event, depending on the event's source.
 	Username string `json:"username"`

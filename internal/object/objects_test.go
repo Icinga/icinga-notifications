@@ -3,6 +3,7 @@ package object
 import (
 	"context"
 	"github.com/icinga/icinga-go-library/database"
+	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/testutils"
@@ -80,14 +81,16 @@ func TestRestoreMutedObjects(t *testing.T) {
 
 func makeObject(ctx context.Context, db *database.DB, t *testing.T, sourceID int64, mute bool) *Object {
 	ev := &event.Event{
-		Time:       time.Time{},
-		SourceId:   sourceID,
-		Name:       testutils.MakeRandomString(t),
-		Mute:       types.Bool{Valid: true, Bool: mute},
-		MuteReason: "Just for testing",
-		Tags: map[string]string{ // Always generate unique object tags not to produce same object ID!
-			"host":    testutils.MakeRandomString(t),
-			"service": testutils.MakeRandomString(t),
+		Time:     time.Time{},
+		SourceId: sourceID,
+		Event: &baseEv.Event{
+			Name:       testutils.MakeRandomString(t),
+			Mute:       types.Bool{Valid: true, Bool: mute},
+			MuteReason: "Just for testing",
+			Tags: map[string]string{ // Always generate unique object tags not to produce same object ID!
+				"host":    testutils.MakeRandomString(t),
+				"service": testutils.MakeRandomString(t),
+			},
 		},
 	}
 

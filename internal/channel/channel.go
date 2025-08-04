@@ -186,7 +186,7 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 		Incident: &plugin.Incident{
 			Id:       i.ID(),
 			Url:      incidentUrl.String(),
-			Severity: i.SeverityString(),
+			Severity: i.IncidentSeverity(),
 		},
 		Event: &plugin.Event{
 			Time:     ev.Time,

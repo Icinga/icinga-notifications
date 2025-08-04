@@ -6,6 +6,7 @@ import (
 	"github.com/icinga/icinga-go-library/com"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
@@ -129,9 +130,11 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 						currentIncidentsMu.Unlock()
 
 						i.RetriggerEscalations(&event.Event{
-							Time:    time.Now(),
-							Type:    event.TypeIncidentAge,
-							Message: fmt.Sprintf("Incident reached age %v (daemon was restarted)", time.Since(i.StartedAt.Time())),
+							Time: time.Now(),
+							Event: &baseEv.Event{
+								Type:    baseEv.TypeIncidentAge,
+								Message: fmt.Sprintf("Incident reached age %v (daemon was restarted)", time.Since(i.StartedAt.Time())),
+							},
 						})
 					}
 
@@ -220,7 +223,7 @@ func ProcessEvent(
 		return fmt.Errorf("cannot sync event object: %w", err)
 	}
 
-	createIncident := ev.Severity != event.SeverityNone && ev.Severity != event.SeverityOK
+	createIncident := ev.Severity != baseEv.SeverityNone && ev.Severity != baseEv.SeverityOK
 	currentIncident, err := GetCurrent(
 		ctx,
 		db,
@@ -234,13 +237,13 @@ func ProcessEvent(
 
 	if currentIncident == nil {
 		switch {
-		case ev.Severity == event.SeverityNone:
+		case ev.Severity == baseEv.SeverityNone:
 			// We need to ignore superfluous mute and unmute events here, as would be the case with an existing
 			// incident, otherwise the event stream catch-up phase will generate useless events after each
 			// Icinga 2 reload and overwhelm the database with the very same mute/unmute events.
-			if wasObjectMuted && ev.Type == event.TypeMute {
+			if wasObjectMuted && ev.Type == baseEv.TypeMute {
 				return event.ErrSuperfluousMuteUnmuteEvent
-			} else if !wasObjectMuted && ev.Type == event.TypeUnmute {
+			} else if !wasObjectMuted && ev.Type == baseEv.TypeUnmute {
 				return event.ErrSuperfluousMuteUnmuteEvent
 			}
 
@@ -251,7 +254,7 @@ func ProcessEvent(
 			}
 
 			return nil
-		case ev.Severity != event.SeverityOK:
+		case ev.Severity != baseEv.SeverityOK:
 			panic(fmt.Sprintf("cannot process event %v with a non-OK state %v without a known incident", ev, ev.Severity))
 		default:
 			return fmt.Errorf("%w: ok state event from source %d", event.ErrSuperfluousStateChange, ev.SourceId)
