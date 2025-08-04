@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
+	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/jmoiron/sqlx"
 )
@@ -23,46 +24,19 @@ var ErrSuperfluousMuteUnmuteEvent = errors.New("ignoring superfluous (un)mute ev
 
 // Event received of a specified Type for internal processing.
 //
-// The JSON struct tags are being used to unmarshal a JSON representation received from the listener.Listener. Some
-// fields are being omitted as they are only allowed to be populated from within icinga-notifications. Currently, there
-// is no Event being marshalled into its JSON representation.
+// This is a representation of an event received from an external source with additional metadata with sole
+// purpose of being used for internal processing. All the JSON serializable fields are these inherited from
+// the base event type, and are used to decode the request body. Currently, there is no Event being marshalled
+// into its JSON representation.
 type Event struct {
 	Time     time.Time `json:"-"`
 	SourceId int64     `json:"-"`
-
-	Name string            `json:"name"`
-	URL  string            `json:"url"`
-	Tags map[string]string `json:"tags"`
-
-	Type     string   `json:"type"`
-	Severity Severity `json:"severity"`
-	Username string   `json:"username"`
-	Message  string   `json:"message"`
-
-	Mute       types.Bool `json:"mute"`
-	MuteReason string     `json:"mute_reason"`
-
-	ID int64 `json:"-"`
+	ID       int64     `json:"-"`
 
 	MatchedRules map[int64]struct{} `json:"-"` // MatchedRules contains the event rule IDs received from source.
-}
 
-// Please keep the following types in alphabetically order and, even more important, make sure that the database type
-// event_type reflects the same values.
-const (
-	TypeAcknowledgementCleared = "acknowledgement-cleared"
-	TypeAcknowledgementSet     = "acknowledgement-set"
-	TypeCustom                 = "custom"
-	TypeDowntimeEnd            = "downtime-end"
-	TypeDowntimeRemoved        = "downtime-removed"
-	TypeDowntimeStart          = "downtime-start"
-	TypeFlappingEnd            = "flapping-end"
-	TypeFlappingStart          = "flapping-start"
-	TypeIncidentAge            = "incident-age"
-	TypeMute                   = "mute"
-	TypeState                  = "state"
-	TypeUnmute                 = "unmute"
-)
+	*baseEv.Event `json:",inline"`
+}
 
 // Validate validates the current event state.
 // Returns an error if it detects a misconfigured field.
@@ -81,39 +55,24 @@ func (e *Event) Validate() error {
 		return fmt.Errorf("invalid event: source ID must not be empty")
 	}
 
-	if e.Severity != SeverityNone && e.Type != TypeState {
-		return fmt.Errorf("invalid event: if 'severity' is set, 'type' must be set to %q", TypeState)
+	if e.Severity != baseEv.SeverityNone && e.Type != baseEv.TypeState {
+		return fmt.Errorf("invalid event: if 'severity' is set, 'type' must be set to %q", baseEv.TypeState)
 	}
-	if e.Type == TypeMute && (!e.Mute.Valid || !e.Mute.Bool) {
-		return fmt.Errorf("invalid event: 'mute' must be true if 'type' is set to %q", TypeMute)
+	if e.Type == baseEv.TypeMute && (!e.Mute.Valid || !e.Mute.Bool) {
+		return fmt.Errorf("invalid event: 'mute' must be true if 'type' is set to %q", baseEv.TypeMute)
 	}
-	if e.Type == TypeUnmute && (!e.Mute.Valid || e.Mute.Bool) {
-		return fmt.Errorf("invalid event: 'mute' must be false if 'type' is set to %q", TypeUnmute)
+	if e.Type == baseEv.TypeUnmute && (!e.Mute.Valid || e.Mute.Bool) {
+		return fmt.Errorf("invalid event: 'mute' must be false if 'type' is set to %q", baseEv.TypeUnmute)
 	}
 	if e.Mute.Valid && e.Mute.Bool && e.MuteReason == "" {
 		return fmt.Errorf("invalid event: 'mute_reason' must not be empty if 'mute' is set")
 	}
 
-	switch e.Type {
-	case "":
-		return fmt.Errorf("invalid event: 'type' must not be empty")
-	case
-		TypeAcknowledgementCleared,
-		TypeAcknowledgementSet,
-		TypeCustom,
-		TypeDowntimeEnd,
-		TypeDowntimeRemoved,
-		TypeDowntimeStart,
-		TypeFlappingEnd,
-		TypeFlappingStart,
-		TypeIncidentAge,
-		TypeMute,
-		TypeState,
-		TypeUnmute:
-		return nil
-	default:
-		return fmt.Errorf("invalid event: unsupported event type %q", e.Type)
+	if e.Type == baseEv.TypeUnknown {
+		return fmt.Errorf("invalid event: unsupported or empty event type %q", e.Type)
 	}
+
+	return nil
 }
 
 // SetMute alters the event mute and mute reason.
@@ -163,7 +122,7 @@ func (e *Event) FullString() string {
 	}
 	_, _ = fmt.Fprintf(&b, "  Time: %s\n", e.Time)
 	_, _ = fmt.Fprintf(&b, "  SourceId: %d\n", e.SourceId)
-	if e.Type != "" {
+	if e.Type != baseEv.TypeUnknown {
 		_, _ = fmt.Fprintf(&b, "  Type: %q\n", e.Type)
 	}
 	if e.Severity != 0 {
@@ -199,7 +158,7 @@ type EventRow struct {
 	Time       types.UnixMilli `db:"time"`
 	ObjectID   types.Binary    `db:"object_id"`
 	Type       types.String    `db:"type"`
-	Severity   Severity        `db:"severity"`
+	Severity   baseEv.Severity `db:"severity"`
 	Username   types.String    `db:"username"`
 	Message    types.String    `db:"message"`
 	Mute       types.Bool      `db:"mute"`
@@ -215,7 +174,7 @@ func NewEventRow(e *Event, objectId types.Binary) *EventRow {
 	return &EventRow{
 		Time:       types.UnixMilli(e.Time),
 		ObjectID:   objectId,
-		Type:       types.MakeString(e.Type, types.TransformEmptyStringToNull),
+		Type:       types.MakeString(e.Type.String(), types.TransformEmptyStringToNull),
 		Severity:   e.Severity,
 		Username:   types.MakeString(e.Username, types.TransformEmptyStringToNull),
 		Message:    types.MakeString(e.Message, types.TransformEmptyStringToNull),
