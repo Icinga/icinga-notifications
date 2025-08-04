@@ -179,10 +179,9 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 	req := &plugin.NotificationRequest{
 		Contact: contactStruct,
 		Object: &plugin.Object{
-			Name:      object.DisplayName(),
-			Url:       ev.URL,
-			Tags:      object.Tags,
-			ExtraTags: object.ExtraTags,
+			Name: object.DisplayName(),
+			Url:  ev.URL,
+			Tags: object.Tags,
 		},
 		Incident: &plugin.Incident{
 			Id:       i.ID(),

@@ -133,9 +133,6 @@ type Object struct {
 
 	// Tags defining this Object, may be "host" and "service" when from Icinga 2.
 	Tags map[string]string `json:"tags"`
-
-	// ExtraTags attached, may be a host or service groups when form Icinga 2.
-	ExtraTags map[string]string `json:"extra_tags"`
 }
 
 // Incident of this NotificationRequest, grouping Events for this Object.
@@ -301,13 +298,6 @@ func FormatMessage(writer io.Writer, req *NotificationRequest) {
 	_, _ = writer.Write([]byte("Tags:\n"))
 	for k, v := range utils.IterateOrderedMap(req.Object.Tags) {
 		_, _ = fmt.Fprintf(writer, "%s: %s\n", k, v)
-	}
-
-	if len(req.Object.ExtraTags) > 0 {
-		_, _ = writer.Write([]byte("\nExtra Tags:\n"))
-		for k, v := range utils.IterateOrderedMap(req.Object.ExtraTags) {
-			_, _ = fmt.Fprintf(writer, "%s: %s\n", k, v)
-		}
 	}
 
 	_, _ = fmt.Fprintf(writer, "\nIncident: %s", req.Incident.Url)
