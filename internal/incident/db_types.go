@@ -3,8 +3,8 @@ package incident
 import (
 	"context"
 	"github.com/icinga/icinga-go-library/database"
+	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
-	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/jmoiron/sqlx"
 )
@@ -74,8 +74,8 @@ type HistoryRow struct {
 	Time              types.UnixMilli   `db:"time"`
 	Type              HistoryEventType  `db:"type"`
 	ChannelID         types.Int         `db:"channel_id"`
-	NewSeverity       event.Severity    `db:"new_severity"`
-	OldSeverity       event.Severity    `db:"old_severity"`
+	NewSeverity       baseEv.Severity   `db:"new_severity"`
+	OldSeverity       baseEv.Severity   `db:"old_severity"`
 	NewRecipientRole  ContactRole       `db:"new_recipient_role"`
 	OldRecipientRole  ContactRole       `db:"old_recipient_role"`
 	Message           types.String      `db:"message"`

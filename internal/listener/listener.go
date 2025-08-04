@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -175,11 +176,11 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	ev.Time = time.Now()
 	ev.SourceId = source.ID
-	if ev.Type == "" {
-		ev.Type = event.TypeState
-	} else if !ev.Mute.Valid && ev.Type == event.TypeMute {
+	if ev.Type == baseEv.TypeUnknown {
+		ev.Type = baseEv.TypeState
+	} else if !ev.Mute.Valid && ev.Type == baseEv.TypeMute {
 		ev.SetMute(true, ev.MuteReason)
-	} else if !ev.Mute.Valid && ev.Type == event.TypeUnmute {
+	} else if !ev.Mute.Valid && ev.Type == baseEv.TypeUnmute {
 		ev.SetMute(false, ev.MuteReason)
 	}
 

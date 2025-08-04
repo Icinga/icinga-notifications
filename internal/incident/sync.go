@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
+	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -17,7 +18,7 @@ import (
 // Upsert implements the contracts.Upserter interface.
 func (i *Incident) Upsert() interface{} {
 	return &struct {
-		Severity    event.Severity  `db:"severity"`
+		Severity    baseEv.Severity `db:"severity"`
 		RecoveredAt types.UnixMilli `db:"recovered_at"`
 	}{Severity: i.Severity, RecoveredAt: i.RecoveredAt}
 }
