@@ -11,3 +11,10 @@ ALTER TABLE source
   Drop COLUMN icinga2_common_name,
   Drop COLUMN icinga2_insecure_tls,
   MODIFY COLUMN listener_password_hash text NOT NULL;
+
+ALTER TABLE rule
+  ADD COLUMN source_id bigint DEFAULT NULL AFTER timeperiod_id,
+  ADD CONSTRAINT fk_rule_source FOREIGN KEY (source_id) REFERENCES source(id);
+
+UPDATE rule SET source_id = (SELECT id FROM source WHERE type = 'icinga2');
+ALTER TABLE rule MODIFY COLUMN source_id bigint NOT NULL;
