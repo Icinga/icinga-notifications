@@ -267,13 +267,15 @@ CREATE TABLE rule (
     id bigint NOT NULL AUTO_INCREMENT,
     name text NOT NULL COLLATE utf8mb4_unicode_ci,
     timeperiod_id bigint,
+    source_id bigint NOT NULL, -- the source this rule belongs to
     object_filter text,
 
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
 
     CONSTRAINT pk_rule PRIMARY KEY (id),
-    CONSTRAINT fk_rule_timeperiod FOREIGN KEY (timeperiod_id) REFERENCES timeperiod(id)
+    CONSTRAINT fk_rule_timeperiod FOREIGN KEY (timeperiod_id) REFERENCES timeperiod(id),
+    CONSTRAINT fk_rule_source FOREIGN KEY (source_id) REFERENCES source(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_rule_changed_at ON rule(changed_at);

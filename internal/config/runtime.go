@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/notifications"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -61,8 +63,9 @@ type ConfigSet struct {
 	Groups           map[int64]*recipient.Group
 	TimePeriods      map[int64]*timeperiod.TimePeriod
 	Schedules        map[int64]*recipient.Schedule
-	Rules            map[int64]*rule.Rule
 	Sources          map[int64]*Source
+
+	RuleSet // RuleSet contains the currently loaded rules and their version.
 
 	// The following fields contain intermediate values, necessary for the incremental config synchronization.
 	// Furthermore, they allow accessing intermediate tables as everything is referred by pointers.
@@ -160,6 +163,25 @@ func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Escalation {
 	}
 
 	return nil
+}
+
+// GetRulesVersionFor retrieves the version of the rules for a specific source.
+//
+// It returns the version as a hexadecimal string, which is a representation of the version number.
+// If the source does not have any rules associated with it, the version will be set to notifications.EmptyRulesVersion.
+//
+// May not be called while holding the write lock on the RuntimeConfig.
+func (r *RuntimeConfig) GetRulesVersionFor(source int64) string {
+	r.RLock()
+	defer r.RUnlock()
+
+	if r.RulesBySource != nil {
+		if sourceInfo, ok := r.RulesBySource[source]; ok && sourceInfo.Version > 0 {
+			return fmt.Sprintf("%x", sourceInfo.Version)
+		}
+	}
+
+	return notifications.EmptyRulesVersion
 }
 
 // GetContact returns *recipient.Contact by the given username (case-insensitive).
