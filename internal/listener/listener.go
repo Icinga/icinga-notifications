@@ -162,14 +162,12 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: parse and verify ruleIdsStr
-	if ruleIdsStr == "" {
-		// Case for empty X-Rule-Ids where the event was just sent to check if new rules are available (previous if).
-		abort(http.StatusNoContent, nil, "dismissed event due to empty X-Rule-Ids")
+	var ev event.Event
+	if err := ev.LoadMatchedRulesFromString(ruleIdsStr); err != nil {
+		abort(http.StatusBadRequest, nil, "cannot parse X-Rule-Ids: %v", err)
 		return
 	}
 
-	var ev event.Event
 	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
 		abort(http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
 		return
@@ -189,9 +187,6 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		abort(http.StatusBadRequest, &ev, err.Error())
 		return
 	}
-
-	ev.ExtraTags = make(map[string]string)
-	ev.ExtraTags["rules"] = ruleIdsStr
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
 	err := incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
