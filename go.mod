@@ -5,7 +5,7 @@ go 1.24
 require (
 	github.com/creasty/defaults v1.8.0
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
-	github.com/emersion/go-smtp v0.23.0
+	github.com/emersion/go-smtp v0.24.0
 	github.com/google/uuid v1.6.0
 	github.com/icinga/icinga-go-library v0.7.3-0.20250807134650-55c038b220d8
 	github.com/jhillyerd/enmime v1.3.0
