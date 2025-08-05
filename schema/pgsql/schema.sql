@@ -320,13 +320,15 @@ CREATE TABLE rule (
     id bigserial,
     name citext NOT NULL,
     timeperiod_id bigint,
+    source_id bigint NOT NULL, -- the source this rule belongs to
     object_filter text,
 
     changed_at bigint NOT NULL,
     deleted boolenum NOT NULL DEFAULT 'n',
 
     CONSTRAINT pk_rule PRIMARY KEY (id),
-    CONSTRAINT fk_rule_timeperiod FOREIGN KEY (timeperiod_id) REFERENCES timeperiod(id)
+    CONSTRAINT fk_rule_timeperiod FOREIGN KEY (timeperiod_id) REFERENCES timeperiod(id),
+    CONSTRAINT fk_rule_source FOREIGN KEY (source_id) REFERENCES source(id)
 );
 
 CREATE INDEX idx_rule_changed_at ON rule(changed_at);
