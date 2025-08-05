@@ -6,8 +6,36 @@ import (
 	"slices"
 )
 
+// SourceRulesInfo holds information about the rules associated with a specific source.
+type SourceRulesInfo struct {
+	// Version is the version of the rules for the source.
+	//
+	// It is a monotonically increasing number that is updated whenever a rule is added, modified, or deleted.
+	// With each state change of the rules referenced by RuleIDs, the Version will always be incremented
+	// by 1, starting from 0. When there are no configured rules for the source, Version will be reset to 0.
+	//
+	// The Version is not unique across different sources, but it is unique for a specific source at a specific time.
+	Version uint64
+
+	// RuleIDs is a list of rule IDs associated with a specific source.
+	//
+	// It is used to quickly access the rules for a specific source without iterating over all rules.
+	RuleIDs []int64
+}
+
+// RuleSet represents the set of event rules currently loaded in the runtime configuration.
+// It contains the rules and their associated information, such as the source they belong to and their version.
+type RuleSet struct {
+	Rules map[int64]*rule.Rule // rules is a map of rule.Rule by their ID.
+
+	RulesBySource map[int64]*SourceRulesInfo // RulesBySource maps source IDs to their rules and version information.
+}
+
 // applyPendingRules synchronizes changed rules.
 func (r *RuntimeConfig) applyPendingRules() {
+	// Keep track of sources the rules were updated for, so we can update their version later.
+	updatedSources := make(map[int64]struct{})
+
 	incrementalApplyPending(
 		r,
 		&r.Rules, &r.configChange.Rules,
@@ -21,6 +49,17 @@ func (r *RuntimeConfig) applyPendingRules() {
 			}
 
 			newElement.Escalations = make(map[int64]*rule.Escalation)
+			updatedSources[newElement.SourceID] = struct{}{}
+			if r.RulesBySource == nil {
+				r.RulesBySource = make(map[int64]*SourceRulesInfo)
+			}
+
+			// Add the new rule to the per-source rules cache.
+			if sourceInfo := r.RulesBySource[newElement.SourceID]; sourceInfo == nil {
+				r.RulesBySource[newElement.SourceID] = &SourceRulesInfo{RuleIDs: []int64{newElement.ID}}
+			} else {
+				sourceInfo.RuleIDs = append(sourceInfo.RuleIDs, newElement.ID)
+			}
 			return nil
 		},
 		func(curElement, update *rule.Rule) error {
@@ -40,10 +79,35 @@ func (r *RuntimeConfig) applyPendingRules() {
 
 			// ObjectFilter{,Expr} are being initialized by config.IncrementalConfigurableInitAndValidatable.
 			curElement.ObjectFilterExpr = update.ObjectFilterExpr
+			updatedSources[curElement.SourceID] = struct{}{}
 
 			return nil
 		},
-		nil)
+		func(delElement *rule.Rule) error {
+			if sourceInfo, ok := r.RulesBySource[delElement.SourceID]; ok {
+				sourceInfo.RuleIDs = slices.DeleteFunc(sourceInfo.RuleIDs, func(id int64) bool {
+					return id == delElement.ID
+				})
+				if len(sourceInfo.RuleIDs) == 0 {
+					delete(r.RulesBySource, delElement.SourceID) // Remove the source if no rules are left.
+				}
+			}
+			return nil
+		},
+	)
+
+	// After applying the rules, we need to update the version of the sources that were modified.
+	// This is done to ensure that the version is incremented whenever a rule is added, modified,
+	// or deleted only once per applyPendingRules call, even if multiple rules from the same source
+	// were changed.
+	for sourceID := range updatedSources {
+		if r.RulesBySource != nil {
+			if sourceInfo, ok := r.RulesBySource[sourceID]; ok {
+				// Invariant: len(sourceInfo.RuleIDs) > 0 if the source exists in RulesBySource (see delete above).
+				sourceInfo.Version++
+			}
+		}
+	}
 
 	incrementalApplyPending(
 		r,

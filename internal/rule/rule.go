@@ -15,6 +15,7 @@ type Rule struct {
 	Name             string                 `db:"name"`
 	TimePeriod       *timeperiod.TimePeriod `db:"-"`
 	TimePeriodID     types.Int              `db:"timeperiod_id"`
+	SourceID         int64                  `db:"source_id"`
 	ObjectFilterExpr types.String           `db:"object_filter"`
 	Escalations      map[int64]*Escalation  `db:"-"`
 }
@@ -37,6 +38,7 @@ func (r *Rule) IncrementalInitAndValidate() error {
 func (r *Rule) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("id", r.ID)
 	encoder.AddString("name", r.Name)
+	encoder.AddInt64("source_id", r.SourceID)
 
 	if r.TimePeriodID.Valid && r.TimePeriodID.Int64 != 0 {
 		encoder.AddInt64("timeperiod_id", r.TimePeriodID.Int64)
