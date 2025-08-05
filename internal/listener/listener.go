@@ -45,7 +45,6 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 
 	l.mux.Handle("/debug/", http.StripPrefix("/debug", l.requireDebugAuth(debugMux)))
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
-	l.mux.HandleFunc("/event-rules", l.RulesForFilters)
 	return l
 }
 
@@ -84,28 +83,6 @@ func (l *Listener) Run(ctx context.Context) error {
 	case err := <-serverErr:
 		return err
 	}
-}
-
-// getRuleVersion returns the latest rule version.
-//
-// Technically, the rule version is an encoded string representation of the latest changed_at value from each rule.
-// Being an implementation detail, it might change over time. For the moment, a simple equality check is enough.
-func (l *Listener) getRuleVersion() string {
-	l.runtimeConfig.RLock()
-	defer l.runtimeConfig.RUnlock()
-
-	var latest time.Time
-	for _, r := range l.runtimeConfig.Rules {
-		if t := r.ChangedAt.Time(); t.After(latest) {
-			latest = t
-		}
-	}
-
-	if latest.IsZero() {
-		return "NA"
-	}
-
-	return fmt.Sprintf("%x", latest.UnixNano())
 }
 
 // sourceFromAuthOrAbort extracts a *config.Source from the HTTP Basic Auth. If the credentials are wrong, (nil, false) is
@@ -154,12 +131,16 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	ruleIdsStr := r.Header.Get("X-Rule-Ids")
 	ruleVersion := r.Header.Get("X-Rule-Version")
 
-	if latestRuleVersion := l.getRuleVersion(); ruleVersion != latestRuleVersion {
-		abort(http.StatusFailedDependency,
-			nil,
-			"X-Rule-Version %q does not match %q, refetch rules",
-			ruleVersion,
-			latestRuleVersion)
+	// If the client uses an outdated rules version, reject the request but send also the current rules version
+	// and rules for this source back to the client, so it can retry the request with the updated rules.
+	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(source.ID); ruleVersion != latestRuleVersion {
+		w.WriteHeader(http.StatusFailedDependency)
+		l.writeSourceRulesInfo(w, source)
+
+		l.logger.Debugw("Abort event processing due to outdated rules version",
+			zap.String("current_version", latestRuleVersion),
+			zap.String("provided_version", ruleVersion),
+			zap.String("source", source.Name))
 		return
 	}
 
@@ -205,15 +186,6 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = fmt.Fprintln(w, "event processed successfully")
 	_, _ = fmt.Fprintln(w)
-}
-
-func (l *Listener) RulesForFilters(w http.ResponseWriter, r *http.Request) {
-	_, validAuth := l.sourceFromAuthOrAbort(w, r)
-	if !validAuth {
-		return
-	}
-
-	l.DumpRules(w, r)
 }
 
 // requireDebugAuth is a middleware that checks if the valid debug password was provided. If there is no password
@@ -327,17 +299,39 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	l.runtimeConfig.RLock()
+	rules := l.runtimeConfig.Rules
+	l.runtimeConfig.RUnlock()
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(rules)
+}
+
+// writeSourceRulesInfo writes the rules information for a specific source to the response writer.
+//
+// It includes the rules version and a map of rule IDs to their corresponding rule objects.
+func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.Source) {
 	type Response struct {
 		Version string
 		Rules   map[int64]*rule.Rule
 	}
 
 	var resp Response
-	resp.Version = l.getRuleVersion()
+	resp.Version = l.runtimeConfig.GetRulesVersionFor(source.ID)
 
-	l.runtimeConfig.RLock()
-	resp.Rules = l.runtimeConfig.Rules
-	l.runtimeConfig.RUnlock()
+	func() { // Use a function to ensure that the RLock and RUnlock are called before writing the response.
+		l.runtimeConfig.RLock()
+		defer l.runtimeConfig.RUnlock()
+
+		sourceInfo := l.runtimeConfig.RulesBySource[source.ID]
+		if sourceInfo != nil {
+			resp.Rules = make(map[int64]*rule.Rule, len(sourceInfo.RuleIDs))
+			for _, rID := range sourceInfo.RuleIDs {
+				resp.Rules[rID] = l.runtimeConfig.Rules[rID]
+			}
+		}
+	}()
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
