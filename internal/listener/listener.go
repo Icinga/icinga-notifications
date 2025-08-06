@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/notifications"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -128,8 +129,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ruleIdsStr := r.Header.Get("X-Rule-Ids")
-	ruleVersion := r.Header.Get("X-Rule-Version")
+	ruleIdsStr := r.Header.Get(notifications.XIcingaRulesId)
+	ruleVersion := r.Header.Get(notifications.XIcingaRulesVersion)
 
 	// If the client uses an outdated rules version, reject the request but send also the current rules version
 	// and rules for this source back to the client, so it can retry the request with the updated rules.
@@ -146,7 +147,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	var ev event.Event
 	if err := ev.LoadMatchedRulesFromString(ruleIdsStr); err != nil {
-		abort(http.StatusBadRequest, nil, "cannot parse X-Rule-Ids: %v", err)
+		abort(http.StatusBadRequest, nil, "cannot parse %s header: %v", notifications.XIcingaRulesId, err)
 		return
 	}
 
