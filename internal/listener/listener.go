@@ -135,7 +135,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	// If the client uses an outdated rules version, reject the request but send also the current rules version
 	// and rules for this source back to the client, so it can retry the request with the updated rules.
 	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(source.ID); ruleVersion != latestRuleVersion {
-		w.WriteHeader(http.StatusFailedDependency)
+		w.WriteHeader(http.StatusPreconditionFailed)
 		l.writeSourceRulesInfo(w, source)
 
 		l.logger.Debugw("Abort event processing due to outdated rules version",
