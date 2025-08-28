@@ -95,7 +95,6 @@ Configuration of the logging component used by Icinga Notifications.
 |-----------------|---------------------------------------------------------------------------|
 | channel         | Notification channels, their configuration and output.                    |
 | database        | Database connection status and queries.                                   |
-| icinga2         | Icinga 2 API communications, including the Event Stream.                  |
 | incident        | Incident management and changes.                                          |
 | listener        | HTTP listener for event submission and debugging.                         |
 | runtime-updates | Configuration changes through Icinga Notifications Web from the database. |

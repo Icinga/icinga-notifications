@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
@@ -23,9 +24,9 @@ func TestLoadOpenIncidents(t *testing.T) {
 
 	// Insert a dummy source for our test cases!
 	source := config.Source{
-		Type:               "notifications",
-		Name:               "Icinga Notifications",
-		Icinga2InsecureTLS: types.Bool{Bool: false, Valid: true},
+		Type:                 "notifications",
+		Name:                 "Icinga Notifications",
+		ListenerPasswordHash: types.MakeString("$2y$"), // Needed to pass the database constraint.
 	}
 	source.ChangedAt = types.UnixMilli(time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC))
 	source.Deleted = types.Bool{Bool: false, Valid: true}
@@ -149,14 +150,12 @@ func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID i
 	ev := &event.Event{
 		Time:     time.Time{},
 		SourceId: sourceID,
-		Name:     testutils.MakeRandomString(t),
-		Tags: map[string]string{ // Always generate unique object tags not to produce same object ID!
-			"host":    testutils.MakeRandomString(t),
-			"service": testutils.MakeRandomString(t),
-		},
-		ExtraTags: map[string]string{
-			"hostgroup/database-server": "",
-			"servicegroup/webserver":    "",
+		Event: &baseEv.Event{
+			Name: testutils.MakeRandomString(t),
+			Tags: map[string]string{ // Always generate unique object tags not to produce same object ID!
+				"host":    testutils.MakeRandomString(t),
+				"service": testutils.MakeRandomString(t),
+			},
 		},
 	}
 
@@ -165,9 +164,9 @@ func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID i
 
 	i := NewIncident(db, o, &config.RuntimeConfig{}, nil)
 	i.StartedAt = types.UnixMilli(time.Now().Add(-2 * time.Hour).Truncate(time.Second))
-	i.Severity = event.SeverityCrit
+	i.Severity = baseEv.SeverityCrit
 	if recovered {
-		i.Severity = event.SeverityOK
+		i.Severity = baseEv.SeverityOK
 		i.RecoveredAt = types.UnixMilli(time.Now())
 	}
 

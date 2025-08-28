@@ -3,6 +3,7 @@ package object
 import (
 	"context"
 	"github.com/icinga/icinga-go-library/database"
+	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/testutils"
@@ -23,9 +24,14 @@ func TestRestoreMutedObjects(t *testing.T) {
 			"type":       "notifications",
 			"name":       "Icinga Notifications",
 			"changed_at": int64(1720702049000),
+			"pwd_hash":   "$2y$", // Needed to pass the database constraint.
 		}
 		// We can't use config.Source here unfortunately due to cyclic import error!
-		id, err := database.InsertObtainID(ctx, tx, `INSERT INTO source (type, name, changed_at) VALUES (:type, :name, :changed_at)`, args)
+		id, err := database.InsertObtainID(
+			ctx,
+			tx,
+			`INSERT INTO source (type, name, changed_at, listener_password_hash) VALUES (:type, :name, :changed_at, :pwd_hash)`,
+			args)
 		require.NoError(t, err, "populating source table should not fail")
 
 		sourceID = id
@@ -62,15 +68,11 @@ func TestRestoreMutedObjects(t *testing.T) {
 			assert.Equal(t, o.URL, objFromCache.URL, "objects url should match")
 
 			assert.Equal(t, o.Tags, objFromCache.Tags, "objects tags should match")
-			assert.Equal(t, o.ExtraTags, objFromCache.ExtraTags, "objects tags should match")
 		}
 
 		// Purge all newly created objects and their relations not mes up local database tests.
 		_, err = db.NamedExecContext(ctx, `DELETE FROM object_id_tag WHERE object_id = :id`, o)
 		assert.NoError(t, err, "deleting object id tags should not fail")
-
-		_, err = db.NamedExecContext(ctx, `DELETE FROM object_extra_tag WHERE object_id = :id`, o)
-		assert.NoError(t, err, "deleting object extra tags should not fail")
 
 		_, err = db.NamedExecContext(ctx, `DELETE FROM object WHERE id = :id`, o)
 		assert.NoError(t, err, "deleting object should not fail")
@@ -79,18 +81,16 @@ func TestRestoreMutedObjects(t *testing.T) {
 
 func makeObject(ctx context.Context, db *database.DB, t *testing.T, sourceID int64, mute bool) *Object {
 	ev := &event.Event{
-		Time:       time.Time{},
-		SourceId:   sourceID,
-		Name:       testutils.MakeRandomString(t),
-		Mute:       types.Bool{Valid: true, Bool: mute},
-		MuteReason: "Just for testing",
-		Tags: map[string]string{ // Always generate unique object tags not to produce same object ID!
-			"host":    testutils.MakeRandomString(t),
-			"service": testutils.MakeRandomString(t),
-		},
-		ExtraTags: map[string]string{
-			"hostgroup/database-server": "",
-			"servicegroup/webserver":    "",
+		Time:     time.Time{},
+		SourceId: sourceID,
+		Event: &baseEv.Event{
+			Name:       testutils.MakeRandomString(t),
+			Mute:       types.Bool{Valid: true, Bool: mute},
+			MuteReason: "Just for testing",
+			Tags: map[string]string{ // Always generate unique object tags not to produce same object ID!
+				"host":    testutils.MakeRandomString(t),
+				"service": testutils.MakeRandomString(t),
+			},
 		},
 	}
 

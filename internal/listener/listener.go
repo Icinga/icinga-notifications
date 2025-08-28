@@ -8,11 +8,14 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/notifications"
+	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
+	"github.com/icinga/icinga-notifications/internal/rule"
 	"go.uber.org/zap"
 	"net/http"
 	"time"
@@ -39,6 +42,7 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 	debugMux.HandleFunc("/dump-config", l.DumpConfig)
 	debugMux.HandleFunc("/dump-incidents", l.DumpIncidents)
 	debugMux.HandleFunc("/dump-schedules", l.DumpSchedules)
+	debugMux.HandleFunc("/dump-rules", l.DumpRules)
 
 	l.mux.Handle("/debug/", http.StripPrefix("/debug", l.requireDebugAuth(debugMux)))
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
@@ -82,7 +86,23 @@ func (l *Listener) Run(ctx context.Context) error {
 	}
 }
 
-func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
+// sourceFromAuthOrAbort extracts a *config.Source from the HTTP Basic Auth. If the credentials are wrong, (nil, false) is
+// returned and 401 was written back to the response writer.
+func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (*config.Source, bool) {
+	if authUser, authPass, authOk := r.BasicAuth(); authOk {
+		src := l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
+		if src != nil {
+			return src, true
+		}
+	}
+
+	w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications"`)
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = fmt.Fprintln(w, "please provide the debug-password as basic auth credentials (user is ignored)")
+	return nil, false
+}
+
+func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	// abort the current connection by sending the status code and an error both to the log and back to the client.
 	abort := func(statusCode int, ev *event.Event, format string, a ...any) {
 		msg := format
@@ -99,35 +119,50 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 		logger.Debugw("Abort listener submitted event processing")
 	}
 
-	if req.Method != http.MethodPost {
+	if r.Method != http.MethodPost {
 		abort(http.StatusMethodNotAllowed, nil, "POST required")
 		return
 	}
 
-	var source *config.Source
-	if authUser, authPass, authOk := req.BasicAuth(); authOk {
-		source = l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
+	source, validAuth := l.sourceFromAuthOrAbort(w, r)
+	if !validAuth {
+		return
 	}
-	if source == nil {
-		w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications"`)
-		abort(http.StatusUnauthorized, nil, "HTTP authorization required")
+
+	ruleIdsStr := r.Header.Get(notifications.XIcingaRulesId)
+	ruleVersion := r.Header.Get(notifications.XIcingaRulesVersion)
+
+	// If the client uses an outdated rules version, reject the request but send also the current rules version
+	// and rules for this source back to the client, so it can retry the request with the updated rules.
+	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(source.ID); ruleVersion != latestRuleVersion {
+		w.WriteHeader(http.StatusPreconditionFailed)
+		l.writeSourceRulesInfo(w, source)
+
+		l.logger.Debugw("Abort event processing due to outdated rules version",
+			zap.String("current_version", latestRuleVersion),
+			zap.String("provided_version", ruleVersion),
+			zap.String("source", source.Name))
 		return
 	}
 
 	var ev event.Event
-	err := json.NewDecoder(req.Body).Decode(&ev)
-	if err != nil {
+	if err := ev.LoadMatchedRulesFromString(ruleIdsStr); err != nil {
+		abort(http.StatusBadRequest, nil, "cannot parse %s header: %v", notifications.XIcingaRulesId, err)
+		return
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
 		abort(http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
 		return
 	}
 
 	ev.Time = time.Now()
 	ev.SourceId = source.ID
-	if ev.Type == "" {
-		ev.Type = event.TypeState
-	} else if !ev.Mute.Valid && ev.Type == event.TypeMute {
+	if ev.Type == baseEv.TypeUnknown {
+		ev.Type = baseEv.TypeState
+	} else if !ev.Mute.Valid && ev.Type == baseEv.TypeMute {
 		ev.SetMute(true, ev.MuteReason)
-	} else if !ev.Mute.Valid && ev.Type == event.TypeUnmute {
+	} else if !ev.Mute.Valid && ev.Type == baseEv.TypeUnmute {
 		ev.SetMute(false, ev.MuteReason)
 	}
 
@@ -137,7 +172,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
-	err = incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
+	err := incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
 	if errors.Is(err, event.ErrSuperfluousStateChange) || errors.Is(err, event.ErrSuperfluousMuteUnmuteEvent) {
 		abort(http.StatusNotAcceptable, &ev, "%v", err)
 		return
@@ -149,7 +184,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, req *http.Request) {
 
 	l.logger.Infow("Successfully processed event", zap.String("event", ev.String()))
 
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusAccepted)
 	_, _ = fmt.Fprintln(w, "event processed successfully")
 	_, _ = fmt.Fprintln(w)
 }
@@ -255,4 +290,51 @@ func (l *Listener) DumpSchedules(w http.ResponseWriter, r *http.Request) {
 
 		_, _ = fmt.Fprintln(w)
 	}
+}
+
+// DumpRules is used as /debug prefixed endpoint to dump all rules. The authorization has to be done beforehand.
+func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = fmt.Fprintln(w, "GET required")
+		return
+	}
+
+	l.runtimeConfig.RLock()
+	rules := l.runtimeConfig.Rules
+	l.runtimeConfig.RUnlock()
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(rules)
+}
+
+// writeSourceRulesInfo writes the rules information for a specific source to the response writer.
+//
+// It includes the rules version and a map of rule IDs to their corresponding rule objects.
+func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.Source) {
+	type Response struct {
+		Version string
+		Rules   map[int64]*rule.Rule
+	}
+
+	var resp Response
+	resp.Version = l.runtimeConfig.GetRulesVersionFor(source.ID)
+
+	func() { // Use a function to ensure that the RLock and RUnlock are called before writing the response.
+		l.runtimeConfig.RLock()
+		defer l.runtimeConfig.RUnlock()
+
+		sourceInfo := l.runtimeConfig.RulesBySource[source.ID]
+		if sourceInfo != nil {
+			resp.Rules = make(map[int64]*rule.Rule, len(sourceInfo.RuleIDs))
+			for _, rID := range sourceInfo.RuleIDs {
+				resp.Rules[rID] = l.runtimeConfig.Rules[rID]
+			}
+		}
+	}()
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(resp)
 }
