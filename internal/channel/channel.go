@@ -51,7 +51,7 @@ type newConfig struct {
 
 // Start initializes the channel and starts the plugin in the background
 func (c *Channel) Start(ctx context.Context, logger *zap.SugaredLogger) {
-	c.Logger = logger
+	c.Logger = logger.With(zap.Object("channel", c))
 	c.restartCh = make(chan newConfig)
 	c.pluginCh = make(chan *Plugin)
 	c.pluginCtx, c.pluginCtxCancel = context.WithCancel(ctx)
@@ -153,7 +153,8 @@ func (c *Channel) Stop() {
 }
 
 // Restart signals to restart the channel plugin with the updated channel config
-func (c *Channel) Restart() {
+func (c *Channel) Restart(logger *zap.SugaredLogger) {
+	c.Logger = logger.With(zap.Object("channel", c))
 	c.Logger.Info("Restarting the channel plugin due to a config change")
 	c.restartCh <- newConfig{c.Type, c.Config}
 }
