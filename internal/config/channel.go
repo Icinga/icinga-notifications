@@ -3,7 +3,6 @@ package config
 import (
 	"context"
 	"github.com/icinga/icinga-notifications/internal/channel"
-	"go.uber.org/zap"
 )
 
 // applyPendingChannels synchronizes changed channels.
@@ -12,9 +11,7 @@ func (r *RuntimeConfig) applyPendingChannels() {
 		r,
 		&r.Channels, &r.configChange.Channels,
 		func(newElement *channel.Channel) error {
-			newElement.Start(context.TODO(), r.logs.GetChildLogger("channel").With(
-				zap.Int64("id", newElement.ID),
-				zap.String("name", newElement.Name)))
+			newElement.Start(context.TODO(), r.logs.GetChildLogger("channel").SugaredLogger)
 			return nil
 		},
 		func(curElement, update *channel.Channel) error {
@@ -22,7 +19,7 @@ func (r *RuntimeConfig) applyPendingChannels() {
 			curElement.Name = update.Name
 			curElement.Type = update.Type
 			curElement.Config = update.Config
-			curElement.Restart()
+			curElement.Restart(r.logs.GetChildLogger("channel").SugaredLogger)
 			return nil
 		},
 		func(delElement *channel.Channel) error {
