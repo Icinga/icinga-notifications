@@ -107,7 +107,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 			}
 
 			escalation.Recipients = slices.DeleteFunc(escalation.Recipients, func(recipient *rule.EscalationRecipient) bool {
-				return recipient.EscalationID == delElement.EscalationID
+				return recipient.ID == delElement.ID
 			})
 			return nil
 		})
