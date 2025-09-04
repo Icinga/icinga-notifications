@@ -3,6 +3,9 @@ package incident
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/icinga/icinga-go-library/com"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
@@ -16,8 +19,6 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	"sync"
-	"time"
 )
 
 var (
@@ -81,11 +82,11 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 					incidentsByObjId := make(map[string]*Incident, chunkLen)
 
 					for _, i := range bulk {
-						incidentsById[i.Id] = i
+						incidentsById[i.ID] = i
 						incidentsByObjId[i.ObjectID.String()] = i
 
 						objectIds = append(objectIds, i.ObjectID)
-						incidentIds = append(incidentIds, i.Id)
+						incidentIds = append(incidentIds, i.ID)
 					}
 
 					// Restore all incident objects matching the given object ids
@@ -195,7 +196,7 @@ func GetCurrentIncidents() map[int64]*Incident {
 
 	m := make(map[int64]*Incident)
 	for _, incident := range currentIncidents {
-		m[incident.Id] = incident
+		m[incident.ID] = incident
 	}
 	return m
 }
