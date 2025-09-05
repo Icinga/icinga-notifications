@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
-	"github.com/icinga/icinga-go-library/notifications"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -124,30 +124,30 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	source, validAuth := l.sourceFromAuthOrAbort(w, r)
+	src, validAuth := l.sourceFromAuthOrAbort(w, r)
 	if !validAuth {
 		return
 	}
 
-	ruleIdsStr := r.Header.Get(notifications.XIcingaRulesId)
-	ruleVersion := r.Header.Get(notifications.XIcingaRulesVersion)
+	ruleIdsStr := r.Header.Get(source.XIcingaRulesId)
+	ruleVersion := r.Header.Get(source.XIcingaRulesVersion)
 
 	// If the client uses an outdated rules version, reject the request but send also the current rules version
 	// and rules for this source back to the client, so it can retry the request with the updated rules.
-	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(source.ID); ruleVersion != latestRuleVersion {
+	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(src.ID); ruleVersion != latestRuleVersion {
 		w.WriteHeader(http.StatusPreconditionFailed)
-		l.writeSourceRulesInfo(w, source)
+		l.writeSourceRulesInfo(w, src)
 
 		l.logger.Debugw("Abort event processing due to outdated rules version",
 			zap.String("current_version", latestRuleVersion),
 			zap.String("provided_version", ruleVersion),
-			zap.String("source", source.Name))
+			zap.String("source", src.Name))
 		return
 	}
 
 	var ev event.Event
 	if err := ev.LoadMatchedRulesFromString(ruleIdsStr); err != nil {
-		abort(http.StatusBadRequest, nil, "cannot parse %s header: %v", notifications.XIcingaRulesId, err)
+		abort(http.StatusBadRequest, nil, "cannot parse %s header: %v", source.XIcingaRulesId, err)
 		return
 	}
 
@@ -157,7 +157,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ev.Time = time.Now()
-	ev.SourceId = source.ID
+	ev.SourceId = src.ID
 	if ev.Type == baseEv.TypeUnknown {
 		ev.Type = baseEv.TypeState
 	} else if !ev.Mute.Valid && ev.Type == baseEv.TypeMute {
