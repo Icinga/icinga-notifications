@@ -221,14 +221,7 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 		return nil
 	}
 
-	if !src.ListenerPasswordHash.Valid {
-		logger.Debugw("Cannot check credentials for source without a listener_password_hash", zap.Int64("id", sourceId))
-		return nil
-	}
-
-	// If either PHP's PASSWORD_DEFAULT changes or Icinga Web 2 starts using something else, e.g., Argon2id, this will
-	// return a descriptive error as the identifier does no longer match the bcrypt "$2y$".
-	err = bcrypt.CompareHashAndPassword([]byte(src.ListenerPasswordHash.String), []byte(pass))
+	err = src.PasswordCompare([]byte(pass))
 	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
 		logger.Debugw("Invalid password for this source", zap.Int64("id", sourceId))
 		return nil

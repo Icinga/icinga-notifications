@@ -96,9 +96,9 @@ func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications"`)
+	w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications source"`)
 	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = fmt.Fprintln(w, "please provide the debug-password as basic auth credentials (user is ignored)")
+	_, _ = fmt.Fprintln(w, "expected valid icinga-notifications source basic auth credentials")
 	return nil, false
 }
 
