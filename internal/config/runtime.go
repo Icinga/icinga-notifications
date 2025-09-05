@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
-	"github.com/icinga/icinga-go-library/notifications"
+	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -171,17 +171,17 @@ func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Escalation {
 // If the source does not have any rules associated with it, the version will be set to notifications.EmptyRulesVersion.
 //
 // May not be called while holding the write lock on the RuntimeConfig.
-func (r *RuntimeConfig) GetRulesVersionFor(source int64) string {
+func (r *RuntimeConfig) GetRulesVersionFor(srcId int64) string {
 	r.RLock()
 	defer r.RUnlock()
 
 	if r.RulesBySource != nil {
-		if sourceInfo, ok := r.RulesBySource[source]; ok && sourceInfo.Version > 0 {
+		if sourceInfo, ok := r.RulesBySource[srcId]; ok && sourceInfo.Version > 0 {
 			return fmt.Sprintf("%x", sourceInfo.Version)
 		}
 	}
 
-	return notifications.EmptyRulesVersion
+	return source.EmptyRulesVersion
 }
 
 // GetContact returns *recipient.Contact by the given username (case-insensitive).
@@ -215,20 +215,20 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 		return nil
 	}
 
-	source, ok := r.Sources[sourceId]
+	src, ok := r.Sources[sourceId]
 	if !ok {
 		logger.Debugw("Cannot check credentials for unknown source ID", zap.Int64("id", sourceId))
 		return nil
 	}
 
-	if !source.ListenerPasswordHash.Valid {
+	if !src.ListenerPasswordHash.Valid {
 		logger.Debugw("Cannot check credentials for source without a listener_password_hash", zap.Int64("id", sourceId))
 		return nil
 	}
 
 	// If either PHP's PASSWORD_DEFAULT changes or Icinga Web 2 starts using something else, e.g., Argon2id, this will
 	// return a descriptive error as the identifier does no longer match the bcrypt "$2y$".
-	err = bcrypt.CompareHashAndPassword([]byte(source.ListenerPasswordHash.String), []byte(pass))
+	err = bcrypt.CompareHashAndPassword([]byte(src.ListenerPasswordHash.String), []byte(pass))
 	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
 		logger.Debugw("Invalid password for this source", zap.Int64("id", sourceId))
 		return nil
@@ -237,7 +237,7 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 		return nil
 	}
 
-	return source
+	return src
 }
 
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
