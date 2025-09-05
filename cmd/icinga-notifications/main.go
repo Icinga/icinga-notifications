@@ -9,7 +9,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
-	"github.com/icinga/icinga-notifications/internal/icinga2"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
 	"github.com/icinga/icinga-notifications/internal/object"
@@ -48,19 +47,10 @@ func main() {
 
 	channel.UpsertPlugins(ctx, conf.ChannelsDir, logs.GetChildLogger("channel"), db)
 
-	icinga2Launcher := &icinga2.Launcher{
-		Ctx:           ctx,
-		Logs:          logs,
-		Db:            db,
-		RuntimeConfig: nil, // Will be set below as it is interconnected..
-	}
-
-	runtimeConfig := config.NewRuntimeConfig(icinga2Launcher.Launch, logs, db)
+	runtimeConfig := config.NewRuntimeConfig(logs, db)
 	if err := runtimeConfig.UpdateFromDatabase(ctx); err != nil {
 		logger.Fatalf("Failed to load config from database %+v", err)
 	}
-
-	icinga2Launcher.RuntimeConfig = runtimeConfig
 
 	go runtimeConfig.PeriodicUpdates(ctx, 1*time.Second)
 
@@ -74,9 +64,6 @@ func main() {
 	if err := object.RestoreMutedObjects(ctx, db); err != nil {
 		logger.Fatalf("Failed to restore muted objects: %+v", err)
 	}
-
-	// Wait to load open incidents from the database before either starting Event Stream Clients or starting the Listener.
-	icinga2Launcher.Ready()
 
 	// When Icinga Notifications is started by systemd, we've to notify systemd that we're ready.
 	_ = sdnotify.Ready()

@@ -2,7 +2,7 @@ package rule
 
 import (
 	"fmt"
-	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"math"
 	"time"
@@ -51,7 +51,7 @@ func (e *EscalationFilter) EvalEqual(key string, value string) (bool, error) {
 
 		return e.IncidentAge == age, nil
 	case "incident_severity":
-		severity, err := event.GetSeverityByName(value)
+		severity, err := event.ParseSeverity(value)
 		if err != nil {
 			return false, err
 		}
@@ -72,7 +72,7 @@ func (e *EscalationFilter) EvalLess(key string, value string) (bool, error) {
 
 		return e.IncidentAge < age, nil
 	case "incident_severity":
-		severity, err := event.GetSeverityByName(value)
+		severity, err := event.ParseSeverity(value)
 		if err != nil {
 			return false, err
 		}
@@ -97,7 +97,7 @@ func (e *EscalationFilter) EvalLessOrEqual(key string, value string) (bool, erro
 
 		return e.IncidentAge <= age, nil
 	case "incident_severity":
-		severity, err := event.GetSeverityByName(value)
+		severity, err := event.ParseSeverity(value)
 		if err != nil {
 			return false, err
 		}

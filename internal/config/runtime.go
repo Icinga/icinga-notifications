@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -25,10 +27,6 @@ type RuntimeConfig struct {
 	// Accessing it requires a lock that is obtained with RLock() and released with RUnlock().
 	ConfigSet
 
-	// EventStreamLaunchFunc is a callback to launch an Event Stream API Client.
-	// This became necessary due to circular imports, either with the incident or icinga2 package.
-	EventStreamLaunchFunc func(source *Source)
-
 	// configChange contains incremental changes to config objects to be merged into the live configuration.
 	//
 	// It will be both created and deleted within RuntimeConfig.UpdateFromDatabase. To keep track of the known state,
@@ -46,13 +44,10 @@ type RuntimeConfig struct {
 }
 
 func NewRuntimeConfig(
-	esLaunch func(source *Source),
 	logs *logging.Logging,
 	db *database.DB,
 ) *RuntimeConfig {
 	return &RuntimeConfig{
-		EventStreamLaunchFunc: esLaunch,
-
 		configChangeTimestamps: make(map[string]types.UnixMilli),
 
 		logs:   logs,
@@ -68,8 +63,9 @@ type ConfigSet struct {
 	Groups           map[int64]*recipient.Group
 	TimePeriods      map[int64]*timeperiod.TimePeriod
 	Schedules        map[int64]*recipient.Schedule
-	Rules            map[int64]*rule.Rule
 	Sources          map[int64]*Source
+
+	RuleSet // RuleSet contains the currently loaded rules and their version.
 
 	// The following fields contain intermediate values, necessary for the incremental config synchronization.
 	// Furthermore, they allow accessing intermediate tables as everything is referred by pointers.
@@ -169,6 +165,25 @@ func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Escalation {
 	return nil
 }
 
+// GetRulesVersionFor retrieves the version of the rules for a specific source.
+//
+// It returns the version as a hexadecimal string, which is a representation of the version number.
+// If the source does not have any rules associated with it, the version will be set to notifications.EmptyRulesVersion.
+//
+// May not be called while holding the write lock on the RuntimeConfig.
+func (r *RuntimeConfig) GetRulesVersionFor(srcId int64) string {
+	r.RLock()
+	defer r.RUnlock()
+
+	if r.RulesBySource != nil {
+		if sourceInfo, ok := r.RulesBySource[srcId]; ok && sourceInfo.Version > 0 {
+			return fmt.Sprintf("%x", sourceInfo.Version)
+		}
+	}
+
+	return source.EmptyRulesVersion
+}
+
 // GetContact returns *recipient.Contact by the given username (case-insensitive).
 // Returns nil when the given username doesn't exist.
 func (r *RuntimeConfig) GetContact(username string) *recipient.Contact {
@@ -200,20 +215,13 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 		return nil
 	}
 
-	source, ok := r.Sources[sourceId]
+	src, ok := r.Sources[sourceId]
 	if !ok {
 		logger.Debugw("Cannot check credentials for unknown source ID", zap.Int64("id", sourceId))
 		return nil
 	}
 
-	if !source.ListenerPasswordHash.Valid {
-		logger.Debugw("Cannot check credentials for source without a listener_password_hash", zap.Int64("id", sourceId))
-		return nil
-	}
-
-	// If either PHP's PASSWORD_DEFAULT changes or Icinga Web 2 starts using something else, e.g., Argon2id, this will
-	// return a descriptive error as the identifier does no longer match the bcrypt "$2y$".
-	err = bcrypt.CompareHashAndPassword([]byte(source.ListenerPasswordHash.String), []byte(pass))
+	err = src.PasswordCompare([]byte(pass))
 	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
 		logger.Debugw("Invalid password for this source", zap.Int64("id", sourceId))
 		return nil
@@ -222,7 +230,7 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 		return nil
 	}
 
-	return source
+	return src
 }
 
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
