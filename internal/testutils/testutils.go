@@ -8,6 +8,8 @@ import (
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 	"os"
 	"strconv"
@@ -65,4 +67,12 @@ func MakeRandomString(t *testing.T) string {
 	require.NoError(t, err, "failed to generate random string")
 
 	return fmt.Sprintf("%x", buf)
+}
+
+// NewTestLoggerFactory creates a new zap logger factory for testing purposes.
+// It uses zaptest to create a logger that writes to the testing output.
+func NewTestLoggerFactory(t *testing.T) logging.CoreFactory {
+	return func(level zap.AtomicLevel) zapcore.Core {
+		return zaptest.NewLogger(t, zaptest.Level(level.Level())).Core()
+	}
 }

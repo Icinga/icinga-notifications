@@ -19,6 +19,31 @@ import (
 	"time"
 )
 
+// Resources holds references to commonly used objects.
+//
+// This struct is typically embedded into other structs to provide easy access
+// to the database connection, runtime configuration, and logging facilities.
+type Resources struct {
+	DB            *database.DB       `db:"-" json:"-"`
+	RuntimeConfig *RuntimeConfig     `db:"-" json:"-"`
+	Logger        *zap.SugaredLogger `db:"-" json:"-"`
+}
+
+// MakeResources creates a new Resources instance using the provided [RuntimeConfig].
+//
+// This function initializes the Resources with references to the database, runtime configuration,
+// and logging facilities from the given [RuntimeConfig]. Thus, all Resources instances created with
+// this function will share the same underlying resources as the provided RuntimeConfig.
+//
+// The component parameter is used to create a child logger specific to the component using these resources.
+func MakeResources(rc *RuntimeConfig, component string) Resources {
+	return Resources{
+		DB:            rc.db,
+		RuntimeConfig: rc,
+		Logger:        rc.logs.GetChildLogger(component).SugaredLogger,
+	}
+}
+
 // RuntimeConfig stores the runtime representation of the configuration present in the database.
 type RuntimeConfig struct {
 	// ConfigSet is the current live config. It is embedded to allow direct access to its members.
@@ -201,7 +226,7 @@ func (r *RuntimeConfig) GetContact(username string) *recipient.Contact {
 //
 // This method returns either a *Source or a nil pointer and logs the cause to the given logger. This is in almost all
 // cases a debug logging message, except when something server-side is wrong, e.g., the hash is invalid.
-func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logging.Logger) *Source {
+func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *zap.SugaredLogger) *Source {
 	r.RLock()
 	defer r.RUnlock()
 

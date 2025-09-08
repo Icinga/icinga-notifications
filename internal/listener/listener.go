@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/icinga/icinga-go-library/database"
-	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	baseSource "github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-notifications/internal"
@@ -22,21 +20,13 @@ import (
 )
 
 type Listener struct {
-	db            *database.DB
-	logger        *logging.Logger
-	runtimeConfig *config.RuntimeConfig
+	config.Resources // Embedding this struct to have easy access to all resources.
 
-	logs *logging.Logging
-	mux  http.ServeMux
+	mux http.ServeMux
 }
 
-func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *logging.Logging) *Listener {
-	l := &Listener{
-		db:            db,
-		logger:        logs.GetChildLogger("listener"),
-		logs:          logs,
-		runtimeConfig: runtimeConfig,
-	}
+func NewListener(runtimeConfig *config.RuntimeConfig) *Listener {
+	l := &Listener{Resources: config.MakeResources(runtimeConfig, "listener")}
 
 	debugMux := http.NewServeMux()
 	debugMux.HandleFunc("/dump-config", l.DumpConfig)
@@ -62,7 +52,7 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 // An error is returned in every case except for a gracefully context-based shutdown without hitting the time limit.
 func (l *Listener) Run(ctx context.Context) error {
 	listenAddr := daemon.Config().Listen
-	l.logger.Infof("Starting listener on http://%s", listenAddr)
+	l.Logger.Infof("Starting listener on http://%s", listenAddr)
 	server := &http.Server{
 		Addr:        listenAddr,
 		Handler:     l,
@@ -90,7 +80,7 @@ func (l *Listener) Run(ctx context.Context) error {
 // returned and 401 was written back to the response writer.
 func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (*config.Source, bool) {
 	if authUser, authPass, authOk := r.BasicAuth(); authOk {
-		src := l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
+		src := l.RuntimeConfig.GetSourceFromCredentials(authUser, authPass, l.Logger)
 		if src != nil {
 			return src, true
 		}
@@ -110,7 +100,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 			msg = fmt.Sprintf(format, a...)
 		}
 
-		logger := l.logger.With(zap.Int("status_code", statusCode), zap.String("message", msg))
+		logger := l.Logger.With(zap.Int("status_code", statusCode), zap.String("message", msg))
 		if ev != nil {
 			logger = logger.With(zap.Stringer("event", ev))
 		}
@@ -138,11 +128,11 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	// If the client uses an outdated rules version, reject the request but also send the current rules version
 	// and rules for this source back to the client, so it can retry the request with the updated rules.
-	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(src.ID); ev.RulesVersion != latestRuleVersion {
+	if latestRuleVersion := l.RuntimeConfig.GetRulesVersionFor(src.ID); ev.RulesVersion != latestRuleVersion {
 		w.WriteHeader(http.StatusPreconditionFailed)
 		l.writeSourceRulesInfo(w, src)
 
-		l.logger.Debugw("Abort event processing due to outdated rules version",
+		l.Logger.Debugw("Abort event processing due to outdated rules version",
 			zap.String("current_version", latestRuleVersion),
 			zap.String("provided_version", ev.RulesVersion),
 			zap.String("source", src.Name))
@@ -165,18 +155,18 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	l.logger.Infow("Processing event", zap.String("event", ev.String()))
-	err := incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
+	l.Logger.Infow("Processing event", zap.String("event", ev.String()))
+	err := incident.ProcessEvent(context.Background(), l.DB, l.RuntimeConfig, &ev)
 	if errors.Is(err, event.ErrSuperfluousStateChange) || errors.Is(err, event.ErrSuperfluousMuteUnmuteEvent) {
 		abort(http.StatusNotAcceptable, &ev, "%v", err)
 		return
 	} else if err != nil {
-		l.logger.Errorw("Failed to successfully process event", zap.Stringer("event", &ev), zap.Error(err))
+		l.Logger.Errorw("Failed to successfully process event", zap.Stringer("event", &ev), zap.Error(err))
 		abort(http.StatusInternalServerError, &ev, "event could not be processed successfully, see server logs for details")
 		return
 	}
 
-	l.logger.Infow("Successfully processed event", zap.String("event", ev.String()))
+	l.Logger.Infow("Successfully processed event", zap.String("event", ev.String()))
 
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = fmt.Fprintln(w, "event processed successfully")
@@ -197,7 +187,7 @@ func (l *Listener) requireDebugAuth(next http.Handler) http.Handler {
 
 		_, providedPassword, _ := r.BasicAuth()
 		if subtle.ConstantTimeCompare([]byte(expectedPassword), []byte(providedPassword)) != 1 {
-			l.logger.Warnw("Unauthorized request", zap.String("url", r.RequestURI))
+			l.Logger.Warnw("Unauthorized request", zap.String("url", r.RequestURI))
 
 			w.Header().Set("WWW-Authenticate", `Basic realm="debug"`)
 			w.WriteHeader(http.StatusUnauthorized)
@@ -220,7 +210,7 @@ func (l *Listener) DumpConfig(w http.ResponseWriter, r *http.Request) {
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(&l.runtimeConfig.ConfigSet)
+	_ = enc.Encode(&l.RuntimeConfig.ConfigSet)
 }
 
 // DumpIncidents is used as /debug prefixed endpoint to dump all incidents. The authorization has to be done beforehand.
@@ -268,10 +258,10 @@ func (l *Listener) DumpSchedules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	l.runtimeConfig.RLock()
-	defer l.runtimeConfig.RUnlock()
+	l.RuntimeConfig.RLock()
+	defer l.RuntimeConfig.RUnlock()
 
-	for _, schedule := range l.runtimeConfig.Schedules {
+	for _, schedule := range l.RuntimeConfig.Schedules {
 		_, _ = fmt.Fprintf(w, "[id=%d] %q:\n", schedule.ID, schedule.Name)
 
 		// Iterate in 30 minute steps as this is the granularity Icinga Notifications Web allows in the configuration.
@@ -294,12 +284,12 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	l.runtimeConfig.RLock()
-	defer l.runtimeConfig.RUnlock()
+	l.RuntimeConfig.RLock()
+	defer l.RuntimeConfig.RUnlock()
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(l.runtimeConfig.Rules)
+	_ = enc.Encode(l.RuntimeConfig.Rules)
 }
 
 // writeSourceRulesInfo writes the rules information for a specific source to the response writer.
@@ -309,18 +299,18 @@ func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.So
 	var rulesInfo baseSource.RulesInfo
 
 	func() { // Use a function to ensure that the RLock and RUnlock are called before writing the response.
-		l.runtimeConfig.RLock()
-		defer l.runtimeConfig.RUnlock()
+		l.RuntimeConfig.RLock()
+		defer l.RuntimeConfig.RUnlock()
 
-		if sourceInfo, ok := l.runtimeConfig.RulesBySource[source.ID]; ok {
+		if sourceInfo, ok := l.RuntimeConfig.RulesBySource[source.ID]; ok {
 			rulesInfo.Version = sourceInfo.Version.String()
 			rulesInfo.Rules = make(map[string]string)
 
 			for _, rID := range sourceInfo.RuleIDs {
 				id := strconv.FormatInt(rID, 10)
 				filterExpr := ""
-				if l.runtimeConfig.Rules[rID].ObjectFilterExpr.Valid {
-					filterExpr = l.runtimeConfig.Rules[rID].ObjectFilterExpr.String
+				if l.RuntimeConfig.Rules[rID].ObjectFilterExpr.Valid {
+					filterExpr = l.RuntimeConfig.Rules[rID].ObjectFilterExpr.String
 				}
 
 				rulesInfo.Rules[id] = filterExpr
