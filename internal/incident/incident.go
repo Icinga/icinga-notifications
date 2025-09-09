@@ -394,25 +394,16 @@ func (i *Incident) handleMuteUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.
 }
 
 // applyMatchingRules walks through the rule IDs obtained from source and generates a RuleMatched history entry.
-//
-// Unknown event rule IDs are ignored, and a warning is logged. Otherwise, if the rule is not already matched on this
-// incident's Object with previous events, it is added to the incident rules and a corresponding history is generated.
-//
-// Returns an error on any database failure.
 func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
 	if i.Rules == nil {
 		i.Rules = make(map[int64]struct{})
 	}
 
-	for ruleID := range ev.MatchedRules {
-		r, ok := i.runtimeConfig.Rules[ruleID]
+	for _, ruleId := range ev.RuleIds {
+		r, ok := i.runtimeConfig.Rules[ruleId]
 		if !ok {
-			// Usually, sources aren't expected to deliberately send rule IDs that don't exist, but if they do,
-			// we warn about it and move on. Other causes of this could be a rule being deleted just right after
-			// the version validation by the listener, and before the incident acquired a read lock on the runtime
-			// config in the ProcessEvent method.
-			i.logger.Warnw("Event refers to non-existing event rule, might got deleted", zap.Int64("rule_id", ruleID))
-			continue
+			i.logger.Errorw("Event refers to non-existing event rule, might got deleted", zap.Int64("rule_id", ruleId))
+			return fmt.Errorf("cannot apply unknown rule %d", ruleId)
 		}
 
 		if _, ok := i.Rules[r.ID]; !ok {

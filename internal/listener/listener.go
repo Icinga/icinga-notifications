@@ -9,7 +9,6 @@ import (
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
-	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -124,35 +123,28 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	src, validAuth := l.sourceFromAuthOrAbort(w, r)
-	if !validAuth {
+	src, isAuthenticated := l.sourceFromAuthOrAbort(w, r)
+	if !isAuthenticated {
+		// Listener.sourceFromAuthOrAbort writes 401 response by itself; no abort() necessary.
 		return
 	}
 
-	ruleIdsStr := r.Header.Get(source.XIcingaRulesId)
-	ruleVersion := r.Header.Get(source.XIcingaRulesVersion)
+	var ev event.Event
+	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
+		abort(http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
+		return
+	}
 
 	// If the client uses an outdated rules version, reject the request but send also the current rules version
 	// and rules for this source back to the client, so it can retry the request with the updated rules.
-	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(src.ID); ruleVersion != latestRuleVersion {
+	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(src.ID); ev.RulesVersion != latestRuleVersion {
 		w.WriteHeader(http.StatusPreconditionFailed)
 		l.writeSourceRulesInfo(w, src)
 
 		l.logger.Debugw("Abort event processing due to outdated rules version",
 			zap.String("current_version", latestRuleVersion),
-			zap.String("provided_version", ruleVersion),
+			zap.String("provided_version", ev.RulesVersion),
 			zap.String("source", src.Name))
-		return
-	}
-
-	var ev event.Event
-	if err := ev.LoadMatchedRulesFromString(ruleIdsStr); err != nil {
-		abort(http.StatusBadRequest, nil, "cannot parse %s header: %v", source.XIcingaRulesId, err)
-		return
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
-		abort(http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
 		return
 	}
 
@@ -301,12 +293,11 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 	}
 
 	l.runtimeConfig.RLock()
-	rules := l.runtimeConfig.Rules
-	l.runtimeConfig.RUnlock()
+	defer l.runtimeConfig.RUnlock()
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(rules)
+	_ = enc.Encode(l.runtimeConfig.Rules)
 }
 
 // writeSourceRulesInfo writes the rules information for a specific source to the response writer.
@@ -319,14 +310,13 @@ func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.So
 	}
 
 	var resp Response
-	resp.Version = l.runtimeConfig.GetRulesVersionFor(source.ID)
 
 	func() { // Use a function to ensure that the RLock and RUnlock are called before writing the response.
 		l.runtimeConfig.RLock()
 		defer l.runtimeConfig.RUnlock()
 
-		sourceInfo := l.runtimeConfig.RulesBySource[source.ID]
-		if sourceInfo != nil {
+		if sourceInfo, ok := l.runtimeConfig.RulesBySource[source.ID]; ok {
+			resp.Version = l.runtimeConfig.RulesVersionString(sourceInfo.Version)
 			resp.Rules = make(map[int64]*rule.Rule, len(sourceInfo.RuleIDs))
 			for _, rID := range sourceInfo.RuleIDs {
 				resp.Rules[rID] = l.runtimeConfig.Rules[rID]

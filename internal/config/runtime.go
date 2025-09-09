@@ -165,6 +165,15 @@ func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Escalation {
 	return nil
 }
 
+// RulesVersionString formats a rule version.
+func (r *RuntimeConfig) RulesVersionString(version uint64) string {
+	if version > 0 {
+		return fmt.Sprintf("%x", version)
+	}
+
+	return source.EmptyRulesVersion
+}
+
 // GetRulesVersionFor retrieves the version of the rules for a specific source.
 //
 // It returns the version as a hexadecimal string, which is a representation of the version number.
@@ -177,11 +186,11 @@ func (r *RuntimeConfig) GetRulesVersionFor(srcId int64) string {
 
 	if r.RulesBySource != nil {
 		if sourceInfo, ok := r.RulesBySource[srcId]; ok && sourceInfo.Version > 0 {
-			return fmt.Sprintf("%x", sourceInfo.Version)
+			return r.RulesVersionString(sourceInfo.Version)
 		}
 	}
 
-	return source.EmptyRulesVersion
+	return r.RulesVersionString(0)
 }
 
 // GetContact returns *recipient.Contact by the given username (case-insensitive).

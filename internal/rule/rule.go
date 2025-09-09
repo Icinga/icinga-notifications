@@ -22,15 +22,6 @@ type Rule struct {
 
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
 func (r *Rule) IncrementalInitAndValidate() error {
-	// if r.ObjectFilterExpr.Valid {
-	// 	f, err := filter.Parse(r.ObjectFilterExpr.String)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-
-	// 	r.ObjectFilter = f
-	// }
-
 	return nil
 }
 
