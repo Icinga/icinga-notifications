@@ -223,7 +223,7 @@ CREATE TABLE source (
     -- The hash is a PHP password_hash with PASSWORD_DEFAULT algorithm, defaulting to bcrypt. This check roughly ensures
     -- that listener_password_hash can only be populated with bcrypt hashes.
     -- https://icinga.com/docs/icinga-web/latest/doc/20-Advanced-Topics/#manual-user-creation-for-database-authentication-backend
-    CONSTRAINT ck_source_bcrypt_listener_password_hash CHECK (listener_password_hash LIKE '$2y$%'),
+    CONSTRAINT ck_source_bcrypt_listener_password_hash CHECK (listener_password_hash LIKE '$2_$%'),
 
     CONSTRAINT pk_source PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

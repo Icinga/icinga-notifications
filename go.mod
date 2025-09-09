@@ -2,12 +2,14 @@ module github.com/icinga/icinga-notifications
 
 go 1.24.0
 
+toolchain go1.24.6
+
 require (
 	github.com/creasty/defaults v1.8.0
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
 	github.com/emersion/go-smtp v0.24.0
 	github.com/google/uuid v1.6.0
-	github.com/icinga/icinga-go-library v0.7.3-0.20250904130608-5032573a325e
+	github.com/icinga/icinga-go-library v0.7.3-0.20250909100113-20db23663e45
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/okzk/sdnotify v0.0.0-20180710141335-d9becc38acbd
