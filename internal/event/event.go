@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -32,8 +30,6 @@ type Event struct {
 	Time     time.Time `json:"-"`
 	SourceId int64     `json:"-"`
 	ID       int64     `json:"-"`
-
-	MatchedRules map[int64]struct{} `json:"-"` // MatchedRules contains the event rule IDs received from source.
 
 	*baseEv.Event `json:",inline"`
 }
@@ -83,28 +79,6 @@ func (e *Event) SetMute(muted bool, reason string) {
 
 func (e *Event) String() string {
 	return fmt.Sprintf("[time=%s type=%q severity=%s]", e.Time, e.Type, e.Severity.String())
-}
-
-// LoadMatchedRulesFromString parses a comma-separated string of rule IDs and loads them into the event's MatchedRules.
-//
-// Returns an error if any of the rule IDs cannot be parsed as an int64.
-func (e *Event) LoadMatchedRulesFromString(ruleIdsStr string) error {
-	if e.MatchedRules == nil {
-		e.MatchedRules = make(map[int64]struct{})
-	}
-
-	if ruleIdsStr == "" {
-		return nil // No rule IDs to load, nothing to do.
-	}
-
-	for _, ruleIdStr := range strings.Split(ruleIdsStr, ",") {
-		ruleId, err := strconv.ParseInt(ruleIdStr, 10, 64)
-		if err != nil {
-			return fmt.Errorf("cannot parse rule ID %q: %w", ruleIdStr, err)
-		}
-		e.MatchedRules[ruleId] = struct{}{}
-	}
-	return nil
 }
 
 func (e *Event) FullString() string {
