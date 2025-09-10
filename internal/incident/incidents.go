@@ -3,9 +3,11 @@ package incident
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/icinga/icinga-go-library/com"
 	"github.com/icinga/icinga-go-library/database"
-	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -16,8 +18,6 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	"sync"
-	"time"
 )
 
 var (
@@ -27,9 +27,7 @@ var (
 
 // LoadOpenIncidents loads all active (not yet closed) incidents from the database and restores all their states.
 // Returns error on any database failure.
-func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Logger, runtimeConfig *config.RuntimeConfig) error {
-	logger.Info("Loading all active incidents from database")
-
+func LoadOpenIncidents(ctx context.Context, db *database.DB, runtimeConfig *config.RuntimeConfig) error {
 	g, ctx := errgroup.WithContext(ctx)
 
 	incidents := make(chan *Incident)
@@ -46,7 +44,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 		defer func() { _ = rows.Close() }()
 
 		for rows.Next() {
-			i := NewIncident(db, nil, runtimeConfig, nil)
+			i := NewIncident(nil, runtimeConfig)
 			if err := rows.StructScan(i); err != nil {
 				return err
 			}
@@ -81,11 +79,11 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 					incidentsByObjId := make(map[string]*Incident, chunkLen)
 
 					for _, i := range bulk {
-						incidentsById[i.Id] = i
+						incidentsById[i.ID] = i
 						incidentsByObjId[i.ObjectID.String()] = i
 
 						objectIds = append(objectIds, i.ObjectID)
-						incidentIds = append(incidentIds, i.Id)
+						incidentIds = append(incidentIds, i.ID)
 					}
 
 					// Restore all incident objects matching the given object ids
@@ -99,10 +97,10 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 						i.EscalationState[state.RuleEscalationID] = state
 
 						// Restore the incident rule matching the current escalation state if any.
-						i.runtimeConfig.RLock()
-						defer i.runtimeConfig.RUnlock()
+						i.RuntimeConfig.RLock()
+						defer i.RuntimeConfig.RUnlock()
 
-						escalation := i.runtimeConfig.GetRuleEscalation(state.RuleEscalationID)
+						escalation := i.RuntimeConfig.GetRuleEscalation(state.RuleEscalationID)
 						if escalation != nil {
 							i.Rules[escalation.RuleID] = struct{}{}
 						}
@@ -122,7 +120,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 					for _, i := range incidentsById {
 						i.Object = object.GetFromCache(i.ObjectID)
 						i.isMuted = i.Object.IsMuted()
-						i.logger = logger.With(zap.String("object", i.Object.DisplayName()),
+						i.Logger = i.Logger.With(zap.String("object", i.Object.DisplayName()),
 							zap.String("incident", i.String()))
 
 						currentIncidentsMu.Lock()
@@ -147,18 +145,14 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 	return g.Wait()
 }
 
-func GetCurrent(
-	ctx context.Context, db *database.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
-	create bool,
-) (*Incident, error) {
+func GetCurrent(ctx context.Context, obj *object.Object, runtimeConfig *config.RuntimeConfig, create bool) (*Incident, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
 
 	currentIncident := currentIncidents[obj]
 
 	if currentIncident == nil && create {
-		incidentLogger := logger.With(zap.String("object", obj.DisplayName()))
-		currentIncident = NewIncident(db, obj, runtimeConfig, incidentLogger)
+		currentIncident = NewIncident(obj, runtimeConfig)
 
 		currentIncidents[obj] = currentIncident
 	}
@@ -195,7 +189,7 @@ func GetCurrentIncidents() map[int64]*Incident {
 
 	m := make(map[int64]*Incident)
 	for _, incident := range currentIncidents {
-		m[incident.Id] = incident
+		m[incident.ID] = incident
 	}
 	return m
 }
@@ -206,13 +200,7 @@ func GetCurrentIncidents() map[int64]*Incident {
 // checks, it calls the Incident.ProcessEvent method.
 //
 // The returned error might be wrapped around event.ErrSuperfluousStateChange.
-func ProcessEvent(
-	ctx context.Context,
-	db *database.DB,
-	logs *logging.Logging,
-	runtimeConfig *config.RuntimeConfig,
-	ev *event.Event,
-) error {
+func ProcessEvent(ctx context.Context, db *database.DB, runtimeConfig *config.RuntimeConfig, ev *event.Event) error {
 	var wasObjectMuted bool
 	if obj := object.GetFromCache(object.ID(ev.SourceId, ev.Tags)); obj != nil {
 		wasObjectMuted = obj.IsMuted()
@@ -224,13 +212,7 @@ func ProcessEvent(
 	}
 
 	createIncident := ev.Severity != baseEv.SeverityNone && ev.Severity != baseEv.SeverityOK
-	currentIncident, err := GetCurrent(
-		ctx,
-		db,
-		obj,
-		logs.GetChildLogger("incident"),
-		runtimeConfig,
-		createIncident)
+	currentIncident, err := GetCurrent(ctx, obj, runtimeConfig, createIncident)
 	if err != nil {
 		return fmt.Errorf("cannot get current incident for %q: %w", obj.DisplayName(), err)
 	}

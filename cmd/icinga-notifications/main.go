@@ -54,8 +54,8 @@ func main() {
 
 	go runtimeConfig.PeriodicUpdates(ctx, 1*time.Second)
 
-	err = incident.LoadOpenIncidents(ctx, db, logs.GetChildLogger("incident"), runtimeConfig)
-	if err != nil {
+	logger.Info("Loading all active incidents from database")
+	if err = incident.LoadOpenIncidents(ctx, db, runtimeConfig); err != nil {
 		logger.Fatalf("Cannot load incidents from database: %+v", err)
 	}
 
@@ -68,7 +68,7 @@ func main() {
 	// When Icinga Notifications is started by systemd, we've to notify systemd that we're ready.
 	_ = sdnotify.Ready()
 
-	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {
+	if err := listener.NewListener(runtimeConfig).Run(ctx); err != nil {
 		logger.Errorf("Listener has finished with an error: %+v", err)
 	} else {
 		logger.Info("Listener has finished")

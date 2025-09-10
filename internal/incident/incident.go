@@ -4,28 +4,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"sync"
 	"time"
 
-	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
-	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
+	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )
 
-type ruleID = int64
-type escalationID = int64
+type ruleID = int64       // alias for better readability
+type escalationID = int64 // alias for better readability
 
 type Incident struct {
-	Id          int64           `db:"id"`
+	ID          int64           `db:"id"`
 	ObjectID    types.Binary    `db:"object_id"`
 	StartedAt   types.UnixMilli `db:"started_at"`
 	RecoveredAt types.UnixMilli `db:"recovered_at"`
@@ -49,53 +49,44 @@ type Incident struct {
 	// This prevents us from generating multiple muted histories when receiving several events that mute our Object.
 	isMuted bool
 
-	db            *database.DB
-	logger        *zap.SugaredLogger
-	runtimeConfig *config.RuntimeConfig
+	config.Resources // Contains common resources such as db, logger and runtimeConfig.
 
 	sync.Mutex
 }
 
-func NewIncident(
-	db *database.DB, obj *object.Object, runtimeConfig *config.RuntimeConfig, logger *zap.SugaredLogger,
-) *Incident {
+// NewIncident creates a new incident for the given [object.Object].
+//
+// If obj is nil, the returned incident won't be associated with any object, and its ObjectID will be zeroed.
+// The returned incident won't be persisted to the database, that has to be done by the caller using [Incident.Sync].
+//
+// Additionally, this function initializes the incident resources using the given runtimeConfig, and sets up
+// the logger to include the object display name if obj is not nil. Otherwise, the logger won't contain any
+// object or incident specific fields.
+func NewIncident(obj *object.Object, runtimeConfig *config.RuntimeConfig) *Incident {
 	i := &Incident{
-		db:              db,
 		Object:          obj,
-		logger:          logger,
-		runtimeConfig:   runtimeConfig,
 		EscalationState: map[escalationID]*EscalationState{},
 		Rules:           map[ruleID]struct{}{},
 		Recipients:      map[recipient.Key]*RecipientState{},
+		Resources:       config.MakeResources(runtimeConfig, "incident"),
 	}
 
 	if obj != nil {
 		i.ObjectID = obj.ID
+		i.Logger = i.Logger.With(zap.String("object", obj.DisplayName()))
 	}
 
 	return i
 }
 
-func (i *Incident) IncidentObject() *object.Object {
-	return i.Object
-}
-
-func (i *Incident) IncidentSeverity() baseEv.Severity {
-	return i.Severity
-}
-
 func (i *Incident) String() string {
-	return fmt.Sprintf("#%d", i.Id)
-}
-
-func (i *Incident) ID() int64 {
-	return i.Id
+	return fmt.Sprintf("#%d", i.ID)
 }
 
 func (i *Incident) HasManager() bool {
 	for recipientKey, state := range i.Recipients {
-		if i.runtimeConfig.GetRecipient(recipientKey) == nil {
-			i.logger.Debugw("Incident refers unknown recipient key, might got deleted", zap.Inline(recipientKey))
+		if i.RuntimeConfig.GetRecipient(recipientKey) == nil {
+			i.Logger.Debugw("Incident refers unknown recipient key, might got deleted", zap.Inline(recipientKey))
 			continue
 		}
 		if state.Role == RoleManager {
@@ -123,29 +114,29 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	i.Lock()
 	defer i.Unlock()
 
-	i.runtimeConfig.RLock()
-	defer i.runtimeConfig.RUnlock()
+	i.RuntimeConfig.RLock()
+	defer i.RuntimeConfig.RUnlock()
 
 	// These event types are not like the others used to mute an object/incident, such as DowntimeStart, which
 	// uniquely identify themselves why an incident is being muted, but are rather super generic types, and as
 	// such, we are ignoring superfluous ones that don't have any effect on that incident.
 	if i.isMuted && ev.Type == baseEv.TypeMute {
-		i.logger.Debugw("Ignoring superfluous mute event", zap.String("event", ev.String()))
+		i.Logger.Debugw("Ignoring superfluous mute event", zap.String("event", ev.String()))
 		return event.ErrSuperfluousMuteUnmuteEvent
 	} else if !i.isMuted && ev.Type == baseEv.TypeUnmute {
-		i.logger.Debugw("Ignoring superfluous unmute event", zap.String("event", ev.String()))
+		i.Logger.Debugw("Ignoring superfluous unmute event", zap.String("event", ev.String()))
 		return event.ErrSuperfluousMuteUnmuteEvent
 	}
 
-	tx, err := i.db.BeginTxx(ctx, nil)
+	tx, err := i.DB.BeginTxx(ctx, nil)
 	if err != nil {
-		i.logger.Errorw("Cannot start a db transaction", zap.Error(err))
+		i.Logger.Errorw("Cannot start a db transaction", zap.Error(err))
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err = ev.Sync(ctx, tx, i.db, i.Object.ID); err != nil {
-		i.logger.Errorw("Failed to insert event and fetch its ID", zap.String("event", ev.String()), zap.Error(err))
+	if err = ev.Sync(ctx, tx, i.DB, i.Object.ID); err != nil {
+		i.Logger.Errorw("Failed to insert event and fetch its ID", zap.String("event", ev.String()), zap.Error(err))
 		return err
 	}
 
@@ -156,16 +147,16 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 			return err
 		}
 
-		i.logger = i.logger.With(zap.String("incident", i.String()))
+		i.Logger = i.Logger.With(zap.String("incident", i.String()))
 	}
 
 	if err = i.AddEvent(ctx, tx, ev); err != nil {
-		i.logger.Errorw("Cannot insert incident event to the database", zap.Error(err))
+		i.Logger.Errorw("Cannot insert incident event to the database", zap.Error(err))
 		return err
 	}
 
 	if err := i.handleMuteUnmute(ctx, tx, ev); err != nil {
-		i.logger.Errorw("Cannot insert incident muted history", zap.String("event", ev.String()), zap.Error(err))
+		i.Logger.Errorw("Cannot insert incident muted history", zap.String("event", ev.String()), zap.Error(err))
 		return err
 	}
 
@@ -181,13 +172,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 			return err
 		}
 
-		// Re-evaluate escalations based on the newly evaluated rules.
-		escalations, err := i.evaluateEscalations(ev.Time)
-		if err != nil {
-			return err
-		}
-
-		if err := i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
+		if err := i.triggerEscalations(ctx, tx, ev, i.evaluateEscalations(ev.Time)); err != nil {
 			return err
 		}
 	case baseEv.TypeAcknowledgementSet:
@@ -209,7 +194,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 
 	if err = tx.Commit(); err != nil {
-		i.logger.Errorw("Cannot commit db transaction", zap.Error(err))
+		i.Logger.Errorw("Cannot commit db transaction", zap.Error(err))
 		return err
 	}
 
@@ -224,8 +209,8 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 	i.Lock()
 	defer i.Unlock()
 
-	i.runtimeConfig.RLock()
-	defer i.runtimeConfig.RUnlock()
+	i.RuntimeConfig.RLock()
+	defer i.RuntimeConfig.RUnlock()
 
 	if !i.RecoveredAt.Time().IsZero() {
 		// Incident is recovered in the meantime.
@@ -233,25 +218,20 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 	}
 
 	if !time.Now().After(ev.Time) {
-		i.logger.DPanicw("Event from the future", zap.Time("event_time", ev.Time), zap.Any("event", ev))
+		i.Logger.DPanicw("Event from the future", zap.Time("event_time", ev.Time), zap.Any("event", ev))
 		return
 	}
 
-	escalations, err := i.evaluateEscalations(ev.Time)
-	if err != nil {
-		i.logger.Errorw("Reevaluating time-based escalations failed", zap.Error(err))
-		return
-	}
-
+	escalations := i.evaluateEscalations(ev.Time)
 	if len(escalations) == 0 {
-		i.logger.Debug("Reevaluated escalations, no new escalations triggered")
+		i.Logger.Debug("Reevaluated escalations, no new escalations triggered")
 		return
 	}
 
 	var notifications []*NotificationEntry
 	ctx := context.Background()
-	err = i.db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
-		err := ev.Sync(ctx, tx, i.db, i.Object.ID)
+	err := i.DB.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
+		err := ev.Sync(ctx, tx, i.DB, i.Object.ID)
 		if err != nil {
 			return err
 		}
@@ -273,14 +253,48 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		return err
 	})
 	if err != nil {
-		i.logger.Errorw("Reevaluating time-based escalations failed", zap.Error(err))
+		i.Logger.Errorw("Reevaluating time-based escalations failed", zap.Error(err))
 	} else {
 		if err = i.notifyContacts(ctx, ev, notifications); err != nil {
-			i.logger.Errorw("Failed to notify reevaluated escalation recipients", zap.Error(err))
+			i.Logger.Errorw("Failed to notify reevaluated escalation recipients", zap.Error(err))
 			return
 		}
 
-		i.logger.Info("Successfully reevaluated time-based escalations")
+		i.Logger.Info("Successfully reevaluated time-based escalations")
+	}
+}
+
+// MakeNotificationRequest creates a notification request for the current incident and the given event.
+//
+// The returned request doesn't contain any contact information, that has to be filled in by the caller.
+// The URL of the incident is constructed using the Icinga Web 2 URL configured in the daemon configuration,
+// and panics if it fails to parse that URL.
+func (i *Incident) MakeNotificationRequest(ev *event.Event) *plugin.NotificationRequest {
+	baseUrl, err := url.Parse(daemon.Config().Icingaweb2URL)
+	if err != nil {
+		i.Logger.Panicw("Failed to parse Icinga Web 2 URL", zap.String("url", daemon.Config().Icingaweb2URL), zap.Error(err))
+	}
+
+	incidentUrl := baseUrl.JoinPath("/notifications/incident")
+	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID)
+
+	return &plugin.NotificationRequest{
+		Object: &plugin.Object{
+			Name: i.Object.DisplayName(),
+			Url:  ev.URL,
+			Tags: i.Object.Tags,
+		},
+		Incident: &plugin.Incident{
+			Id:       i.ID,
+			Url:      incidentUrl.String(),
+			Severity: i.Severity,
+		},
+		Event: &plugin.Event{
+			Time:     ev.Time,
+			Type:     ev.Type,
+			Username: ev.Username,
+			Message:  ev.Message,
+		},
 	}
 }
 
@@ -288,14 +302,14 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 	oldSeverity := i.Severity
 	newSeverity := ev.Severity
 	if oldSeverity == newSeverity {
-		err := fmt.Errorf("%w: %s state event from source %d", event.ErrSuperfluousStateChange, ev.Severity.String(), ev.SourceId)
-		return err
+		i.Logger.Debugw("Ignoring superfluous severity change event", zap.Int64("source_id", ev.SourceId), zap.Stringer("event", ev))
+		return event.ErrSuperfluousStateChange
 	}
 
-	i.logger.Infof("Incident severity changed from %s to %s", oldSeverity.String(), newSeverity.String())
+	i.Logger.Infof("Incident severity changed from %s to %s", oldSeverity.String(), newSeverity.String())
 
 	hr := &HistoryRow{
-		IncidentID:  i.Id,
+		IncidentID:  i.ID,
 		EventID:     types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Time:        types.UnixMilli(time.Now()),
 		Type:        IncidentSeverityChanged,
@@ -304,26 +318,26 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 	}
 
-	if err := hr.Sync(ctx, i.db, tx); err != nil {
-		i.logger.Errorw("Failed to insert incident severity changed history", zap.Error(err))
+	if err := hr.Sync(ctx, i.DB, tx); err != nil {
+		i.Logger.Errorw("Failed to insert incident severity changed history", zap.Error(err))
 		return err
 	}
 
 	if newSeverity == baseEv.SeverityOK {
 		i.RecoveredAt = types.UnixMilli(time.Now())
-		i.logger.Info("All sources recovered, closing incident")
+		i.Logger.Info("All sources recovered, closing incident")
 
 		RemoveCurrent(i.Object)
 
 		hr = &HistoryRow{
-			IncidentID: i.Id,
+			IncidentID: i.ID,
 			EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 			Time:       i.RecoveredAt,
 			Type:       Closed,
 		}
 
-		if err := hr.Sync(ctx, i.db, tx); err != nil {
-			i.logger.Errorw("Cannot insert incident closed history to the database", zap.Error(err))
+		if err := hr.Sync(ctx, i.DB, tx); err != nil {
+			i.Logger.Errorw("Cannot insert incident closed history to the database", zap.Error(err))
 			return err
 		}
 
@@ -334,7 +348,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 	i.Severity = newSeverity
 	if err := i.Sync(ctx, tx); err != nil {
-		i.logger.Errorw("Failed to update incident severity", zap.Error(err))
+		i.Logger.Errorw("Failed to update incident severity", zap.Error(err))
 		return err
 	}
 
@@ -345,14 +359,14 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 	i.StartedAt = types.UnixMilli(ev.Time)
 	i.Severity = ev.Severity
 	if err := i.Sync(ctx, tx); err != nil {
-		i.logger.Errorw("Cannot insert incident to the database", zap.Error(err))
+		i.Logger.Errorw("Cannot insert incident to the database", zap.Error(err))
 		return err
 	}
 
-	i.logger.Infow(fmt.Sprintf("Source %d opened incident at severity %q", ev.SourceId, i.Severity.String()), zap.String("message", ev.Message))
+	i.Logger.Infow(fmt.Sprintf("Source %d opened incident at severity %q", ev.SourceId, i.Severity.String()), zap.String("message", ev.Message))
 
 	hr := &HistoryRow{
-		IncidentID:  i.Id,
+		IncidentID:  i.ID,
 		Type:        Opened,
 		Time:        types.UnixMilli(ev.Time),
 		EventID:     types.MakeInt(ev.ID, types.TransformZeroIntToNull),
@@ -360,8 +374,8 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 		Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 	}
 
-	if err := hr.Sync(ctx, i.db, tx); err != nil {
-		i.logger.Errorw("Cannot insert incident opened history event", zap.Error(err))
+	if err := hr.Sync(ctx, i.DB, tx); err != nil {
+		i.Logger.Errorw("Cannot insert incident opened history event", zap.Error(err))
 		return err
 	}
 
@@ -375,8 +389,8 @@ func (i *Incident) handleMuteUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.
 		return nil
 	}
 
-	hr := &HistoryRow{IncidentID: i.Id, EventID: types.MakeInt(ev.ID, types.TransformZeroIntToNull), Time: types.UnixMilli(time.Now())}
-	logger := i.logger.With(zap.String("event", ev.String()))
+	hr := &HistoryRow{IncidentID: i.ID, EventID: types.MakeInt(ev.ID, types.TransformZeroIntToNull), Time: types.UnixMilli(time.Now())}
+	logger := i.Logger.With(zap.String("event", ev.String()))
 	if i.Object.IsMuted() {
 		hr.Type = Muted
 		// Since the object may have already been muted with previous events before this incident even
@@ -390,7 +404,7 @@ func (i *Incident) handleMuteUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.
 		logger.Infow("Unmuting incident", zap.String("reason", ev.MuteReason))
 	}
 
-	return hr.Sync(ctx, i.db, tx)
+	return hr.Sync(ctx, i.DB, tx)
 }
 
 // applyMatchingRules walks through the rule IDs obtained from source and generates a RuleMatched history entry.
@@ -400,31 +414,31 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 	}
 
 	for _, ruleId := range ev.RuleIds {
-		r, ok := i.runtimeConfig.Rules[ruleId]
+		r, ok := i.RuntimeConfig.Rules[ruleId]
 		if !ok {
-			i.logger.Errorw("Event refers to non-existing event rule, might got deleted", zap.Int64("rule_id", ruleId))
+			i.Logger.Errorw("Event refers to non-existing event rule, might got deleted", zap.Int64("rule_id", ruleId))
 			return fmt.Errorf("cannot apply unknown rule %d", ruleId)
 		}
 
 		if _, ok := i.Rules[r.ID]; !ok {
 			i.Rules[r.ID] = struct{}{}
-			i.logger.Infow("Rule matches", zap.Object("rule", r))
+			i.Logger.Infow("Rule matches", zap.Object("rule", r))
 
 			err := i.AddRuleMatched(ctx, tx, r)
 			if err != nil {
-				i.logger.Errorw("Failed to upsert incident rule", zap.Object("rule", r), zap.Error(err))
+				i.Logger.Errorw("Failed to upsert incident rule", zap.Object("rule", r), zap.Error(err))
 				return err
 			}
 
 			hr := &HistoryRow{
-				IncidentID: i.Id,
+				IncidentID: i.ID,
 				Time:       types.UnixMilli(time.Now()),
 				EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 				RuleID:     types.MakeInt(r.ID, types.TransformZeroIntToNull),
 				Type:       RuleMatched,
 			}
-			if err := hr.Sync(ctx, i.db, tx); err != nil {
-				i.logger.Errorw("Failed to insert rule matched incident history", zap.Object("rule", r), zap.Error(err))
+			if err := hr.Sync(ctx, i.DB, tx); err != nil {
+				i.Logger.Errorw("Failed to insert rule matched incident history", zap.Object("rule", r), zap.Error(err))
 				return err
 			}
 		}
@@ -433,93 +447,91 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 	return nil
 }
 
-// evaluateEscalations evaluates this incidents rule escalations to be triggered if they aren't already.
-// Returns the newly evaluated escalations to be triggered or an error on database failure.
-func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation, error) {
-	if i.EscalationState == nil {
-		i.EscalationState = make(map[int64]*EscalationState)
-	}
-
+// evaluateEscalations evaluates all the escalations of the current incident's rules and returns the ones that matched.
+//
+// It also sets up a timer to re-evaluate the escalations when necessary, for example when an escalation
+// condition is based on the incident age and the incident is not old enough yet to match that condition.
+//
+// Note that this function does not trigger the matched escalations, it only evaluates them and returns
+// the ones that matched. It's the caller's responsibility to trigger them afterwards.
+func (i *Incident) evaluateEscalations(eventTime time.Time) config.RuleEntries {
 	// Escalations are reevaluated now, reset any existing timer, if there might be future time-based escalations,
 	// this function will start a new timer.
 	if i.timer != nil {
-		i.logger.Info("Stopping reevaluate timer due to escalation evaluation")
+		i.Logger.Info("Stopping reevaluate timer due to escalation evaluation")
 		i.timer.Stop()
 		i.timer = nil
 	}
 
 	filterContext := &rule.EscalationFilter{IncidentAge: eventTime.Sub(i.StartedAt.Time()), IncidentSeverity: i.Severity}
 
-	var escalations []*rule.Escalation
-	retryAfter := rule.RetryNever
+	escalations := make(config.RuleEntries)
 
-	for rID := range i.Rules {
-		r := i.runtimeConfig.Rules[rID]
-		if r == nil {
-			i.logger.Debugw("Incident refers unknown rule, might got deleted", zap.Int64("rule_id", rID))
-			continue
-		}
+	// EvaluateRuleEntries only returns an error if one of the provided callback hooks returns
+	// an error or the OnError handler returns false, and since none of our callbacks return an
+	// error nor false, we can safely discard the return value here.
+	_ = escalations.Evaluate(i.RuntimeConfig, filterContext, i.Rules, config.EvalOptions{
+		// Prevent reevaluation of an already triggered escalation via the pre run hook.
+		OnPreEvaluate: func(escalation *rule.Escalation) bool {
+			return i.EscalationState == nil || i.EscalationState[escalation.ID] == nil
+		},
+		OnError: func(escalation *rule.Escalation, err error) bool {
+			r := i.RuntimeConfig.Rules[escalation.RuleID]
+			i.Logger.Warnw("Failed to evaluate escalation condition", zap.Object("rule", r),
+				zap.Object("escalation", escalation), zap.Error(err))
+			return true
+		},
+		OnAllConfigEvaluated: func(retryAfter time.Duration) {
+			if retryAfter != rule.RetryNever {
+				// The retryAfter duration is relative to the incident duration represented by the escalation filter,
+				// i.e. if an incident is 15m old and an escalation rule evaluates incident_age>=1h the retryAfter
+				// would contain 45m (1h - incident age (15m)). Therefore, we have to use the event time instead of
+				// the incident start time here.
+				nextEvalAt := eventTime.Add(retryAfter)
 
-		// Check if new escalation stages are reached
-		for _, escalation := range r.Escalations {
-			if _, ok := i.EscalationState[escalation.ID]; !ok {
-				matched, err := escalation.Eval(filterContext)
-				if err != nil {
-					i.logger.Warnw(
-						"Failed to evaluate escalation condition", zap.Object("rule", r),
-						zap.Object("escalation", escalation), zap.Error(err),
-					)
-				} else if !matched {
-					incidentAgeFilter := filterContext.ReevaluateAfter(escalation.Condition)
-					retryAfter = min(retryAfter, incidentAgeFilter)
-				} else {
-					escalations = append(escalations, escalation)
-				}
+				i.Logger.Infow("Scheduling escalation reevaluation", zap.Duration("after", retryAfter), zap.Time("at", nextEvalAt))
+				i.timer = time.AfterFunc(retryAfter, func() {
+					i.Logger.Info("Reevaluating escalations")
+
+					i.RetriggerEscalations(&event.Event{
+						Time: nextEvalAt,
+						Event: &baseEv.Event{
+							Type:    baseEv.TypeIncidentAge,
+							Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt.Time())),
+						},
+					})
+				})
 			}
-		}
-	}
+		},
+	})
 
-	if retryAfter != rule.RetryNever {
-		// The retryAfter duration is relative to the incident duration represented by the escalation filter,
-		// i.e. if an incident is 15m old and an escalation rule evaluates incident_age>=1h the retryAfter would
-		// contain 45m (1h - incident age (15m)). Therefore, we have to use the event time instead of the incident
-		// start time here.
-		nextEvalAt := eventTime.Add(retryAfter)
-
-		i.logger.Infow("Scheduling escalation reevaluation", zap.Duration("after", retryAfter), zap.Time("at", nextEvalAt))
-		i.timer = time.AfterFunc(retryAfter, func() {
-			i.logger.Info("Reevaluating escalations")
-
-			i.RetriggerEscalations(&event.Event{
-				Time: nextEvalAt,
-				Event: &baseEv.Event{
-					Type:    baseEv.TypeIncidentAge,
-					Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt.Time())),
-				},
-			})
-		})
-	}
-
-	return escalations, nil
+	return escalations
 }
 
-// triggerEscalations triggers the given escalations and generates incident history items for each of them.
-// Returns an error on database failure.
-func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, escalations []*rule.Escalation) error {
+// triggerEscalations triggers the given escalations for the current incident.
+//
+// For each escalation, it creates an [EscalationState] entry, generates an [EscalationTriggered]
+// history entry and adds the escalation recipients to the incident recipients cache. If any of these
+// operations fail, the function returns an error and stops processing further escalations.
+func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *event.Event, escalations config.RuleEntries) error {
+	if i.EscalationState == nil {
+		i.EscalationState = make(map[int64]*EscalationState)
+	}
+
 	for _, escalation := range escalations {
-		r := i.runtimeConfig.Rules[escalation.RuleID]
+		r := i.RuntimeConfig.Rules[escalation.RuleID]
 		if r == nil {
-			i.logger.Debugw("Incident refers unknown rule, might got deleted", zap.Int64("rule_id", escalation.RuleID))
+			i.Logger.Debugw("Incident refers unknown rule, might got deleted", zap.Int64("rule_id", escalation.RuleID))
 			continue
 		}
 
-		i.logger.Infow("Rule reached escalation", zap.Object("rule", r), zap.Object("escalation", escalation))
+		i.Logger.Infow("Rule reached escalation", zap.Object("rule", r), zap.Object("escalation", escalation))
 
 		state := &EscalationState{RuleEscalationID: escalation.ID, TriggeredAt: types.UnixMilli(time.Now())}
 		i.EscalationState[escalation.ID] = state
 
 		if err := i.AddEscalationTriggered(ctx, tx, state); err != nil {
-			i.logger.Errorw(
+			i.Logger.Errorw(
 				"Failed to upsert escalation state", zap.Object("rule", r),
 				zap.Object("escalation", escalation), zap.Error(err),
 			)
@@ -527,7 +539,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 		}
 
 		hr := &HistoryRow{
-			IncidentID:       i.Id,
+			IncidentID:       i.ID,
 			Time:             state.TriggeredAt,
 			EventID:          types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 			RuleEscalationID: types.MakeInt(state.RuleEscalationID, types.TransformZeroIntToNull),
@@ -535,8 +547,8 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 			Type:             EscalationTriggered,
 		}
 
-		if err := hr.Sync(ctx, i.db, tx); err != nil {
-			i.logger.Errorw(
+		if err := hr.Sync(ctx, i.DB, tx); err != nil {
+			i.Logger.Errorw(
 				"Failed to insert escalation triggered incident history", zap.Object("rule", r),
 				zap.Object("escalation", escalation), zap.Error(err),
 			)
@@ -551,26 +563,30 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 	return nil
 }
 
-// notifyContacts executes all the given pending notifications of the current incident.
-// Returns error on database failure or if the provided context is cancelled.
+// notifyContacts sends notifications to the given contacts via their configured channels.
+//
+// It updates the given NotificationEntry states in the database, marking them as sent or failed.
+// Failing to update a notification entry is logged but doesn't stop the notification process, thus
+// it will only return an error if the given context is done.
 func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifications []*NotificationEntry) error {
+	req := i.MakeNotificationRequest(ev)
 	for _, notification := range notifications {
-		contact := i.runtimeConfig.Contacts[notification.ContactID]
+		contact := i.RuntimeConfig.Contacts[notification.ContactID]
 		if contact == nil {
-			i.logger.Debugw("Incident refers unknown contact, might got deleted", zap.Int64("contact_id", notification.ContactID))
+			i.Logger.Debugw("Incident refers unknown contact, might got deleted", zap.Int64("contact_id", notification.ContactID))
 			continue
 		}
 
-		if i.notifyContact(contact, ev, notification.ChannelID) != nil {
+		if i.notifyContact(contact, req, notification.ChannelID) != nil {
 			notification.State = NotificationStateFailed
 		} else {
 			notification.State = NotificationStateSent
 		}
 
 		notification.SentAt = types.UnixMilli(time.Now())
-		stmt, _ := i.db.BuildUpdateStmt(notification)
-		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
-			i.logger.Errorw(
+		stmt, _ := i.DB.BuildUpdateStmt(notification)
+		if _, err := i.DB.NamedExecContext(ctx, stmt, notification); err != nil {
+			i.Logger.Errorw(
 				"Failed to update contact notified incident history", zap.String("contact", contact.String()),
 				zap.Error(err),
 			)
@@ -585,25 +601,30 @@ func (i *Incident) notifyContacts(ctx context.Context, ev *event.Event, notifica
 }
 
 // notifyContact notifies the given recipient via a channel matching the given ID.
-func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, chID int64) error {
-	ch := i.runtimeConfig.Channels[chID]
+func (i *Incident) notifyContact(contact *recipient.Contact, req *plugin.NotificationRequest, chID int64) error {
+	ch := i.RuntimeConfig.Channels[chID]
 	if ch == nil {
-		i.logger.Errorw("Could not find config for channel", zap.Int64("channel_id", chID))
+		i.Logger.Errorw("Could not find config for channel", zap.Int64("channel_id", chID))
 
 		return fmt.Errorf("could not find config for channel ID: %d", chID)
 	}
 
-	i.logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type),
-		zap.Int64("channel_id", chID), zap.String("event_type", ev.Type.String()))
+	i.Logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type),
+		zap.Int64("channel_id", chID), zap.Stringer("event_type", req.Event.Type))
 
-	err := ch.Notify(contact, i, ev, daemon.Config().Icingaweb2URL)
-	if err != nil {
-		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
+	contactStruct := &plugin.Contact{FullName: contact.FullName}
+	for _, addr := range contact.Addresses {
+		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
+	}
+	req.Contact = contactStruct
+
+	if err := ch.Notify(req); err != nil {
+		i.Logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
 		return err
 	}
 
-	i.logger.Infow("Successfully sent a notification via channel plugin", zap.String("type", ch.Type),
-		zap.String("contact", contact.FullName), zap.String("event_type", ev.Type.String()))
+	i.Logger.Infow("Successfully sent a notification via channel plugin", zap.String("type", ch.Type),
+		zap.String("contact", contact.FullName), zap.Stringer("event_type", req.Event.Type))
 
 	return nil
 }
@@ -616,9 +637,9 @@ var errSuperfluousAckEvent = errors.New("superfluous acknowledgement set event, 
 // Promotes the ack author to incident.RoleManager if it's not already the case and generates a history entry.
 // Returns error on database failure.
 func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	contact := i.runtimeConfig.GetContact(ev.Username)
+	contact := i.RuntimeConfig.GetContact(ev.Username)
 	if contact == nil {
-		i.logger.Warnw("Ignoring acknowledgement event from an unknown author", zap.String("author", ev.Username))
+		i.Logger.Warnw("Ignoring acknowledgement event from an unknown author", zap.String("author", ev.Username))
 
 		return fmt.Errorf("unknown acknowledgment author %q", ev.Username)
 	}
@@ -632,17 +653,17 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 
 		if oldRole == RoleManager {
 			// The user is already a manager
-			i.logger.Debugw("Ignoring acknowledgement-set event, author is already a manager", zap.String("author", ev.Username))
+			i.Logger.Debugw("Ignoring acknowledgement-set event, author is already a manager", zap.String("author", ev.Username))
 			return errSuperfluousAckEvent
 		}
 	} else {
 		i.Recipients[recipientKey] = &RecipientState{Role: newRole}
 	}
 
-	i.logger.Infof("Contact %q role changed from %s to %s", contact.String(), oldRole.String(), newRole.String())
+	i.Logger.Infof("Contact %q role changed from %s to %s", contact.String(), oldRole.String(), newRole.String())
 
 	hr := &HistoryRow{
-		IncidentID:       i.Id,
+		IncidentID:       i.ID,
 		Key:              recipientKey,
 		EventID:          types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Type:             RecipientRoleChanged,
@@ -652,17 +673,17 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 		Message:          types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 	}
 
-	if err := hr.Sync(ctx, i.db, tx); err != nil {
-		i.logger.Errorw("Failed to add recipient role changed history", zap.String("recipient", contact.String()), zap.Error(err))
+	if err := hr.Sync(ctx, i.DB, tx); err != nil {
+		i.Logger.Errorw("Failed to add recipient role changed history", zap.String("recipient", contact.String()), zap.Error(err))
 		return err
 	}
 
 	cr := &ContactRow{IncidentID: hr.IncidentID, Key: recipientKey, Role: newRole}
 
-	stmt, _ := i.db.BuildUpsertStmt(cr)
+	stmt, _ := i.DB.BuildUpsertStmt(cr)
 	_, err := tx.NamedExecContext(ctx, stmt, cr)
 	if err != nil {
-		i.logger.Errorw("Failed to upsert incident contact", zap.String("contact", contact.String()), zap.Error(err))
+		i.Logger.Errorw("Failed to upsert incident contact", zap.String("contact", contact.String()), zap.Error(err))
 		return err
 	}
 
@@ -674,9 +695,9 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	contactChs := make(rule.ContactChannels)
 	// Load all escalations recipients channels
 	for escalationID := range i.EscalationState {
-		escalation := i.runtimeConfig.GetRuleEscalation(escalationID)
+		escalation := i.RuntimeConfig.GetRuleEscalation(escalationID)
 		if escalation == nil {
-			i.logger.Debugw("Incident refers unknown escalation, might got deleted", zap.Int64("escalation_id", escalationID))
+			i.Logger.Debugw("Incident refers unknown escalation, might got deleted", zap.Int64("escalation_id", escalationID))
 			continue
 		}
 
@@ -687,16 +708,16 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	// When a recipient has subscribed/managed this incident via the UI or using an ACK, fallback
 	// to the default contact channel.
 	for recipientKey, state := range i.Recipients {
-		r := i.runtimeConfig.GetRecipient(recipientKey)
+		r := i.RuntimeConfig.GetRecipient(recipientKey)
 		if r == nil {
-			i.logger.Debugw("Incident refers unknown recipient key, might got deleted", zap.Inline(recipientKey))
+			i.Logger.Debugw("Incident refers unknown recipient key, might got deleted", zap.Inline(recipientKey))
 			continue
 		}
 
 		if i.IsNotifiable(state.Role) {
 			contacts := r.GetContactsAt(t)
 			if len(contacts) > 0 {
-				i.logger.Debugw("Expanded recipient to contacts",
+				i.Logger.Debugw("Expanded recipient to contacts",
 					zap.Object("recipient", r),
 					zap.Objects("contacts", contacts))
 
@@ -707,7 +728,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 					}
 				}
 			} else {
-				i.logger.Warnw("Recipient expanded to no contacts", zap.Object("recipient", r))
+				i.Logger.Warnw("Recipient expanded to no contacts", zap.Object("recipient", r))
 			}
 		}
 	}
@@ -720,9 +741,9 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 func (i *Incident) restoreRecipients(ctx context.Context) error {
 	contact := &ContactRow{}
 	var contacts []*ContactRow
-	err := i.db.SelectContext(ctx, &contacts, i.db.Rebind(i.db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), i.Id)
+	err := i.DB.SelectContext(ctx, &contacts, i.DB.Rebind(i.DB.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), i.ID)
 	if err != nil {
-		i.logger.Errorw("Failed to restore incident recipients from the database", zap.Error(err))
+		i.Logger.Errorw("Failed to restore incident recipients from the database", zap.Error(err))
 		return err
 	}
 
@@ -762,7 +783,3 @@ func (e *EscalationState) TableName() string {
 type RecipientState struct {
 	Role ContactRole
 }
-
-var (
-	_ contracts.Incident = (*Incident)(nil)
-)
