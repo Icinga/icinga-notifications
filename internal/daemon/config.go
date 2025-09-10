@@ -2,14 +2,15 @@ package daemon
 
 import (
 	"errors"
+	"os"
+	"time"
+
 	"github.com/creasty/defaults"
 	"github.com/icinga/icinga-go-library/config"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/utils"
 	"github.com/icinga/icinga-notifications/internal"
-	"os"
-	"time"
 )
 
 const (
@@ -100,4 +101,21 @@ func ParseFlagsAndConfig() {
 
 		utils.PrintErrorThenExit(err, ExitFailure)
 	}
+}
+
+// InitTestConfig initialises the global daemon config instance and applies the defaults.
+// This should be used for unit tests only.
+func InitTestConfig() error {
+	daemonConfig = new(ConfigFile)
+	if err := defaults.Set(daemonConfig); err != nil {
+		return err
+	}
+	if err := defaults.Set(&daemonConfig.Database); err != nil {
+		return err
+	}
+	if err := defaults.Set(&daemonConfig.Logging); err != nil {
+		return err
+	}
+
+	return nil
 }

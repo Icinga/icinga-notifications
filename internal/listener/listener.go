@@ -11,6 +11,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/events"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"go.uber.org/zap"
@@ -154,7 +155,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	l.Logger.Infow("Processing event", zap.String("event", ev.String()))
-	err := incident.ProcessEvent(context.Background(), l.DB, l.RuntimeConfig, &ev)
+	err := events.Process(context.Background(), l.RuntimeConfig, &ev)
 	if errors.Is(err, event.ErrSuperfluousStateChange) || errors.Is(err, event.ErrSuperfluousMuteUnmuteEvent) {
 		abort(http.StatusNotAcceptable, &ev, "%v", err)
 		return
