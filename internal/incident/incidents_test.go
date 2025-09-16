@@ -150,7 +150,7 @@ func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID i
 	ev := &event.Event{
 		Time:     time.Time{},
 		SourceId: sourceID,
-		Event: &baseEv.Event{
+		Event: baseEv.Event{
 			Name: testutils.MakeRandomString(t),
 			Tags: map[string]string{ // Always generate unique object tags not to produce same object ID!
 				"host":    testutils.MakeRandomString(t),

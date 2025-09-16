@@ -83,7 +83,7 @@ func makeObject(ctx context.Context, db *database.DB, t *testing.T, sourceID int
 	ev := &event.Event{
 		Time:     time.Time{},
 		SourceId: sourceID,
-		Event: &baseEv.Event{
+		Event: baseEv.Event{
 			Name:       testutils.MakeRandomString(t),
 			Mute:       types.Bool{Valid: true, Bool: mute},
 			MuteReason: "Just for testing",

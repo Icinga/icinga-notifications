@@ -2,15 +2,12 @@ package object
 
 import "github.com/icinga/icinga-go-library/types"
 
-// TagRow is a base type for IdTagRow and ExtraTagRow
-type TagRow struct {
+// IdTagRow represents a single database object id tag.
+type IdTagRow struct {
 	ObjectId types.Binary `db:"object_id"`
 	Tag      string       `db:"tag"`
 	Value    string       `db:"value"`
 }
-
-// IdTagRow represents a single database object id tag.
-type IdTagRow TagRow
 
 // TableName implements the contracts.TableNamer interface.
 func (e *IdTagRow) TableName() string {
