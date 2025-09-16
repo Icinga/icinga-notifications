@@ -104,7 +104,7 @@ func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, 
 	}
 
 	stmt, _ = db.BuildUpsertStmt(&IdTagRow{})
-	_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(newObject.ID, ev.Tags))
+	_, err = tx.NamedExecContext(ctx, stmt, mapToIdTagRows(newObject.ID, ev.Tags))
 	if err != nil {
 		return nil, fmt.Errorf("failed to upsert object id tags: %w", err)
 	}
@@ -193,11 +193,11 @@ func ID(source int64, tags map[string]string) types.Binary {
 	return h.Sum(nil)
 }
 
-// mapToTagRows transforms the object tags map to a slice of TagRow struct.
-func mapToTagRows(objectId types.Binary, tags map[string]string) []*TagRow {
-	var tagRows []*TagRow
+// mapToIdTagRows transforms the object tags map to a slice of TagRow struct.
+func mapToIdTagRows(objectId types.Binary, tags map[string]string) []*IdTagRow {
+	var tagRows []*IdTagRow
 	for key, val := range tags {
-		tagRows = append(tagRows, &TagRow{
+		tagRows = append(tagRows, &IdTagRow{
 			ObjectId: objectId,
 			Tag:      key,
 			Value:    val,

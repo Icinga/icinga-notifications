@@ -98,7 +98,7 @@ func restoreObjectsFromQuery(ctx context.Context, db *database.DB, query string,
 					if err != nil {
 						return errors.Wrap(err, "cannot restore objects ID tags")
 					}
-	
+
 					cacheMu.Lock()
 					defer cacheMu.Unlock()
 
