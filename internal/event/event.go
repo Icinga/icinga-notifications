@@ -31,7 +31,7 @@ type Event struct {
 	SourceId int64     `json:"-"`
 	ID       int64     `json:"-"`
 
-	*baseEv.Event `json:",inline"`
+	baseEv.Event `json:",inline"`
 }
 
 // Validate validates the current event state.

@@ -131,7 +131,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 
 						i.RetriggerEscalations(&event.Event{
 							Time: time.Now(),
-							Event: &baseEv.Event{
+							Event: baseEv.Event{
 								Type:    baseEv.TypeIncidentAge,
 								Message: fmt.Sprintf("Incident reached age %v (daemon was restarted)", time.Since(i.StartedAt.Time())),
 							},

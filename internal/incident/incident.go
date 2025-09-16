@@ -492,7 +492,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 
 			i.RetriggerEscalations(&event.Event{
 				Time: nextEvalAt,
-				Event: &baseEv.Event{
+				Event: baseEv.Event{
 					Type:    baseEv.TypeIncidentAge,
 					Message: fmt.Sprintf("Incident reached age %v", nextEvalAt.Sub(i.StartedAt.Time())),
 				},
