@@ -640,7 +640,7 @@ func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, ch
 	i.logger.Infow(fmt.Sprintf("Notify contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type),
 		zap.Int64("channel_id", chID), zap.String("event_type", ev.Type.String()))
 
-	err := ch.Notify(contact, i, ev, i.DaemonConfig.Icingaweb2URL)
+	err := ch.Notify(contact, i, ev)
 	if err != nil {
 		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
 		return err
