@@ -12,7 +12,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"net/url"
 )
 
 type Channel struct {
@@ -163,7 +162,7 @@ func (c *Channel) Restart(logger *zap.SugaredLogger) {
 }
 
 // Notify prepares and sends the notification request, returns a non-error on fails, nil on success
-func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *event.Event, icingaweb2Url string) error {
+func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *event.Event) error {
 	p := c.getPlugin()
 	if p == nil {
 		return errors.New("plugin could not be started")
@@ -174,8 +173,7 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
 	}
 
-	baseUrl, _ := url.Parse(icingaweb2Url)
-	incidentUrl := baseUrl.JoinPath("/notifications/incident")
+	incidentUrl := c.daemonConfig.IcingaWeb2UrlParsed.JoinPath("/notifications/incident")
 	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID())
 	object := i.IncidentObject()
 

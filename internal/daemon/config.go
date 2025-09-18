@@ -2,12 +2,14 @@ package daemon
 
 import (
 	"errors"
+	"fmt"
 	"github.com/creasty/defaults"
 	"github.com/icinga/icinga-go-library/config"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/utils"
 	"github.com/icinga/icinga-notifications/internal"
+	"net/url"
 	"os"
 	"time"
 )
@@ -25,6 +27,12 @@ type ConfigFile struct {
 	Icingaweb2URL string          `yaml:"icingaweb2-url"`
 	Database      database.Config `yaml:"database"`
 	Logging       logging.Config  `yaml:"logging"`
+
+	// IcingaWeb2UrlParsed holds the parsed Icinga Web 2 URL after validation of the config file.
+	//
+	// This field is not part of the YAML config and is only populated after successful validation.
+	// The resulting URL always ends with a trailing slash, making it easier to resolve relative paths against it.
+	IcingaWeb2UrlParsed *url.URL
 }
 
 // SetDefaults implements the defaults.Setter interface.
@@ -44,6 +52,15 @@ func (c *ConfigFile) Validate() error {
 		return err
 	}
 
+	if c.Icingaweb2URL == "" {
+		return errors.New("icingaweb2-url must be set")
+	}
+
+	parsedUrl, err := url.Parse(c.Icingaweb2URL)
+	if err != nil {
+		return fmt.Errorf("invalid icingaweb2-url: %w", err)
+	}
+	c.IcingaWeb2UrlParsed = parsedUrl.JoinPath("/")
 	return nil
 }
 

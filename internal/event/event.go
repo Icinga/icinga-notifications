@@ -36,18 +36,18 @@ type Event struct {
 }
 
 // CompleteURL prefixes the URL with the given Icinga Web 2 base URL unless it already carries a URL or is empty.
-func (e *Event) CompleteURL(icingaWebBaseUrl string) {
+func (e *Event) CompleteURL(icingaWebBaseUrl *url.URL) {
 	if e.URL == "" {
 		return
 	}
 
-	if !strings.HasSuffix(icingaWebBaseUrl, "/") {
-		icingaWebBaseUrl += "/"
+	u, err := url.Parse(strings.TrimLeft(e.URL, "/"))
+	if err != nil {
+		return // leave as is on parse error
 	}
 
-	u, err := url.Parse(e.URL)
-	if err != nil || u.Scheme == "" {
-		e.URL = icingaWebBaseUrl + e.URL
+	if !u.IsAbs() {
+		e.URL = icingaWebBaseUrl.ResolveReference(u).String()
 	}
 }
 
