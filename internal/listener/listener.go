@@ -9,12 +9,12 @@ import (
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	baseSource "github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
-	"github.com/icinga/icinga-notifications/internal/rule"
 	"go.uber.org/zap"
 	"net/http"
 	"time"
@@ -148,6 +148,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ev.CompleteURL(daemon.Config().Icingaweb2URL)
 	ev.Time = time.Now()
 	ev.SourceId = src.ID
 	if ev.Type == baseEv.TypeUnknown {
@@ -304,27 +305,30 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 //
 // It includes the rules version and a map of rule IDs to their corresponding rule objects.
 func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.Source) {
-	type Response struct {
-		Version string
-		Rules   map[int64]*rule.Rule
-	}
-
-	var resp Response
+	var rulesInfo baseSource.RulesInfo
 
 	func() { // Use a function to ensure that the RLock and RUnlock are called before writing the response.
 		l.runtimeConfig.RLock()
 		defer l.runtimeConfig.RUnlock()
 
 		if sourceInfo, ok := l.runtimeConfig.RulesBySource[source.ID]; ok {
-			resp.Version = l.runtimeConfig.RulesVersionString(sourceInfo.Version)
-			resp.Rules = make(map[int64]*rule.Rule, len(sourceInfo.RuleIDs))
+			rulesInfo.Version = l.runtimeConfig.RulesVersionString(sourceInfo.Version)
+			rulesInfo.Rules = make(map[string]baseSource.RuleResp)
 			for _, rID := range sourceInfo.RuleIDs {
-				resp.Rules[rID] = l.runtimeConfig.Rules[rID]
+				resp := baseSource.RuleResp{
+					Id:   l.runtimeConfig.RulesVersionString(rID),
+					Name: l.runtimeConfig.Rules[rID].Name,
+				}
+				if l.runtimeConfig.Rules[rID].ObjectFilterExpr.Valid {
+					resp.ObjectFilterExpr = l.runtimeConfig.Rules[rID].ObjectFilterExpr.String
+				}
+
+				rulesInfo.Rules[resp.Id] = resp
 			}
 		}
 	}()
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(resp)
+	_ = enc.Encode(rulesInfo)
 }

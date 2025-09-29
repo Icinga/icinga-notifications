@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -32,6 +34,22 @@ type Event struct {
 	ID       int64     `json:"-"`
 
 	baseEv.Event `json:",inline"`
+}
+
+// CompleteURL prefixes the URL with the given Icinga Web 2 base URL unless it already carries a URL or is empty.
+func (e *Event) CompleteURL(icingaWebBaseUrl string) {
+	if e.URL == "" {
+		return
+	}
+
+	if !strings.HasSuffix(icingaWebBaseUrl, "/") {
+		icingaWebBaseUrl += "/"
+	}
+
+	u, err := url.Parse(e.URL)
+	if err != nil || u.Scheme == "" {
+		e.URL = icingaWebBaseUrl + e.URL
+	}
 }
 
 // Validate validates the current event state.
