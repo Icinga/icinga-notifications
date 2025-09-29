@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -400,10 +401,16 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 	}
 
 	for _, ruleId := range ev.RuleIds {
-		r, ok := i.runtimeConfig.Rules[ruleId]
+		ruleIdInt, err := strconv.ParseInt(ruleId, 10, 64)
+		if err != nil {
+			i.logger.Errorw("Event rule is not an integer", zap.String("rule_id", ruleId), zap.Error(err))
+			return fmt.Errorf("cannot convert rule id %q to an int: %w", ruleId, err)
+		}
+
+		r, ok := i.runtimeConfig.Rules[ruleIdInt]
 		if !ok {
-			i.logger.Errorw("Event refers to non-existing event rule, might got deleted", zap.Int64("rule_id", ruleId))
-			return fmt.Errorf("cannot apply unknown rule %d", ruleId)
+			i.logger.Errorw("Event refers to non-existing event rule, might got deleted", zap.Int64("rule_id", ruleIdInt))
+			return fmt.Errorf("cannot apply unknown rule %d", ruleIdInt)
 		}
 
 		if _, ok := i.Rules[r.ID]; !ok {
