@@ -15,7 +15,7 @@ type SourceRulesInfo struct {
 	// by 1, effectively starting at 1.
 	//
 	// The Version is not unique across different sources, but it is unique for a specific source at a specific time.
-	Version uint64
+	Version int64
 
 	// RuleIDs is a list of rule IDs associated with a specific source.
 	//

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
-	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -166,18 +165,13 @@ func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Escalation {
 }
 
 // RulesVersionString formats a rule version.
-func (r *RuntimeConfig) RulesVersionString(version uint64) string {
-	if version > 0 {
-		return fmt.Sprintf("%x", version)
-	}
-
-	return source.EmptyRulesVersion
+func (r *RuntimeConfig) RulesVersionString(version int64) string {
+	return fmt.Sprintf("%x", version)
 }
 
 // GetRulesVersionFor retrieves the version of the rules for a specific source.
 //
 // It returns the version as a hexadecimal string, which is a representation of the version number.
-// If the source does not have any rules associated with it, the version will be set to notifications.EmptyRulesVersion.
 //
 // May not be called while holding the write lock on the RuntimeConfig.
 func (r *RuntimeConfig) GetRulesVersionFor(srcId int64) string {
