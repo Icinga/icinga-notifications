@@ -3,18 +3,23 @@ package config
 import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/rule"
+	"math"
 	"slices"
+	"time"
 )
 
 // SourceRulesInfo holds information about the rules associated with a specific source.
 type SourceRulesInfo struct {
 	// Version is the version of the rules for the source.
 	//
-	// It is a monotonically increasing number that is updated whenever a rule is added, modified, or deleted.
-	// With each state change of the rules referenced by RuleIDs, the Version will always be incremented
-	// by 1, effectively starting at 1.
+	// It is a monotonically increasing number, updated whenever a rule is changed. With each change of a rule
+	// referenced by RuleIDs, the Version will be incremented by one.
 	//
-	// The Version is not unique across different sources, but it is unique for a specific source at a specific time.
+	// In the current implementation, Version starts at MAX_INT64-UNIX_TIME. Doing so reduces the chance for race
+	// conditions by asserting that after restarting Icinga Notifications the new Version will be lesser than the
+	// previous one, which started at a bigger number, potentially being incremented multiple times.
+	//
+	// Multiple source's versions are independent of another.
 	Version int64
 
 	// RuleIDs is a list of rule IDs associated with a specific source.
@@ -58,7 +63,10 @@ func (r *RuntimeConfig) applyPendingRules() {
 			if sourceInfo, ok := r.RulesBySource[newElement.SourceID]; ok {
 				sourceInfo.RuleIDs = append(sourceInfo.RuleIDs, newElement.ID)
 			} else {
-				r.RulesBySource[newElement.SourceID] = &SourceRulesInfo{RuleIDs: []int64{newElement.ID}}
+				r.RulesBySource[newElement.SourceID] = &SourceRulesInfo{
+					Version: math.MaxInt64 - time.Now().Unix(),
+					RuleIDs: []int64{newElement.ID},
+				}
 			}
 
 			updatedSources[newElement.SourceID] = struct{}{}
