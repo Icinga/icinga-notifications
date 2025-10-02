@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"time"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
@@ -16,8 +19,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"go.uber.org/zap"
-	"net/http"
-	"time"
 )
 
 type Listener struct {
@@ -303,7 +304,7 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 
 // writeSourceRulesInfo writes the rules information for a specific source to the response writer.
 //
-// It includes the rules version and a map of rule IDs to their corresponding rule objects.
+// Internally, it converts the data to [baseSource.RulesInfo], being serialized JSON-encoded.
 func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.Source) {
 	var rulesInfo baseSource.RulesInfo
 
@@ -313,17 +314,16 @@ func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.So
 
 		if sourceInfo, ok := l.runtimeConfig.RulesBySource[source.ID]; ok {
 			rulesInfo.Version = l.runtimeConfig.RulesVersionString(sourceInfo.Version)
-			rulesInfo.Rules = make(map[string]baseSource.RuleResp)
+			rulesInfo.Rules = make(map[string]string)
+
 			for _, rID := range sourceInfo.RuleIDs {
-				resp := baseSource.RuleResp{
-					Id:   l.runtimeConfig.RulesVersionString(rID),
-					Name: l.runtimeConfig.Rules[rID].Name,
-				}
+				id := l.runtimeConfig.RulesVersionString(rID)
+				filterExpr := ""
 				if l.runtimeConfig.Rules[rID].ObjectFilterExpr.Valid {
-					resp.ObjectFilterExpr = l.runtimeConfig.Rules[rID].ObjectFilterExpr.String
+					filterExpr = l.runtimeConfig.Rules[rID].ObjectFilterExpr.String
 				}
 
-				rulesInfo.Rules[resp.Id] = resp
+				rulesInfo.Rules[id] = filterExpr
 			}
 		}
 	}()
