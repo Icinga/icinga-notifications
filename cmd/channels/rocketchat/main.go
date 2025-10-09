@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-notifications/internal"
-	"github.com/icinga/icinga-notifications/pkg/plugin"
 	"net/http"
 	"time"
 )
