@@ -18,3 +18,6 @@ ALTER TABLE rule
 
 UPDATE rule SET source_id = (SELECT id FROM source WHERE type = 'icinga2');
 ALTER TABLE rule ALTER COLUMN source_id SET NOT NULL;
+
+ALTER TABLE incident_contact
+    ADD CONSTRAINT pk_incident_contact PRIMARY KEY (incident_id, contact_id, contactgroup_id, schedule_id);

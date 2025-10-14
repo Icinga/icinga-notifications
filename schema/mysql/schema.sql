@@ -356,6 +356,8 @@ CREATE TABLE incident_contact (
     schedule_id bigint,
     role enum('recipient', 'subscriber', 'manager'), -- NOT NULL is enforced via CHECK not to default to 'recipient'
 
+    CONSTRAINT pk_incident_contact PRIMARY KEY (incident_id, contact_id, contactgroup_id, schedule_id),
+
     CONSTRAINT uk_incident_contact_incident_id_contact_id UNIQUE (incident_id, contact_id),
     CONSTRAINT uk_incident_contact_incident_id_contactgroup_id UNIQUE (incident_id, contactgroup_id),
     CONSTRAINT uk_incident_contact_incident_id_schedule_id UNIQUE (incident_id, schedule_id),

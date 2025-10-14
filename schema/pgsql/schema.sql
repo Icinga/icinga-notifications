@@ -403,6 +403,8 @@ CREATE TABLE incident_contact (
     schedule_id bigint,
     role incident_contact_role NOT NULL,
 
+    CONSTRAINT pk_incident_contact PRIMARY KEY (incident_id, contact_id, contactgroup_id, schedule_id),
+
     -- Keep in sync with internal/incident/db_types.go!
     CONSTRAINT uk_incident_contact_incident_id_contact_id UNIQUE (incident_id, contact_id),
     CONSTRAINT uk_incident_contact_incident_id_contactgroup_id UNIQUE (incident_id, contactgroup_id),
