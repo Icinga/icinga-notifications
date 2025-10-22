@@ -23,7 +23,8 @@ type Object struct {
 	URL        types.String `db:"url"`
 	MuteReason types.String `db:"mute_reason"`
 
-	Tags map[string]string `db:"-"`
+	Tags      map[string]string `db:"-"`
+	ExtraTags map[string]string `db:"-"`
 
 	db *database.DB
 }
@@ -31,11 +32,12 @@ type Object struct {
 // New creates a new object from the given event.
 func New(db *database.DB, ev *event.Event) *Object {
 	obj := &Object{
-		SourceID: ev.SourceId,
-		Name:     ev.Name,
-		db:       db,
-		URL:      types.MakeString(ev.URL, types.TransformEmptyStringToNull),
-		Tags:     ev.Tags,
+		SourceID:  ev.SourceId,
+		Name:      ev.Name,
+		db:        db,
+		URL:       types.MakeString(ev.URL, types.TransformEmptyStringToNull),
+		Tags:      ev.Tags,
+		ExtraTags: ev.ExtraTags,
 	}
 	if ev.Mute.Valid && ev.Mute.Bool {
 		obj.MuteReason = types.String{NullString: sql.NullString{String: ev.MuteReason, Valid: true}}
@@ -79,6 +81,7 @@ func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, 
 	} else {
 		*newObject = *object
 
+		newObject.ExtraTags = ev.ExtraTags
 		newObject.Name = ev.Name
 		newObject.URL = types.MakeString(ev.URL, types.TransformEmptyStringToNull)
 		if ev.Mute.Valid {
@@ -104,9 +107,23 @@ func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, 
 	}
 
 	stmt, _ = db.BuildUpsertStmt(&IdTagRow{})
-	_, err = tx.NamedExecContext(ctx, stmt, mapToIdTagRows(newObject.ID, ev.Tags))
+	_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(newObject.ID, ev.Tags))
 	if err != nil {
 		return nil, fmt.Errorf("failed to upsert object id tags: %w", err)
+	}
+
+	extraTag := &ExtraTagRow{ObjectId: newObject.ID}
+	_, err = tx.NamedExecContext(ctx, `DELETE FROM "object_extra_tag" WHERE "object_id" = :object_id`, extraTag)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete object extra tags: %w", err)
+	}
+
+	if len(ev.ExtraTags) > 0 {
+		stmt, _ := db.BuildInsertStmt(extraTag)
+		_, err = tx.NamedExecContext(ctx, stmt, mapToTagRows(newObject.ID, ev.ExtraTags))
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert object extra tags: %w", err)
+		}
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -155,6 +172,15 @@ func (o *Object) String() string {
 	_, _ = fmt.Fprintf(&b, "    Source %d:\n", o.SourceID)
 	_, _ = fmt.Fprintf(&b, "    Name: %q\n", o.Name)
 	_, _ = fmt.Fprintf(&b, "    URL: %q\n", o.URL.String)
+	_, _ = fmt.Fprintf(&b, "    Extra Tags:\n")
+
+	for tag, value := range o.ExtraTags {
+		_, _ = fmt.Fprintf(&b, "        %q", tag)
+		if value != "" {
+			_, _ = fmt.Fprintf(&b, " = %q", value)
+		}
+		_, _ = fmt.Fprintf(&b, "\n")
+	}
 
 	return b.String()
 }
@@ -193,11 +219,11 @@ func ID(source int64, tags map[string]string) types.Binary {
 	return h.Sum(nil)
 }
 
-// mapToIdTagRows transforms the object tags map to a slice of TagRow struct.
-func mapToIdTagRows(objectId types.Binary, tags map[string]string) []*IdTagRow {
-	var tagRows []*IdTagRow
-	for key, val := range tags {
-		tagRows = append(tagRows, &IdTagRow{
+// mapToTagRows transforms the object (extra) tags map to a slice of TagRow struct.
+func mapToTagRows(objectId types.Binary, extraTags map[string]string) []*TagRow {
+	var tagRows []*TagRow
+	for key, val := range extraTags {
+		tagRows = append(tagRows, &TagRow{
 			ObjectId: objectId,
 			Tag:      key,
 			Value:    val,

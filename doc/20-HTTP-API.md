@@ -22,6 +22,16 @@ curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-ev
     "host": "dummy-809",
     "service": "random fortune"
   },
+  "extra_tags": {
+    "hostgroup/app-container": null,
+    "hostgroup/department-dev": null,
+    "hostgroup/env-qa": null,
+    "hostgroup/location-rome": null,
+    "servicegroup/app-mail": null,
+    "servicegroup/department-nms": null,
+    "servicegroup/env-prod": null,
+    "servicegroup/location-berlin": null
+  },
   "type": "state",
   "severity": "crit",
   "username": "",

@@ -257,6 +257,16 @@ or if the channel is missing required configuration values.
         "host": "dummy-816",
         "service": "random fortune"
       },
+      "extra_tags": {
+        "hostgroup/app-mobile": "",
+        "hostgroup/department-dev": "",
+        "hostgroup/env-prod": "",
+        "hostgroup/location-rome": "",
+        "servicegroup/app-storage": "",
+        "servicegroup/department-ps": "",
+        "servicegroup/env-prod": "",
+        "servicegroup/location-rome": ""
+      }
     },
     "incident": {
       "id": 1437,
