@@ -1,8 +1,8 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
-ALTER TABLE contact ADD COLUMN external_uuid uuid UNIQUE;
-ALTER TABLE contactgroup ADD COLUMN external_uuid uuid UNIQUE;
-ALTER TABLE channel ADD COLUMN external_uuid uuid UNIQUE;
+ALTER TABLE contact ADD COLUMN external_uuid uuid CONSTRAINT uk_contact_external_uuid UNIQUE;
+ALTER TABLE contactgroup ADD COLUMN external_uuid uuid CONSTRAINT uk_contactgroup_external_uuid UNIQUE;
+ALTER TABLE channel ADD COLUMN external_uuid uuid CONSTRAINT uk_channel_external_uuid UNIQUE;
 
 UPDATE contact SET external_uuid = uuid_generate_v4() WHERE external_uuid IS NULL;
 UPDATE contactgroup SET external_uuid = uuid_generate_v4() WHERE external_uuid IS NULL;

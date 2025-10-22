@@ -42,36 +42,35 @@ CREATE TABLE available_channel_type (
 
 CREATE TABLE channel (
     id bigserial,
+    external_uuid uuid NOT NULL, -- used for external references
     name citext NOT NULL,
     type varchar(255) NOT NULL, -- 'email', 'sms', ...
     config text, -- JSON with channel-specific attributes
     -- for now type determines the implementation, in the future, this will need a reference to a concrete
     -- implementation to allow multiple implementations of a sms channel for example, probably even user-provided ones
-    external_uuid uuid NOT NULL,
 
     changed_at bigint NOT NULL,
     deleted boolenum NOT NULL DEFAULT 'n',
 
     CONSTRAINT pk_channel PRIMARY KEY (id),
-    CONSTRAINT fk_channel_available_channel_type FOREIGN KEY (type) REFERENCES available_channel_type(type),
-    UNIQUE (external_uuid)
+    CONSTRAINT uk_channel_external_uuid UNIQUE (external_uuid),
+    CONSTRAINT fk_channel_available_channel_type FOREIGN KEY (type) REFERENCES available_channel_type(type)
 );
 
 CREATE INDEX idx_channel_changed_at ON channel(changed_at);
 
 CREATE TABLE contact (
     id bigserial,
+    external_uuid uuid NOT NULL, -- used for external references
     full_name citext NOT NULL,
     username citext, -- reference to web user
     default_channel_id bigint NOT NULL,
-    external_uuid uuid NOT NULL,
 
     changed_at bigint NOT NULL,
     deleted boolenum NOT NULL DEFAULT 'n',
 
     CONSTRAINT pk_contact PRIMARY KEY (id),
-    UNIQUE (username),
-    UNIQUE (external_uuid),
+    CONSTRAINT uk_contact_external_uuid UNIQUE (external_uuid),
 
     -- As the username is unique, it must be NULLed for deletion via "deleted = 'y'"
     CONSTRAINT uk_contact_username UNIQUE (username),
@@ -99,14 +98,14 @@ CREATE INDEX idx_contact_address_changed_at ON contact_address(changed_at);
 
 CREATE TABLE contactgroup (
     id bigserial,
+    external_uuid uuid NOT NULL, -- used for external references
     name citext NOT NULL,
-    external_uuid uuid NOT NULL,
 
     changed_at bigint NOT NULL,
     deleted boolenum NOT NULL DEFAULT 'n',
 
     CONSTRAINT pk_contactgroup PRIMARY KEY (id),
-    UNIQUE (external_uuid)
+    CONSTRAINT uk_contactgroup_external_uuid UNIQUE (external_uuid)
 );
 
 CREATE INDEX idx_contactgroup_changed_at ON contactgroup(changed_at);
