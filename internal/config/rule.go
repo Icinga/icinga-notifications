@@ -3,24 +3,40 @@ package config
 import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/rule"
-	"math"
 	"slices"
 	"time"
 )
+
+// SourceRuleVersion for SourceRulesInfo, consisting of two numbers, one static and one incrementable.
+type SourceRuleVersion struct {
+	Major int64
+	Minor int64
+}
+
+// NewSourceRuleVersion creates a new source version based on the current timestamp and a zero counter.
+func NewSourceRuleVersion() SourceRuleVersion {
+	return SourceRuleVersion{
+		Major: time.Now().UTC().UnixMilli(),
+		Minor: 0,
+	}
+}
+
+// Increment the version counter.
+func (sourceVersion *SourceRuleVersion) Increment() {
+	sourceVersion.Minor++
+}
+
+// String implements fmt.Stringer and returns a pretty-printable representation.
+func (sourceVersion *SourceRuleVersion) String() string {
+	return fmt.Sprintf("%x-%x", sourceVersion.Major, sourceVersion.Minor)
+}
 
 // SourceRulesInfo holds information about the rules associated with a specific source.
 type SourceRulesInfo struct {
 	// Version is the version of the rules for the source.
 	//
-	// It is a monotonically increasing number, updated whenever a rule is changed. With each change of a rule
-	// referenced by RuleIDs, the Version will be incremented by one.
-	//
-	// In the current implementation, Version starts at MAX_INT64-UNIX_TIME. Doing so reduces the chance for race
-	// conditions by asserting that after restarting Icinga Notifications the new Version will be lesser than the
-	// previous one, which started at a bigger number, potentially being incremented multiple times.
-	//
 	// Multiple source's versions are independent of another.
-	Version int64
+	Version SourceRuleVersion
 
 	// RuleIDs is a list of rule IDs associated with a specific source.
 	//
@@ -64,7 +80,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 				sourceInfo.RuleIDs = append(sourceInfo.RuleIDs, newElement.ID)
 			} else {
 				r.RulesBySource[newElement.SourceID] = &SourceRulesInfo{
-					Version: math.MaxInt64 - time.Now().Unix(),
+					Version: NewSourceRuleVersion(),
 					RuleIDs: []int64{newElement.ID},
 				}
 			}
@@ -114,7 +130,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 	// were changed.
 	for sourceID := range updatedSources {
 		if sourceInfo, ok := r.RulesBySource[sourceID]; ok {
-			sourceInfo.Version++
+			sourceInfo.Version.Increment()
 		}
 	}
 

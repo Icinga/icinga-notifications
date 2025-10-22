@@ -136,9 +136,9 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If the client uses an outdated rules version, reject the request but send also the current rules version
+	// If the client uses an outdated rules version, reject the request but also send the current rules version
 	// and rules for this source back to the client, so it can retry the request with the updated rules.
-	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(src.ID); ev.RulesVersion != latestRuleVersion {
+	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(src.ID); ev.RulesVersion != latestRuleVersion || latestRuleVersion == config.MissingRuleVersion {
 		w.WriteHeader(http.StatusPreconditionFailed)
 		l.writeSourceRulesInfo(w, src)
 
@@ -313,11 +313,11 @@ func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.So
 		defer l.runtimeConfig.RUnlock()
 
 		if sourceInfo, ok := l.runtimeConfig.RulesBySource[source.ID]; ok {
-			rulesInfo.Version = l.runtimeConfig.RulesVersionString(sourceInfo.Version)
+			rulesInfo.Version = sourceInfo.Version.String()
 			rulesInfo.Rules = make(map[string]string)
 
 			for _, rID := range sourceInfo.RuleIDs {
-				id := l.runtimeConfig.RulesVersionString(rID)
+				id := fmt.Sprintf("%d", rID)
 				filterExpr := ""
 				if l.runtimeConfig.Rules[rID].ObjectFilterExpr.Valid {
 					filterExpr = l.runtimeConfig.Rules[rID].ObjectFilterExpr.String

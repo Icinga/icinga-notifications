@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/types"
@@ -164,14 +163,11 @@ func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Escalation {
 	return nil
 }
 
-// RulesVersionString formats a rule version.
-func (r *RuntimeConfig) RulesVersionString(version int64) string {
-	return fmt.Sprintf("%x", version)
-}
+const MissingRuleVersion = "N/A"
 
 // GetRulesVersionFor retrieves the version of the rules for a specific source.
 //
-// It returns the version as a hexadecimal string, which is a representation of the version number.
+// If either no rules or no rule for this source exist, MissingRuleVersion is returned.
 //
 // May not be called while holding the write lock on the RuntimeConfig.
 func (r *RuntimeConfig) GetRulesVersionFor(srcId int64) string {
@@ -179,12 +175,12 @@ func (r *RuntimeConfig) GetRulesVersionFor(srcId int64) string {
 	defer r.RUnlock()
 
 	if r.RulesBySource != nil {
-		if sourceInfo, ok := r.RulesBySource[srcId]; ok && sourceInfo.Version > 0 {
-			return r.RulesVersionString(sourceInfo.Version)
+		if sourceInfo, ok := r.RulesBySource[srcId]; ok {
+			return sourceInfo.Version.String()
 		}
 	}
 
-	return r.RulesVersionString(0)
+	return MissingRuleVersion
 }
 
 // GetContact returns *recipient.Contact by the given username (case-insensitive).
