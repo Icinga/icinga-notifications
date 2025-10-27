@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -401,12 +400,6 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 		i.Rules = make(map[int64]struct{})
 	}
 
-	sourceRulesInfo, ok := i.runtimeConfig.RulesBySource[ev.SourceId]
-	if !ok {
-		i.logger.Errorw("Event refers to non-existing source", zap.Int64("source_id", ev.SourceId))
-		return fmt.Errorf("cannot lookup event source %d", ev.SourceId)
-	}
-
 	for _, ruleId := range ev.RuleIds {
 		ruleIdInt, err := strconv.ParseInt(ruleId, 10, 64)
 		if err != nil {
@@ -414,17 +407,18 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 			return fmt.Errorf("cannot convert rule id %q to an int: %w", ruleId, err)
 		}
 
-		if !slices.Contains(sourceRulesInfo.RuleIDs, ruleIdInt) {
-			i.logger.Errorw("Event rule does not belong to source",
-				zap.Int64("source_id", ev.SourceId),
-				zap.Int64("rule_id", ruleIdInt))
-			return fmt.Errorf("event rule %d does not belong to source %d", ruleIdInt, ev.SourceId)
-		}
-
 		r, ok := i.runtimeConfig.Rules[ruleIdInt]
 		if !ok {
 			i.logger.Errorw("Event refers to non-existing event rule, might got deleted", zap.Int64("rule_id", ruleIdInt))
 			return fmt.Errorf("cannot apply unknown rule %d", ruleIdInt)
+		}
+
+		if r.SourceID != ev.SourceId {
+			i.logger.Errorw("Rule source ID does not match event source ID",
+				zap.Int64("event_source_id", ev.SourceId),
+				zap.Int64("rule_source_id", r.SourceID),
+				zap.Int64("rule_id", ruleIdInt))
+			return fmt.Errorf("rule %d source ID %d does not match event source %d", ruleIdInt, r.SourceID, ev.SourceId)
 		}
 
 		if _, ok := i.Rules[r.ID]; !ok {
