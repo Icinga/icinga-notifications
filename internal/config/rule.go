@@ -16,7 +16,7 @@ type SourceRuleVersion struct {
 // NewSourceRuleVersion creates a new source version based on the current timestamp and a zero counter.
 func NewSourceRuleVersion() SourceRuleVersion {
 	return SourceRuleVersion{
-		Major: time.Now().UTC().UnixMilli(),
+		Major: time.Now().UnixMilli(),
 		Minor: 0,
 	}
 }
