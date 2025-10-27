@@ -127,6 +127,7 @@ CREATE INDEX idx_contactgroup_member_changed_at ON contactgroup_member(changed_a
 CREATE TABLE schedule (
     id bigserial,
     name citext NOT NULL,
+    timezone text NOT NULL, -- e.g. 'Europe/Berlin'
 
     changed_at bigint NOT NULL,
     deleted boolenum NOT NULL DEFAULT 'n',
