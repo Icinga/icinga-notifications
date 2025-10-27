@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -138,7 +139,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	// If the client uses an outdated rules version, reject the request but also send the current rules version
 	// and rules for this source back to the client, so it can retry the request with the updated rules.
-	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(src.ID); ev.RulesVersion != latestRuleVersion || latestRuleVersion == config.MissingRuleVersion {
+	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(src.ID); ev.RulesVersion != latestRuleVersion {
 		w.WriteHeader(http.StatusPreconditionFailed)
 		l.writeSourceRulesInfo(w, src)
 
@@ -317,7 +318,7 @@ func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.So
 			rulesInfo.Rules = make(map[string]string)
 
 			for _, rID := range sourceInfo.RuleIDs {
-				id := fmt.Sprintf("%d", rID)
+				id := strconv.FormatInt(rID, 10)
 				filterExpr := ""
 				if l.runtimeConfig.Rules[rID].ObjectFilterExpr.Valid {
 					filterExpr = l.runtimeConfig.Rules[rID].ObjectFilterExpr.String
