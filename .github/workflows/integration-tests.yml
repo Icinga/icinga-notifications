@@ -1,0 +1,34 @@
+name: Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+      - 'support/*'
+      - 'init-integration-tests' # TODO: remove PR testing branch
+      - 'x-integration-tests'    # TODO: remove PR testing branch
+  pull_request: {}
+  schedule:
+    - cron: '42 23 * * *'
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Run Integration Tests
+        run: ./test.sh
+        working-directory: tests/
+      - name: Compress Debug Log
+        if: ${{ always() }}
+        run: xz -9 ./tests/out/debug.log
+      - name: Upload Debug Log
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug.log.xz
+          path: ./tests/out/debug.log.xz
+          retention-days: 1
