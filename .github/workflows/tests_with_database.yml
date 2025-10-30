@@ -76,7 +76,7 @@ jobs:
         # cases in different packages from accessing the same database. Note
         # that t.Parallel() only affects parallelism within one process, i.e.
         # within the tests of one package.
-        run: go test -v -timeout 5m -p 1 ./...
+        run: go test -timeout 5m -p 1 ./...
 
   postgresql:
     name: PostgreSQL ${{ matrix.version }}
@@ -135,4 +135,4 @@ jobs:
         # cases in different packages from accessing the same database. Note
         # that t.Parallel() only affects parallelism within one process, i.e.
         # within the tests of one package.
-        run: go test -v -timeout 5m -p 1 ./...
+        run: go test -timeout 5m -p 1 ./...
