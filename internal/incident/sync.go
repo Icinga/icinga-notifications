@@ -3,8 +3,6 @@ package incident
 import (
 	"context"
 	"fmt"
-	"time"
-
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
@@ -13,6 +11,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+	"time"
 )
 
 // Upsert implements the contracts.Upserter interface.

@@ -62,8 +62,10 @@ type ConfigSet struct {
 	TimePeriods      map[int64]*timeperiod.TimePeriod
 	Schedules        map[int64]*recipient.Schedule
 	Sources          map[int64]*Source
+	Rules            map[int64]*rule.Rule
 
-	RuleSet // RuleSet contains the currently loaded rules and their version.
+	// RulesBySource maps source IDs to their rules and version information.
+	RulesBySource map[int64]*SourceRulesInfo
 
 	// The following fields contain intermediate values, necessary for the incremental config synchronization.
 	// Furthermore, they allow accessing intermediate tables as everything is referred by pointers.

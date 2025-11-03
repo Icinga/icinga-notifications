@@ -9,11 +9,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
-
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"sort"
 )
 
 type Object struct {

@@ -4,10 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-	"sync"
-	"time"
-
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
@@ -20,6 +16,9 @@ import (
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+	"strconv"
+	"sync"
+	"time"
 )
 
 type ruleID = int64

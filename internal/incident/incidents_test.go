@@ -26,7 +26,7 @@ func TestLoadOpenIncidents(t *testing.T) {
 	source := &config.Source{
 		Type:                 "notifications",
 		Name:                 "Icinga Notifications",
-		ListenerPasswordHash: "$2y$", // Needed to pass the database constraint.
+		ListenerPasswordHash: types.MakeString("$2y$"), // Needed to pass the database constraint.
 	}
 	source.ChangedAt = types.UnixMilli(time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC))
 	source.Deleted = types.Bool{Bool: false, Valid: true}
