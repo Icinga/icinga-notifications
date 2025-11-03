@@ -35,7 +35,9 @@ curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-ev
   "type": "state",
   "severity": "crit",
   "username": "",
-  "message": "Something went somewhere very wrong."
+  "message": "Something went somewhere very wrong.",
+  "rule_version": "23",
+  "rule_ids": ["0"]
 }
 EOF
 ```
@@ -60,6 +62,15 @@ The current incidents can be dumped as JSON.
 
 ```
 curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-incidents'
+```
+
+
+### Dump Rules
+
+The current rules can be dumped as JSON.
+
+```
+curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-rules'
 ```
 
 ### Dump Schedules

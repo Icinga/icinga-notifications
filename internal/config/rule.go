@@ -44,14 +44,6 @@ type SourceRulesInfo struct {
 	RuleIDs []int64
 }
 
-// RuleSet represents the set of event rules currently loaded in the runtime configuration.
-// It contains the rules and their associated information, such as the source they belong to and their version.
-type RuleSet struct {
-	Rules map[int64]*rule.Rule // rules is a map of rule.Rule by their ID.
-
-	RulesBySource map[int64]*SourceRulesInfo // RulesBySource maps source IDs to their rules and version information.
-}
-
 // applyPendingRules synchronizes changed rules.
 func (r *RuntimeConfig) applyPendingRules() {
 	// Keep track of sources the rules were updated for, so we can update their version later.

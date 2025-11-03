@@ -6,10 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"strconv"
-	"time"
-
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
@@ -20,6 +16,9 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"go.uber.org/zap"
+	"net/http"
+	"strconv"
+	"time"
 )
 
 type Listener struct {
@@ -162,7 +161,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ev.Validate(); err != nil {
-		abort(http.StatusBadRequest, &ev, err.Error())
+		abort(http.StatusBadRequest, &ev, "%v", err)
 		return
 	}
 

@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/subtle"
 	"fmt"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/bcrypt"
@@ -16,8 +17,8 @@ type Source struct {
 	Type string `db:"type"`
 	Name string `db:"name"`
 
-	ListenerPasswordHash  string `db:"listener_password_hash"`
-	listenerPassword      []byte `db:"-"`
+	ListenerPasswordHash  types.String `db:"listener_password_hash"`
+	listenerPassword      []byte       `db:"-"`
 	listenerPasswordMutex sync.Mutex
 }
 
@@ -43,7 +44,7 @@ func (source *Source) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 // If a Source changes, it will be recreated - RuntimeConfig.applyPendingSources has a nil updateFn - and the cache is
 // automatically purged.
 func (source *Source) PasswordCompare(password []byte) error {
-	if source.ListenerPasswordHash == "" {
+	if !source.ListenerPasswordHash.Valid {
 		return fmt.Errorf("source has no password hash to compare")
 	}
 
@@ -58,7 +59,7 @@ func (source *Source) PasswordCompare(password []byte) error {
 		return nil
 	}
 
-	err := bcrypt.CompareHashAndPassword([]byte(source.ListenerPasswordHash), password)
+	err := bcrypt.CompareHashAndPassword([]byte(source.ListenerPasswordHash.String), password)
 	if err != nil {
 		return err
 	}
