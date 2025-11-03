@@ -5,14 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
-	"strings"
-	"time"
-
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/jmoiron/sqlx"
+	"net/url"
+	"strings"
+	"time"
 )
 
 // ErrSuperfluousStateChange indicates a superfluous state change being ignored and stopping further processing.
@@ -91,7 +90,7 @@ func (e *Event) Validate() error {
 	}
 
 	if e.Type == baseEv.TypeUnknown {
-		return fmt.Errorf("invalid event: unsupported or empty event type %q", e.Type)
+		return errors.New("invalid event: missing type")
 	}
 
 	return nil

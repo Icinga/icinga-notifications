@@ -215,7 +215,7 @@ CREATE TABLE source (
     -- The column listener_password_hash is type-dependent.
     -- This column is required to limit API access for incoming connections to the Listener.
     -- The username will be "source-${id}", allowing early verification.
-    listener_password_hash text NOT NULL,
+    listener_password_hash text,
 
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
@@ -223,7 +223,7 @@ CREATE TABLE source (
     -- The hash is a PHP password_hash with PASSWORD_DEFAULT algorithm, defaulting to bcrypt. This check roughly ensures
     -- that listener_password_hash can only be populated with bcrypt hashes.
     -- https://icinga.com/docs/icinga-web/latest/doc/20-Advanced-Topics/#manual-user-creation-for-database-authentication-backend
-    CONSTRAINT ck_source_bcrypt_listener_password_hash CHECK (listener_password_hash LIKE '$2_$%'),
+    CONSTRAINT ck_source_bcrypt_listener_password_hash CHECK (listener_password_hash IS NULL OR listener_password_hash LIKE '$2_$%'),
 
     CONSTRAINT pk_source PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
