@@ -53,6 +53,29 @@ func (r *RuntimeConfig) applyPendingRules() {
 		r.RulesBySource = make(map[int64]*SourceRulesInfo)
 	}
 
+	addToRulesBySource := func(elem *rule.Rule) {
+		if sourceInfo, ok := r.RulesBySource[elem.SourceID]; ok {
+			sourceInfo.RuleIDs = append(sourceInfo.RuleIDs, elem.ID)
+		} else {
+			r.RulesBySource[elem.SourceID] = &SourceRulesInfo{
+				Version: NewSourceRuleVersion(),
+				RuleIDs: []int64{elem.ID},
+			}
+		}
+
+		updatedSources[elem.SourceID] = struct{}{}
+	}
+
+	delFromRulesBySource := func(elem *rule.Rule) {
+		if sourceInfo, ok := r.RulesBySource[elem.SourceID]; ok {
+			sourceInfo.RuleIDs = slices.DeleteFunc(sourceInfo.RuleIDs, func(id int64) bool {
+				return id == elem.ID
+			})
+		}
+
+		updatedSources[elem.SourceID] = struct{}{}
+	}
+
 	incrementalApplyPending(
 		r,
 		&r.Rules, &r.configChange.Rules,
@@ -67,17 +90,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 
 			newElement.Escalations = make(map[int64]*rule.Escalation)
 
-			// Add the new rule to the per-source rules cache.
-			if sourceInfo, ok := r.RulesBySource[newElement.SourceID]; ok {
-				sourceInfo.RuleIDs = append(sourceInfo.RuleIDs, newElement.ID)
-			} else {
-				r.RulesBySource[newElement.SourceID] = &SourceRulesInfo{
-					Version: NewSourceRuleVersion(),
-					RuleIDs: []int64{newElement.ID},
-				}
-			}
-
-			updatedSources[newElement.SourceID] = struct{}{}
+			addToRulesBySource(newElement)
 
 			return nil
 		},
@@ -96,6 +109,12 @@ func (r *RuntimeConfig) applyPendingRules() {
 				curElement.TimePeriod = nil
 			}
 
+			if curElement.SourceID != update.SourceID {
+				delFromRulesBySource(curElement)
+				curElement.SourceID = update.SourceID
+				addToRulesBySource(curElement)
+			}
+
 			// ObjectFilter{,Expr} are being initialized by config.IncrementalConfigurableInitAndValidatable.
 			curElement.ObjectFilterExpr = update.ObjectFilterExpr
 
@@ -104,13 +123,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 			return nil
 		},
 		func(delElement *rule.Rule) error {
-			if sourceInfo, ok := r.RulesBySource[delElement.SourceID]; ok {
-				sourceInfo.RuleIDs = slices.DeleteFunc(sourceInfo.RuleIDs, func(id int64) bool {
-					return id == delElement.ID
-				})
-			}
-
-			updatedSources[delElement.SourceID] = struct{}{}
+			delFromRulesBySource(delElement)
 
 			return nil
 		},
