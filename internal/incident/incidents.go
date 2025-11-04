@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/icinga/icinga-go-library/com"
-	"github.com/icinga/icinga-go-library/database"
-	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -27,16 +25,14 @@ var (
 
 // LoadOpenIncidents loads all active (not yet closed) incidents from the database and restores all their states.
 // Returns error on any database failure.
-func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Logger, runtimeConfig *config.RuntimeConfig) error {
-	logger.Info("Loading all active incidents from database")
-
+func LoadOpenIncidents(ctx context.Context, resources *config.Resources) error {
 	g, ctx := errgroup.WithContext(ctx)
 
 	incidents := make(chan *Incident)
 	g.Go(func() error {
 		defer close(incidents)
 
-		rows, err := db.QueryxContext(ctx, db.BuildSelectStmt(new(Incident), new(Incident))+` WHERE "recovered_at" IS NULL`)
+		rows, err := resources.DB.QueryxContext(ctx, resources.DB.BuildSelectStmt(new(Incident), new(Incident))+` WHERE "recovered_at" IS NULL`)
 		if err != nil {
 			return err
 		}
@@ -46,7 +42,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 		defer func() { _ = rows.Close() }()
 
 		for rows.Next() {
-			i := NewIncident(db, nil, runtimeConfig, nil)
+			i := NewIncident(nil, resources)
 			if err := rows.StructScan(i); err != nil {
 				return err
 			}
@@ -62,7 +58,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 	})
 
 	g.Go(func() error {
-		bulks := com.Bulk(ctx, incidents, db.Options.MaxPlaceholdersPerStatement, com.NeverSplit[*Incident])
+		bulks := com.Bulk(ctx, incidents, resources.DB.Options.MaxPlaceholdersPerStatement, com.NeverSplit[*Incident])
 
 		for {
 			select {
@@ -89,20 +85,20 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 					}
 
 					// Restore all incident objects matching the given object ids
-					if err := object.RestoreObjects(ctx, db, objectIds); err != nil {
+					if err := object.RestoreObjects(ctx, resources.DB, objectIds); err != nil {
 						return err
 					}
 
 					// Restore all escalation states and incident rules matching the given incident ids.
-					err := utils.ForEachRow[EscalationState](ctx, db, "incident_id", incidentIds, func(state *EscalationState) {
+					err := utils.ForEachRow[EscalationState](ctx, resources.DB, "incident_id", incidentIds, func(state *EscalationState) {
 						i := incidentsById[state.IncidentID]
 						i.EscalationState[state.RuleEscalationID] = state
 
 						// Restore the incident rule matching the current escalation state if any.
-						i.runtimeConfig.RLock()
-						defer i.runtimeConfig.RUnlock()
+						i.RuntimeConfig.RLock()
+						defer i.RuntimeConfig.RUnlock()
 
-						escalation := i.runtimeConfig.GetRuleEscalation(state.RuleEscalationID)
+						escalation := i.RuntimeConfig.GetRuleEscalation(state.RuleEscalationID)
 						if escalation != nil {
 							i.Rules[escalation.RuleID] = struct{}{}
 						}
@@ -112,7 +108,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 					}
 
 					// Restore incident recipients matching the given incident ids.
-					err = utils.ForEachRow[ContactRow](ctx, db, "incident_id", incidentIds, func(c *ContactRow) {
+					err = utils.ForEachRow[ContactRow](ctx, resources.DB, "incident_id", incidentIds, func(c *ContactRow) {
 						incidentsById[c.IncidentID].Recipients[c.Key] = &RecipientState{Role: c.Role}
 					})
 					if err != nil {
@@ -122,7 +118,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 					for _, i := range incidentsById {
 						i.Object = object.GetFromCache(i.ObjectID)
 						i.isMuted = i.Object.IsMuted()
-						i.logger = logger.With(zap.String("object", i.Object.DisplayName()),
+						i.logger = i.logger.With(zap.String("object", i.Object.DisplayName()),
 							zap.String("incident", i.String()))
 
 						currentIncidentsMu.Lock()
@@ -147,18 +143,14 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 	return g.Wait()
 }
 
-func GetCurrent(
-	ctx context.Context, db *database.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
-	create bool,
-) (*Incident, error) {
+func GetCurrent(ctx context.Context, obj *object.Object, resources *config.Resources, create bool) (*Incident, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
 
 	currentIncident := currentIncidents[obj]
 
 	if currentIncident == nil && create {
-		incidentLogger := logger.With(zap.String("object", obj.DisplayName()))
-		currentIncident = NewIncident(db, obj, runtimeConfig, incidentLogger)
+		currentIncident = NewIncident(obj, resources)
 
 		currentIncidents[obj] = currentIncident
 	}
@@ -206,31 +198,19 @@ func GetCurrentIncidents() map[int64]*Incident {
 // checks, it calls the Incident.ProcessEvent method.
 //
 // The returned error might be wrapped around event.ErrSuperfluousStateChange.
-func ProcessEvent(
-	ctx context.Context,
-	db *database.DB,
-	logs *logging.Logging,
-	runtimeConfig *config.RuntimeConfig,
-	ev *event.Event,
-) error {
+func ProcessEvent(ctx context.Context, resources *config.Resources, ev *event.Event) error {
 	var wasObjectMuted bool
 	if obj := object.GetFromCache(object.ID(ev.SourceId, ev.Tags)); obj != nil {
 		wasObjectMuted = obj.IsMuted()
 	}
 
-	obj, err := object.FromEvent(ctx, db, ev)
+	obj, err := object.FromEvent(ctx, resources.DB, ev)
 	if err != nil {
 		return fmt.Errorf("cannot sync event object: %w", err)
 	}
 
 	createIncident := ev.Severity != baseEv.SeverityNone && ev.Severity != baseEv.SeverityOK
-	currentIncident, err := GetCurrent(
-		ctx,
-		db,
-		obj,
-		logs.GetChildLogger("incident"),
-		runtimeConfig,
-		createIncident)
+	currentIncident, err := GetCurrent(ctx, obj, resources, createIncident)
 	if err != nil {
 		return fmt.Errorf("cannot get current incident for %q: %w", obj.DisplayName(), err)
 	}
@@ -248,7 +228,7 @@ func ProcessEvent(
 			}
 
 			// There is no active incident, but the event appears to be relevant, so try to persist it in the DB.
-			err = db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error { return ev.Sync(ctx, tx, db, obj.ID) })
+			err = resources.DB.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error { return ev.Sync(ctx, tx, resources.DB, obj.ID) })
 			if err != nil {
 				return errors.New("cannot sync non-state event to the database")
 			}

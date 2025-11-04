@@ -30,8 +30,8 @@ type Plugin struct {
 }
 
 // NewPlugin starts and returns a new plugin instance. If the start of the plugin fails, an error is returned
-func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
-	file := filepath.Join(daemon.Config().ChannelsDir, pluginType)
+func NewPlugin(pluginType, channelsDir string, logger *zap.SugaredLogger) (*Plugin, error) {
+	file := filepath.Join(channelsDir, pluginType)
 
 	logger.Debugw("Starting new channel plugin process", zap.String("path", file))
 
@@ -167,9 +167,9 @@ func forwardLogs(errPipe io.Reader, logger *zap.SugaredLogger) {
 }
 
 // UpsertPlugins upsert the available_channel_type table with working plugins
-func UpsertPlugins(ctx context.Context, channelPluginDir string, logger *logging.Logger, db *database.DB) {
+func UpsertPlugins(ctx context.Context, conf *daemon.ConfigFile, logger *logging.Logger, db *database.DB) {
 	logger.Debug("Updating available channel types")
-	files, err := os.ReadDir(channelPluginDir)
+	files, err := os.ReadDir(conf.ChannelsDir)
 	if err != nil {
 		logger.Errorw("Failed to read the channel plugin directory", zap.Error(err))
 	}
@@ -185,7 +185,7 @@ func UpsertPlugins(ctx context.Context, channelPluginDir string, logger *logging
 			continue
 		}
 
-		p, err := NewPlugin(pluginType, pluginLogger)
+		p, err := NewPlugin(pluginType, conf.ChannelsDir, pluginLogger)
 		if err != nil {
 			pluginLogger.Errorw("Failed to start plugin", zap.Error(err))
 			continue

@@ -8,6 +8,7 @@ import (
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/channel"
+	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
@@ -19,11 +20,29 @@ import (
 	"time"
 )
 
+// Resources holds references to commonly used objects.
+type Resources struct {
+	DaemonConfig  *daemon.ConfigFile `db:"-" json:"-"`
+	RuntimeConfig *RuntimeConfig     `db:"-" json:"-"`
+	DB            *database.DB       `db:"-" json:"-"`
+	Logs          *logging.Logging   `db:"-" json:"-"`
+}
+
+// MakeResources creates a new Resources instance with the provided components.
+//
+// This function initializes the Resources struct by assigning the given [RuntimeConfig],
+// database connection, and logging facilities.
+func MakeResources(rc *RuntimeConfig, file *daemon.ConfigFile, db *database.DB, logs *logging.Logging) *Resources {
+	return &Resources{RuntimeConfig: rc, DaemonConfig: file, DB: db, Logs: logs}
+}
+
 // RuntimeConfig stores the runtime representation of the configuration present in the database.
 type RuntimeConfig struct {
 	// ConfigSet is the current live config. It is embedded to allow direct access to its members.
 	// Accessing it requires a lock that is obtained with RLock() and released with RUnlock().
 	ConfigSet
+
+	*Resources // Contains references to commonly used objects and to itself.
 
 	// configChange contains incremental changes to config objects to be merged into the live configuration.
 	//
@@ -33,24 +52,18 @@ type RuntimeConfig struct {
 	configChangeAvailable  bool
 	configChangeTimestamps map[string]types.UnixMilli
 
-	logs   *logging.Logging
 	logger *logging.Logger
-	db     *database.DB
 
 	// mu is used to synchronize access to the live ConfigSet.
 	mu sync.RWMutex
 }
 
-func NewRuntimeConfig(
-	logs *logging.Logging,
-	db *database.DB,
-) *RuntimeConfig {
+func NewRuntimeConfig(resouces *Resources) *RuntimeConfig {
 	return &RuntimeConfig{
 		configChangeTimestamps: make(map[string]types.UnixMilli),
 
-		logs:   logs,
-		logger: logs.GetChildLogger("runtime-updates"),
-		db:     db,
+		Resources: resouces,
+		logger:    resouces.Logs.GetChildLogger("runtime-updates"),
 	}
 }
 
@@ -235,7 +248,7 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 }
 
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
-	tx, err := r.db.BeginTxx(ctx, &sql.TxOptions{
+	tx, err := r.DB.BeginTxx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  true,
 	})

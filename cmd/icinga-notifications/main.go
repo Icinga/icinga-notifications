@@ -19,8 +19,7 @@ import (
 )
 
 func main() {
-	daemon.ParseFlagsAndConfig()
-	conf := daemon.Config()
+	conf := daemon.ParseFlagsAndConfig()
 
 	logs, err := logging.NewLoggingFromConfig("icinga-notifications", conf.Logging)
 	if err != nil {
@@ -45,17 +44,19 @@ func main() {
 		logger.Fatalf("Cannot connect to the database: %+v", err)
 	}
 
-	channel.UpsertPlugins(ctx, conf.ChannelsDir, logs.GetChildLogger("channel"), db)
+	channel.UpsertPlugins(ctx, conf, logs.GetChildLogger("channel"), db)
 
-	runtimeConfig := config.NewRuntimeConfig(logs, db)
+	resources := config.MakeResources(nil, conf, db, logs)
+	runtimeConfig := config.NewRuntimeConfig(resources)
+	resources.RuntimeConfig = runtimeConfig
 	if err := runtimeConfig.UpdateFromDatabase(ctx); err != nil {
 		logger.Fatalf("Failed to load config from database %+v", err)
 	}
 
 	go runtimeConfig.PeriodicUpdates(ctx, 1*time.Second)
 
-	err = incident.LoadOpenIncidents(ctx, db, logs.GetChildLogger("incident"), runtimeConfig)
-	if err != nil {
+	logger.Info("Loading all active incidents from database")
+	if err = incident.LoadOpenIncidents(ctx, resources); err != nil {
 		logger.Fatalf("Cannot load incidents from database: %+v", err)
 	}
 
@@ -68,7 +69,7 @@ func main() {
 	// When Icinga Notifications is started by systemd, we've to notify systemd that we're ready.
 	_ = sdnotify.Ready()
 
-	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {
+	if err := listener.NewListener(resources).Run(ctx); err != nil {
 		logger.Errorf("Listener has finished with an error: %+v", err)
 	} else {
 		logger.Info("Listener has finished")

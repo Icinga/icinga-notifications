@@ -58,7 +58,7 @@ func incrementalFetch[
 	stmtLogger := r.logger.With(zap.String("table", tableName))
 
 	var (
-		stmt     = r.db.BuildSelectStmt(typePtr, typePtr)
+		stmt     = r.DB.BuildSelectStmt(typePtr, typePtr)
 		stmtArgs []any
 	)
 	if hasChangedAt {
@@ -67,7 +67,7 @@ func incrementalFetch[
 		stmtArgs = []any{changedAt}
 	}
 
-	stmt = r.db.Rebind(stmt + ` ORDER BY "changed_at"`)
+	stmt = r.DB.Rebind(stmt + ` ORDER BY "changed_at"`)
 	stmtLogger = stmtLogger.With(zap.String("query", stmt))
 
 	var ts []T

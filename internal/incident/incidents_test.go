@@ -13,7 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap"
 	"testing"
 	"time"
 )
@@ -21,6 +21,10 @@ import (
 func TestLoadOpenIncidents(t *testing.T) {
 	ctx := context.Background()
 	db := testutils.GetTestDB(ctx, t)
+	logs := logging.NewLoggingWithFactory("testing", zap.DebugLevel, time.Hour, testutils.NewTestLoggerFactory(t))
+	resources := config.MakeResources(nil, nil, db, logs)
+	runtimeC := config.NewRuntimeConfig(resources)
+	resources.RuntimeConfig = runtimeC
 
 	// Insert a dummy source for our test cases!
 	source := &config.Source{
@@ -51,12 +55,12 @@ func TestLoadOpenIncidents(t *testing.T) {
 
 	testData := make(map[string]*Incident, 10*db.Options.MaxPlaceholdersPerStatement)
 	for j := 1; j <= 10*db.Options.MaxPlaceholdersPerStatement; j++ {
-		i := makeIncident(ctx, db, t, source.ID, false)
+		i := makeIncident(ctx, t, resources, source.ID, false)
 		testData[i.ObjectID.String()] = i
 	}
 
 	t.Run("WithNoRecoveredIncidents", func(t *testing.T) {
-		assertIncidents(ctx, db, t, testData)
+		assertIncidents(ctx, t, resources, testData)
 	})
 
 	t.Run("WithSomeRecoveredIncidents", func(t *testing.T) {
@@ -83,16 +87,16 @@ func TestLoadOpenIncidents(t *testing.T) {
 
 		for j := 1; j <= db.Options.MaxPlaceholdersPerStatement/2; j++ {
 			// We don't need to cache recovered incidents in memory.
-			_ = makeIncident(ctx, db, t, source.ID, true)
+			_ = makeIncident(ctx, t, resources, source.ID, true)
 
 			if j%2 == 0 {
 				// Add some extra new not recovered incidents to fully simulate a daemon reload.
-				i := makeIncident(ctx, db, t, source.ID, false)
+				i := makeIncident(ctx, t, resources, source.ID, false)
 				testData[i.ObjectID.String()] = i
 			}
 		}
 
-		assertIncidents(ctx, db, t, testData)
+		assertIncidents(ctx, t, resources, testData)
 	})
 }
 
@@ -100,9 +104,7 @@ func TestLoadOpenIncidents(t *testing.T) {
 //
 // The incident loading process is limited to a maximum duration of 10 seconds and will be
 // aborted and causes the entire test suite to fail immediately, if it takes longer.
-func assertIncidents(ctx context.Context, db *database.DB, t *testing.T, testData map[string]*Incident) {
-	logger := logging.NewLogger(zaptest.NewLogger(t).Sugar(), time.Hour)
-
+func assertIncidents(ctx context.Context, t *testing.T, resources *config.Resources, testData map[string]*Incident) {
 	// Since we have been using object.FromEvent() to persist the test objects to the database,
 	// these will be automatically added to the objects cache as well. So clear the cache before
 	// reloading the incidents, otherwise it will panic in object.RestoreObjects().
@@ -113,7 +115,7 @@ func assertIncidents(ctx context.Context, db *database.DB, t *testing.T, testDat
 	ctx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(10*time.Second))
 	defer cancelFunc()
 
-	err := LoadOpenIncidents(ctx, db, logger, &config.RuntimeConfig{})
+	err := LoadOpenIncidents(ctx, resources)
 	require.NoError(t, err, "failed to load not recovered incidents")
 
 	incidents := GetCurrentIncidents()
@@ -146,7 +148,7 @@ func assertIncidents(ctx context.Context, db *database.DB, t *testing.T, testDat
 // This will firstly create and synchronise a new object from a freshly generated dummy event with distinct
 // tags and name, and ensures that no error is returned, otherwise it will cause the entire test suite to fail.
 // Once the object has been successfully synchronised, an incident is created and synced with the database.
-func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID int64, recovered bool) *Incident {
+func makeIncident(ctx context.Context, t *testing.T, resources *config.Resources, sourceID int64, recovered bool) *Incident {
 	ev := &event.Event{
 		Time:     time.Time{},
 		SourceId: sourceID,
@@ -163,10 +165,10 @@ func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID i
 		},
 	}
 
-	o, err := object.FromEvent(ctx, db, ev)
+	o, err := object.FromEvent(ctx, resources.DB, ev)
 	require.NoError(t, err)
 
-	i := NewIncident(db, o, &config.RuntimeConfig{}, nil)
+	i := NewIncident(o, resources)
 	i.StartedAt = types.UnixMilli(time.Now().Add(-2 * time.Hour).Truncate(time.Second))
 	i.Severity = baseEv.SeverityCrit
 	if recovered {
@@ -174,7 +176,7 @@ func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID i
 		i.RecoveredAt = types.UnixMilli(time.Now())
 	}
 
-	tx, err := db.BeginTxx(ctx, nil)
+	tx, err := resources.DB.BeginTxx(ctx, nil)
 	require.NoError(t, err, "starting a transaction should not fail")
 	require.NoError(t, i.Sync(ctx, tx), "failed to insert incident")
 	require.NoError(t, tx.Commit(), "committing a transaction should not fail")
