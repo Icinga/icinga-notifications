@@ -7,6 +7,7 @@ import (
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/icinga/icinga-notifications/internal/contracts"
+	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"go.uber.org/zap"
@@ -23,8 +24,9 @@ type Channel struct {
 
 	Logger *zap.SugaredLogger `db:"-"`
 
-	restartCh chan newConfig
-	pluginCh  chan *Plugin
+	daemonConfig *daemon.ConfigFile
+	restartCh    chan newConfig
+	pluginCh     chan *Plugin
 
 	pluginCtx       context.Context
 	pluginCtxCancel func()
@@ -50,8 +52,9 @@ type newConfig struct {
 }
 
 // Start initializes the channel and starts the plugin in the background
-func (c *Channel) Start(ctx context.Context, logger *zap.SugaredLogger) {
+func (c *Channel) Start(ctx context.Context, conf *daemon.ConfigFile, logger *zap.SugaredLogger) {
 	c.Logger = logger.With(zap.Object("channel", c))
+	c.daemonConfig = conf
 	c.restartCh = make(chan newConfig)
 	c.pluginCh = make(chan *Plugin)
 	c.pluginCtx, c.pluginCtxCancel = context.WithCancel(ctx)
@@ -63,7 +66,7 @@ func (c *Channel) Start(ctx context.Context, logger *zap.SugaredLogger) {
 func (c *Channel) initPlugin(cType string, config string) *Plugin {
 	c.Logger.Debug("Initializing channel plugin")
 
-	p, err := NewPlugin(cType, c.Logger)
+	p, err := NewPlugin(cType, c.daemonConfig.ChannelsDir, c.Logger)
 	if err != nil {
 		c.Logger.Errorw("Failed to initialize channel plugin", zap.Error(err))
 		return nil

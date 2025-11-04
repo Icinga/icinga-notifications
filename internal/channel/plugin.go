@@ -9,7 +9,6 @@ import (
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-go-library/notifications/rpc"
-	"github.com/icinga/icinga-notifications/internal/daemon"
 	"go.uber.org/zap"
 	"io"
 	"os"
@@ -30,8 +29,8 @@ type Plugin struct {
 }
 
 // NewPlugin starts and returns a new plugin instance. If the start of the plugin fails, an error is returned
-func NewPlugin(pluginType string, logger *zap.SugaredLogger) (*Plugin, error) {
-	file := filepath.Join(daemon.Config().ChannelsDir, pluginType)
+func NewPlugin(pluginType, channelsDir string, logger *zap.SugaredLogger) (*Plugin, error) {
+	file := filepath.Join(channelsDir, pluginType)
 
 	logger.Debugw("Starting new channel plugin process", zap.String("path", file))
 
@@ -185,7 +184,7 @@ func UpsertPlugins(ctx context.Context, channelPluginDir string, logger *logging
 			continue
 		}
 
-		p, err := NewPlugin(pluginType, pluginLogger)
+		p, err := NewPlugin(pluginType, channelPluginDir, pluginLogger)
 		if err != nil {
 			pluginLogger.Errorw("Failed to start plugin", zap.Error(err))
 			continue

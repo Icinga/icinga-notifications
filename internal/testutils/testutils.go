@@ -8,6 +8,8 @@ import (
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 	"os"
 	"strconv"
@@ -65,4 +67,20 @@ func MakeRandomString(t *testing.T) string {
 	require.NoError(t, err, "failed to generate random string")
 
 	return fmt.Sprintf("%x", buf)
+}
+
+// NewTestLogging creates a new logging instance for testing purposes.
+//
+// The logger uses zaptest to integrate with the testing.T instance, allowing log output to be
+// captured and displayed in test results. The logging level is set to Debug to provide detailed
+// output during tests.
+func NewTestLogging(t *testing.T) *logging.Logging {
+	return logging.NewLoggingWithFactory(
+		"testing",
+		zap.DebugLevel,
+		time.Hour,
+		func(level zap.AtomicLevel) zapcore.Core {
+			return zaptest.NewLogger(t, zaptest.Level(level.Level())).Core()
+		},
+	)
 }

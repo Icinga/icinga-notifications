@@ -27,13 +27,13 @@ func (i *Incident) Upsert() interface{} {
 // Returns an error on db failure.
 func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 	if i.Id != 0 {
-		stmt, _ := i.db.BuildUpsertStmt(i)
+		stmt, _ := i.DB.BuildUpsertStmt(i)
 		_, err := tx.NamedExecContext(ctx, stmt, i)
 		if err != nil {
 			return fmt.Errorf("failed to upsert incident: %w", err)
 		}
 	} else {
-		stmt := database.BuildInsertStmtWithout(i.db, i, "id")
+		stmt := database.BuildInsertStmtWithout(i.DB, i, "id")
 		incidentId, err := database.InsertObtainID(ctx, tx, stmt, i)
 		if err != nil {
 			return err
@@ -48,7 +48,7 @@ func (i *Incident) Sync(ctx context.Context, tx *sqlx.Tx) error {
 func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, state *EscalationState) error {
 	state.IncidentID = i.Id
 
-	stmt, _ := i.db.BuildUpsertStmt(state)
+	stmt, _ := i.DB.BuildUpsertStmt(state)
 	_, err := tx.NamedExecContext(ctx, stmt, state)
 
 	return err
@@ -57,7 +57,7 @@ func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, stat
 // AddEvent Inserts incident history record to the database and returns an error on db failure.
 func (i *Incident) AddEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
 	ie := &EventRow{IncidentID: i.Id, EventID: ev.ID}
-	stmt, _ := i.db.BuildInsertStmt(ie)
+	stmt, _ := i.DB.BuildInsertStmt(ie)
 	_, err := tx.NamedExecContext(ctx, stmt, ie)
 
 	return err
@@ -98,7 +98,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 					OldRecipientRole: oldRole,
 				}
 
-				if err := hr.Sync(ctx, i.db, tx); err != nil {
+				if err := hr.Sync(ctx, i.DB, tx); err != nil {
 					i.logger.Errorw(
 						"Failed to insert recipient role changed incident history", zap.Object("escalation", escalation),
 						zap.String("recipients", r.String()), zap.Error(err),
@@ -109,7 +109,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 			cr.Role = state.Role
 		}
 
-		stmt, _ := i.db.BuildUpsertStmt(cr)
+		stmt, _ := i.DB.BuildUpsertStmt(cr)
 		_, err := tx.NamedExecContext(ctx, stmt, cr)
 		if err != nil {
 			i.logger.Errorw(
@@ -127,7 +127,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 // Returns an error on database failure.
 func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule) error {
 	rr := &RuleRow{IncidentID: i.Id, RuleID: r.ID}
-	stmt, _ := i.db.BuildUpsertStmt(rr)
+	stmt, _ := i.DB.BuildUpsertStmt(rr)
 	_, err := tx.NamedExecContext(ctx, stmt, rr)
 
 	return err
@@ -159,7 +159,7 @@ func (i *Incident) generateNotifications(
 				hr.NotificationState = NotificationStateSuppressed
 			}
 
-			if err := hr.Sync(ctx, i.db, tx); err != nil {
+			if err := hr.Sync(ctx, i.DB, tx); err != nil {
 				i.logger.Errorw("Failed to insert incident notification history",
 					zap.String("contact", contact.FullName),
 					zap.Bool("incident_muted", i.isMuted),

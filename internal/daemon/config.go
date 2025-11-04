@@ -61,23 +61,10 @@ type Flags struct {
 	Config string `short:"c" long:"config" description:"path to config file"`
 }
 
-// daemonConfig holds the configuration state as a singleton.
-// It is initialised by the ParseFlagsAndConfig func and exposed through the Config function.
-var daemonConfig *ConfigFile
-
-// Config returns the config that was loaded while starting the daemon.
-// Panics when ParseFlagsAndConfig was not called earlier.
-func Config() *ConfigFile {
-	if daemonConfig == nil {
-		panic("ERROR: daemon.Config() called before daemon.ParseFlagsAndConfig()")
-	}
-
-	return daemonConfig
-}
-
 // ParseFlagsAndConfig parses the CLI flags provided to the executable and tries to load the config from the YAML file.
-// Prints any error during parsing or config loading to os.Stderr and exits.
-func ParseFlagsAndConfig() {
+//
+// Prints any error during parsing or config loading to os.Stderr and exits, otherwise returns the loaded ConfigFile.
+func ParseFlagsAndConfig() *ConfigFile {
 	flags := Flags{Config: internal.SysConfDir + "/icinga-notifications/config.yml"}
 	if err := config.ParseFlags(&flags); err != nil {
 		if errors.Is(err, config.ErrInvalidArgument) {
@@ -92,7 +79,7 @@ func ParseFlagsAndConfig() {
 		os.Exit(ExitSuccess)
 	}
 
-	daemonConfig = new(ConfigFile)
+	daemonConfig := new(ConfigFile)
 	if err := config.FromYAMLFile(flags.Config, daemonConfig); err != nil {
 		if errors.Is(err, config.ErrInvalidArgument) {
 			panic(err)
@@ -100,4 +87,5 @@ func ParseFlagsAndConfig() {
 
 		utils.PrintErrorThenExit(err, ExitFailure)
 	}
+	return daemonConfig
 }

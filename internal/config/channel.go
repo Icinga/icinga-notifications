@@ -11,7 +11,7 @@ func (r *RuntimeConfig) applyPendingChannels() {
 		r,
 		&r.Channels, &r.configChange.Channels,
 		func(newElement *channel.Channel) error {
-			newElement.Start(context.TODO(), r.logs.GetChildLogger("channel").SugaredLogger)
+			newElement.Start(context.TODO(), r.DaemonConfig, r.Logs.GetChildLogger("channel").SugaredLogger)
 			return nil
 		},
 		func(curElement, update *channel.Channel) error {
@@ -19,7 +19,7 @@ func (r *RuntimeConfig) applyPendingChannels() {
 			curElement.Name = update.Name
 			curElement.Type = update.Type
 			curElement.Config = update.Config
-			curElement.Restart(r.logs.GetChildLogger("channel").SugaredLogger)
+			curElement.Restart(r.Logs.GetChildLogger("channel").SugaredLogger)
 			return nil
 		},
 		func(delElement *channel.Channel) error {
