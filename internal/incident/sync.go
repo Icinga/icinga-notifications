@@ -161,7 +161,9 @@ func (i *Incident) generateNotifications(
 
 			if err := hr.Sync(ctx, i.db, tx); err != nil {
 				i.logger.Errorw("Failed to insert incident notification history",
-					zap.String("contact", contact.FullName), zap.Bool("incident_muted", i.Object.IsMuted()),
+					zap.String("contact", contact.FullName),
+					zap.Bool("incident_muted", i.isMuted),
+					zap.Bool("object_muted", i.Object.IsMuted()),
 					zap.Error(err))
 				return nil, err
 			}

@@ -164,11 +164,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		return err
 	}
 
-	if err := i.handleMuteUnmute(ctx, tx, ev); err != nil {
-		i.logger.Errorw("Cannot insert incident muted history", zap.String("event", ev.String()), zap.Error(err))
-		return err
-	}
-
 	switch ev.Type {
 	case baseEv.TypeState:
 		if !isNew {
@@ -202,9 +197,24 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 	}
 
+	// The unmute history entry, on the other hand, must be inserted first, so that the notifications generated
+	// below appear logically after the unmute event. This way, when viewing the incident history in the UI, the
+	// unmute event will appear before the notifications that were sent after unmuting.
+	if err := i.handleUnmute(ctx, tx, ev); err != nil {
+		i.logger.Errorw("Cannot insert incident muted history", zap.String("event", ev.String()), zap.Error(err))
+		return err
+	}
+
 	var notifications []*NotificationEntry
 	notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
 	if err != nil {
+		return err
+	}
+
+	// So that the incident muted history appears logically after the just generated notifications, we must insert
+	// the muted history last. This way, the history entries will make sense when viewed in chronological order.
+	if err := i.handleMute(ctx, tx, ev); err != nil {
+		i.logger.Errorw("Cannot insert incident muted history", zap.Stringer("event", ev), zap.Error(err))
 		return err
 	}
 
@@ -368,28 +378,48 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 	return nil
 }
 
-// handleMuteUnmute generates an incident Muted or Unmuted history based on the Object state.
+// handleUnmute generates the corresponding Unmuted history if the incident is going to be unmuted now.
+//
+// If the incident is already unmuted, or the object is still muted, this is a no-op.
 // Returns an error if fails to insert the generated history to the database.
-func (i *Incident) handleMuteUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	if i.isMuted == i.Object.IsMuted() {
+func (i *Incident) handleUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
+	if !i.isMuted || i.Object.IsMuted() {
 		return nil
 	}
 
-	hr := &HistoryRow{IncidentID: i.Id, EventID: types.MakeInt(ev.ID, types.TransformZeroIntToNull), Time: types.UnixMilli(time.Now())}
-	logger := i.logger.With(zap.String("event", ev.String()))
-	if i.Object.IsMuted() {
-		hr.Type = Muted
-		// Since the object may have already been muted with previous events before this incident even
-		// existed, we have to use the mute reason from this object and not from the ongoing event.
-		hr.Message = i.Object.MuteReason
-		logger.Infow("Muting incident", zap.String("reason", i.Object.MuteReason.String))
-	} else {
-		hr.Type = Unmuted
+	i.logger.Infow("Unmuting incident", zap.Stringer("event", ev), zap.String("reason", i.Object.MuteReason.String))
+
+	hr := &HistoryRow{
+		IncidentID: i.Id,
+		EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
+		Time:       types.UnixMilli(time.Now()),
+		Type:       Unmuted,
 		// On the other hand, if an object is unmuted, its mute reason is already reset, and we can't access it anymore.
-		hr.Message = types.MakeString(ev.MuteReason, types.TransformEmptyStringToNull)
-		logger.Infow("Unmuting incident", zap.String("reason", ev.MuteReason))
+		Message: types.MakeString(ev.MuteReason, types.TransformEmptyStringToNull),
+	}
+	return hr.Sync(ctx, i.db, tx)
+}
+
+// handleMute generates the corresponding Muted history if the incident is not yet muted but is going to be muted now.
+//
+// If the incident is already muted, or the object is not muted at all, this is a no-op.
+// Returns an error if fails to insert the generated history to the database.
+func (i *Incident) handleMute(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
+	if i.isMuted || !i.Object.IsMuted() {
+		return nil
 	}
 
+	i.logger.Infow("Muting incident", zap.Stringer("event", ev), zap.String("reason", i.Object.MuteReason.String))
+
+	hr := &HistoryRow{
+		IncidentID: i.Id,
+		EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
+		Time:       types.UnixMilli(time.Now()),
+		Type:       Muted,
+		// Since the object may have already been muted with previous events before this incident even
+		// existed, we have to use the mute reason from this object and not from the ongoing event.
+		Message: i.Object.MuteReason,
+	}
 	return hr.Sync(ctx, i.db, tx)
 }
 
