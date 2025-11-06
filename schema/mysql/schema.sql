@@ -212,7 +212,6 @@ CREATE TABLE source (
     -- will likely need a distinguishing value for multiple sources of the same type in the future, like for example
     -- the Icinga DB environment ID for Icinga 2 sources
 
-    -- The column listener_password_hash is type-dependent.
     -- This column is required to limit API access for incoming connections to the Listener.
     -- The username will be "source-${id}", allowing early verification.
     listener_password_hash text,

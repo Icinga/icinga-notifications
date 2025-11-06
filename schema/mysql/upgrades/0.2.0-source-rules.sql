@@ -1,11 +1,15 @@
-ALTER TABLE source DROP CONSTRAINT ck_source_icinga2_has_config;
+ALTER TABLE source
+  DROP CONSTRAINT ck_source_icinga2_has_config,
+  DROP CONSTRAINT ck_source_bcrypt_listener_password_hash;
 ALTER TABLE source
   DROP COLUMN icinga2_base_url,
   DROP COLUMN icinga2_auth_user,
   DROP COLUMN icinga2_auth_pass,
   DROP COLUMN icinga2_ca_pem,
   DROP COLUMN icinga2_common_name,
-  DROP COLUMN icinga2_insecure_tls;
+  DROP COLUMN icinga2_insecure_tls,
+  ADD CONSTRAINT ck_source_bcrypt_listener_password_hash CHECK (
+    listener_password_hash IS NULL OR listener_password_hash LIKE '$2_$%');
 
 ALTER TABLE rule
   ADD COLUMN source_id bigint DEFAULT NULL AFTER timeperiod_id,
