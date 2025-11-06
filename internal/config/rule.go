@@ -115,7 +115,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 				addToRulesBySource(curElement)
 			}
 
-			// ObjectFilter{,Expr} are being initialized by config.IncrementalConfigurableInitAndValidatable.
+			// ObjectFilterExpr is being initialized by config.IncrementalConfigurableInitAndValidatable.
 			curElement.ObjectFilterExpr = update.ObjectFilterExpr
 
 			updatedSources[curElement.SourceID] = struct{}{}
