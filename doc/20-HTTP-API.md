@@ -5,13 +5,24 @@ via `listen` and `debug-password`.
 
 ## Process Event
 
-One possible source next to the Icinga 2 API is event submission to the Icinga Notifications HTTP API listener.
-After creating a source with type _Other_ in Icinga Notifications Web,
-the specified credentials can be used for HTTP Basic Authentication of a JSON-encoded
-[Event](https://github.com/Icinga/icinga-notifications/blob/main/internal/event/event.go).
+Events can be submitted to Icinga Notifications using the `/process-event` HTTP API endpoint.
+
+After creating a source in Icinga Notifications Web,
+the specified credentials can be used via HTTP Basic Authentication to submit a JSON-encoded
+[`Event`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/event/event.go).
 
 The authentication is performed via HTTP Basic Authentication, expecting `source-${id}` as the username,
 `${id}` being the source's `id` within the database, and the configured password.
+
+Events sent to Icinga Notifications are expected to match rules that describe further event escalations.
+These rules can be created in the web interface.
+Next to an array of `rule_ids`, a `rules_version` must be provided to ensure that the source has no outdated state.
+
+When the submitted `rules_version` is either outdated or empty, the `/process-event` endpoint returns an HTTP 412 response.
+The response's body is a JSON-encoded version of the
+[`RulesInfo`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/source/client.go),
+containing the latest `rules_version` together with all rules for this source.
+After reevaluating these rules, one can resubmit the event with the updated `rules_version`.
 
 ```
 curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-event' <<EOF
@@ -36,7 +47,7 @@ curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-ev
   "severity": "crit",
   "username": "",
   "message": "Something went somewhere very wrong.",
-  "rule_version": "23",
+  "rules_version": "23",
   "rule_ids": ["0"]
 }
 EOF
