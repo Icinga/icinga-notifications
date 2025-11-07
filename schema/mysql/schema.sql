@@ -213,12 +213,15 @@ CREATE TABLE source (
     -- will likely need a distinguishing value for multiple sources of the same type in the future, like for example
     -- the Icinga DB environment ID for Icinga 2 sources
 
-    -- This column is required to limit API access for incoming connections to the Listener.
-    -- The username will be "source-${id}", allowing early verification.
+    -- listener_{username,password_hash} are required to limit API access for incoming connections to the Listener.
+    listener_username varchar(255),
     listener_password_hash text,
 
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
+
+    CONSTRAINT uk_source_listener_username UNIQUE (listener_username),
+    CONSTRAINT ck_source_listener_username_or_deleted CHECK (deleted = 'y' OR listener_username IS NOT NULL),
 
     -- The hash is a PHP password_hash with PASSWORD_DEFAULT algorithm, defaulting to bcrypt. This check roughly ensures
     -- that listener_password_hash can only be populated with bcrypt hashes.

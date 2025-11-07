@@ -17,6 +17,7 @@ type Source struct {
 	Type string `db:"type"`
 	Name string `db:"name"`
 
+	ListenerUsername      types.String `db:"listener_username"`
 	ListenerPasswordHash  types.String `db:"listener_password_hash"`
 	listenerPassword      []byte       `db:"-"`
 	listenerPasswordMutex sync.Mutex

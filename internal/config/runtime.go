@@ -13,7 +13,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -205,29 +204,24 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 	r.RLock()
 	defer r.RUnlock()
 
-	sourceIdRaw, sourceIdOk := strings.CutPrefix(user, "source-")
-	if !sourceIdOk {
-		logger.Debugw("Cannot extract source ID from HTTP basic auth username", zap.String("user_input", user))
-		return nil
+	var src *Source
+	for _, tmpSrc := range r.Sources {
+		if tmpSrc.ListenerUsername.Valid && tmpSrc.ListenerUsername.String == user {
+			src = tmpSrc
+			break
+		}
 	}
-	sourceId, err := strconv.ParseInt(sourceIdRaw, 10, 64)
-	if err != nil {
-		logger.Debugw("Cannot convert extracted source Id to int", zap.String("user_input", user), zap.Error(err))
-		return nil
-	}
-
-	src, ok := r.Sources[sourceId]
-	if !ok {
-		logger.Debugw("Cannot check credentials for unknown source ID", zap.Int64("id", sourceId))
+	if src == nil {
+		logger.Debugw("Cannot find source for username", zap.String("user", user))
 		return nil
 	}
 
-	err = src.PasswordCompare([]byte(pass))
+	err := src.PasswordCompare([]byte(pass))
 	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
-		logger.Debugw("Invalid password for this source", zap.Int64("id", sourceId))
+		logger.Debugw("Invalid password for source", zap.Int64("id", src.ID))
 		return nil
 	} else if err != nil {
-		logger.Errorw("Failed to verify password for this source", zap.Int64("id", sourceId), zap.Error(err))
+		logger.Errorw("Failed to verify password for source", zap.Int64("id", src.ID), zap.Error(err))
 		return nil
 	}
 

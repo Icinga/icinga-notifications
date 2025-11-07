@@ -24,13 +24,14 @@ func TestRestoreMutedObjects(t *testing.T) {
 			"type":       "notifications",
 			"name":       "Icinga Notifications",
 			"changed_at": int64(1720702049000),
+			"user":       "jane.doe",
 			"pwd_hash":   "$2y$", // Needed to pass the database constraint.
 		}
 		// We can't use config.Source here unfortunately due to cyclic import error!
 		id, err := database.InsertObtainID(
 			ctx,
 			tx,
-			`INSERT INTO source (type, name, changed_at, listener_password_hash) VALUES (:type, :name, :changed_at, :pwd_hash)`,
+			`INSERT INTO source (type, name, changed_at, listener_username, listener_password_hash) VALUES (:type, :name, :changed_at, :user, :pwd_hash)`,
 			args)
 		require.NoError(t, err, "populating source table should not fail")
 
