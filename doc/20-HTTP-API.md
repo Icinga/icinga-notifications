@@ -11,8 +11,12 @@ After creating a source in Icinga Notifications Web,
 the specified credentials can be used via HTTP Basic Authentication to submit a JSON-encoded
 [`Event`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/event/event.go).
 
-The authentication is performed via HTTP Basic Authentication, expecting `source-${id}` as the username,
-`${id}` being the source's `id` within the database, and the configured password.
+The authentication is performed via HTTP Basic Authentication using the source's username and password.
+
+!!! info
+
+    Before Icinga Notifications version 0.2.0, the username was a fixed string based on the source ID, such as `source-${id}`.
+    When upgrading a setup from an earlier version, these usernames are still valid, but can be changed in Icinga Notifications Web.
 
 Events sent to Icinga Notifications are expected to match rules that describe further event escalations.
 These rules can be created in the web interface.

@@ -24,8 +24,9 @@ func TestLoadOpenIncidents(t *testing.T) {
 
 	// Insert a dummy source for our test cases!
 	source := &config.Source{
-		Type: "notifications",
-		Name: "Icinga Notifications",
+		Type:             "notifications",
+		Name:             "Icinga Notifications",
+		ListenerUsername: types.MakeString("notifications"),
 	}
 	source.ChangedAt = types.UnixMilli(time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC))
 	source.Deleted = types.Bool{Bool: false, Valid: true}
