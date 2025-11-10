@@ -94,6 +94,7 @@ CREATE INDEX idx_contactgroup_member_changed_at ON contactgroup_member(changed_a
 CREATE TABLE schedule (
     id bigint NOT NULL AUTO_INCREMENT,
     name text NOT NULL COLLATE utf8mb4_unicode_ci,
+    timezone text NOT NULL, -- e.g. 'Europe/Berlin'
 
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
