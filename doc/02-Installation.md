@@ -92,7 +92,7 @@ systemctl enable --now icinga-notifications
 
 ## Installing Icinga Notifications Web
 
-With Icinga 2, Icinga Notifications and the database fully set up, it is now time to install Icinga Notifications Web,
+With Icinga 2, Icinga DB, Icinga Notifications and the database fully set up, it is now time to install Icinga Notifications Web,
 which connects to the database and allows configuring Icinga Notifications.
 
 Please follow the

@@ -12,7 +12,7 @@ forwards notifications to predefined contacts, consisting of:
 * The Icinga Notifications daemon, which receives events and sends notifications.
 * The [Icinga Notifications Web](https://icinga.com/docs/icinga-notifications-web/latest/doc/01-About/) module,
   which provides graphical configuration.
-* Icinga 2 and other sources that provide monitoring events that result in notifications.
+* Icinga DB and other sources that provide monitoring events that result in notifications.
 
 ## Big Picture
 
@@ -25,10 +25,10 @@ First, the Icinga Notifications configuration resides in a SQL database.
 It can be conveniently tweaked via Icinga Notifications Web directly from a web browser.
 The Icinga Notifications daemon uses this database to read the current configuration.
 
-As in any Icinga setup, all host and service checks are defined in Icinga 2.
-By querying the Icinga 2 API, the Icinga Notifications daemon retrieves state changes, acknowledgements, and other events.
+As in most Icinga setups, all host and service checks are defined in Icinga 2 and processed by Icinga DB.
+The Icinga DB can act as an Icinga Notifications source to forward state changes, acknowledgements, and other events to the Icinga Notifications daemon.
 These events are stored in the database and are available for further inspection in Icinga Notifications Web.
-Next to Icinga 2, other notification sources can be configured.
+Next to Icinga DB, other notification sources can be configured.
 
 Depending on its configuration, the daemon will take action on these events.
 This optionally includes escalations that are sent through a channel plugin.

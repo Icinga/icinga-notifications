@@ -11,7 +11,7 @@ forwards notifications to predefined contacts, consisting of:
 * The Icinga Notifications daemon (this repository), which receives events and sends notifications.
 * The [Icinga Notifications Web](https://github.com/Icinga/icinga-notifications-web) module,
   which provides graphical configuration.
-* Icinga 2 and other sources that provide monitoring events that result in notifications.
+* Icinga DB and other sources that provide monitoring events that result in notifications.
 
 ![Icinga Notifications Architecture](doc/images/icinga-notifications-architecture.png)
 
