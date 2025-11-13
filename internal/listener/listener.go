@@ -306,7 +306,9 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 //
 // Internally, it converts the data to [baseSource.RulesInfo], being serialized JSON-encoded.
 func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.Source) {
-	var rulesInfo baseSource.RulesInfo
+	rulesInfo := baseSource.RulesInfo{
+		Version: config.NoRulesVersion,
+	}
 
 	func() { // Use a function to ensure that the RLock and RUnlock are called before writing the response.
 		l.runtimeConfig.RLock()
