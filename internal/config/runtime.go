@@ -164,11 +164,15 @@ func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Escalation {
 	return nil
 }
 
-const MissingRuleVersion = "N/A"
+// NoRulesVersion is a source.RulesInfo version implying that no rules are available for this source.
+//
+// Setting this to the empty string lets comparisons with an empty rule version evaluate to true, which conveniently
+// reduces the amount of rule exchanges between a source and this daemon on a clean setup.
+const NoRulesVersion = ""
 
 // GetRulesVersionFor retrieves the version of the rules for a specific source.
 //
-// If either no rules or no rule for this source exist, MissingRuleVersion is returned.
+// If either no rules or no rule for this source exist, NoRulesVersion is returned.
 //
 // May not be called while holding the write lock on the RuntimeConfig.
 func (r *RuntimeConfig) GetRulesVersionFor(srcId int64) string {
@@ -181,7 +185,7 @@ func (r *RuntimeConfig) GetRulesVersionFor(srcId int64) string {
 		}
 	}
 
-	return MissingRuleVersion
+	return NoRulesVersion
 }
 
 // GetContact returns *recipient.Contact by the given username (case-insensitive).
