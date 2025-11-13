@@ -33,12 +33,6 @@ For a package installation, the default will point to the correct location and m
 This directory should be `/usr/libexec/icinga-notifications/channels` on systems that follow the Filesystem Hierarchy Standard.
 It may also be `/usr/lib/icinga-notifications/channels`, depending on the operating system conventions.
 
-### API Timeout
-
-The `api-timeout` specifies the Icinga 2 API request timeout defined as a [duration string](#duration-string).
-Note, this timeout does not apply to the Icinga 2 event streams, but to those API endpoints
-like `/v1/objects`, `/v1/status` used to occasionally retrieve some additional information of a Checkable.
-
 ## Database Configuration
 
 Connection configuration for the database where Icinga Notifications stores configuration and historical data.

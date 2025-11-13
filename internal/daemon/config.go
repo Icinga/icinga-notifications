@@ -9,7 +9,6 @@ import (
 	"github.com/icinga/icinga-go-library/utils"
 	"github.com/icinga/icinga-notifications/internal"
 	"os"
-	"time"
 )
 
 const (
@@ -21,7 +20,6 @@ type ConfigFile struct {
 	Listen        string          `yaml:"listen" default:"localhost:5680"`
 	DebugPassword string          `yaml:"debug-password"`
 	ChannelsDir   string          `yaml:"channels-dir"`
-	ApiTimeout    time.Duration   `yaml:"api-timeout" default:"1m"`
 	Icingaweb2URL string          `yaml:"icingaweb2-url"`
 	Database      database.Config `yaml:"database"`
 	Logging       logging.Config  `yaml:"logging"`
