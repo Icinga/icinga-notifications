@@ -92,10 +92,19 @@ systemctl enable --now icinga-notifications
 
 ## Installing Icinga Notifications Web
 
-With Icinga 2, Icinga DB, Icinga Notifications and the database fully set up, it is now time to install Icinga Notifications Web,
+With Icinga Notifications and the database fully set up, it is now time to install Icinga Notifications Web,
 which connects to the database and allows configuring Icinga Notifications.
 
 Please follow the
 [Icinga Notifications Web documentation](https://icinga.com/docs/icinga-notifications-web/latest/doc/02-Installation/).
+
+## Configuring Source
+
+After installing Icinga Notifications Web, you can use it to create sources that will submit their events to Icinga
+Notifications. Navigate to the module configuration, and open `notifications` and use the _Sources_ create them.
+
+Events from Icinga 2 are forwarded by Icinga DB (requires version 1.5.0 or later), hence, the source credentials have to
+be specified in its configuration file `/etc/icingadb/config.yml` using the
+[`notifications-source` configuration option](https://icinga.com/docs/icinga-db/latest/doc/03-Configuration/#notifications-source-configuration).
 
 <!-- {% endif %} --><!-- {# end else if index #} -->
