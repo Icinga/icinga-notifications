@@ -102,25 +102,26 @@ func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request)
 	return nil, false
 }
 
-func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
-	// abort the current connection by sending the status code and an error both to the log and back to the client.
-	abort := func(statusCode int, ev *event.Event, format string, a ...any) {
-		msg := format
-		if len(a) > 0 {
-			msg = fmt.Sprintf(format, a...)
-		}
-
-		logger := l.logger.With(zap.Int("status_code", statusCode), zap.String("message", msg))
-		if ev != nil {
-			logger = logger.With(zap.Stringer("event", ev))
-		}
-
-		http.Error(w, msg, statusCode)
-		logger.Debugw("Abort listener submitted event processing")
+// abort the current connection by sending the status code and an error both to the log and back to the client.
+func (l *Listener) abort(w http.ResponseWriter, statusCode int, ev *event.Event, format string, a ...any) {
+	msg := format
+	if len(a) > 0 {
+		msg = fmt.Sprintf(format, a...)
 	}
 
+	logger := l.logger.With(zap.Int("status_code", statusCode), zap.String("message", msg))
+	if ev != nil {
+		logger = logger.With(zap.Stringer("event", ev))
+	}
+
+	http.Error(w, msg, statusCode)
+	logger.Debugw("Abort listener submitted event processing")
+}
+
+func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
+	// abort the current connection by sending the status code and an error both to the log and back to the client.
 	if r.Method != http.MethodPost {
-		abort(http.StatusMethodNotAllowed, nil, "POST required")
+		l.abort(w, http.StatusMethodNotAllowed, nil, "POST required")
 		return
 	}
 
@@ -132,7 +133,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	var ev event.Event
 	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
-		abort(http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
+		l.abort(w, http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
 		return
 	}
 
@@ -161,18 +162,18 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ev.Validate(); err != nil {
-		abort(http.StatusBadRequest, &ev, "%v", err)
+		l.abort(w, http.StatusBadRequest, &ev, "%v", err)
 		return
 	}
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
 	err := incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
 	if errors.Is(err, event.ErrSuperfluousStateChange) || errors.Is(err, event.ErrSuperfluousMuteUnmuteEvent) {
-		abort(http.StatusNotAcceptable, &ev, "%v", err)
+		l.abort(w, http.StatusNotAcceptable, &ev, "%v", err)
 		return
 	} else if err != nil {
 		l.logger.Errorw("Failed to successfully process event", zap.Stringer("event", &ev), zap.Error(err))
-		abort(http.StatusInternalServerError, &ev, "event could not be processed successfully, see server logs for details")
+		l.abort(w, http.StatusInternalServerError, &ev, "event could not be processed successfully, see server logs for details")
 		return
 	}
 
