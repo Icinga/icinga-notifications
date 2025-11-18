@@ -46,6 +46,7 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 
 	l.mux.Handle("/debug/", http.StripPrefix("/debug", l.requireDebugAuth(debugMux)))
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
+	l.mux.HandleFunc("/incidents", l.GetIncidents)
 	return l
 }
 
@@ -182,6 +183,49 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = fmt.Fprintln(w, "event processed successfully")
 	_, _ = fmt.Fprintln(w)
+}
+
+func (l *Listener) GetIncidents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		l.abort(w, http.StatusMethodNotAllowed, nil, "POST required")
+		return
+	}
+
+	src, isAuthenticated := l.sourceFromAuthOrAbort(w, r)
+	if !isAuthenticated {
+		// Listener.sourceFromAuthOrAbort writes 401 response by itself; no abort() necessary.
+		return
+	}
+
+	// Temporary struct type to use for incident serialization. The Incident type itself isn't directly passed to the
+	// JSON because that returns all fields for the DumpIncidents() debug endpoint.
+	type SerializableIncident struct {
+		Incident   string            `json:"incident"`
+		ObjectTags map[string]string `json:"object_tags"`
+		Severity   baseEv.Severity   `json:"severity"`
+	}
+
+	incidents := incident.GetCurrentIncidentsForSource(src.ID)
+	result := make([]*SerializableIncident, 0, len(incidents))
+	for _, inc := range incidents {
+		if inc.Object.SourceID == src.ID {
+			inc.Lock()
+			result = append(result, &SerializableIncident{
+				Incident:   inc.String(),
+				ObjectTags: inc.Object.Tags,
+				Severity:   inc.Severity,
+			})
+			inc.Unlock()
+		}
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	err := enc.Encode(result)
+	if err != nil {
+		l.logger.Errorw("Failed to serialize incidents for source", zap.Object("source", src), zap.Error(err))
+		return
+	}
 }
 
 // requireDebugAuth is a middleware that checks if the valid debug password was provided. If there is no password
