@@ -200,6 +200,20 @@ func GetCurrentIncidents() map[int64]*Incident {
 	return m
 }
 
+// GetCurrentIncidentsForSource returns a slice containing all currently open incidents belonging to a source.
+func GetCurrentIncidentsForSource(sourceID int64) []*Incident {
+	currentIncidentsMu.Lock()
+	defer currentIncidentsMu.Unlock()
+
+	var result []*Incident
+	for _, incident := range currentIncidents {
+		if incident.Object.SourceID == sourceID {
+			result = append(result, incident)
+		}
+	}
+	return result
+}
+
 // ProcessEvent from an event.Event.
 //
 // This function first gets this Event's object.Object and its incident.Incident. Then, after performing some safety

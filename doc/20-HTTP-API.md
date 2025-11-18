@@ -57,6 +57,34 @@ curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-ev
 EOF
 ```
 
+### Get Incidents
+
+A source can query the list of open incidents belonging to its objects using the `/incidents` HTTP API endpoint.
+
+The authentication is performed via HTTP Basic Authentication using the source's username and password.
+
+```
+$ curl -u 'example:insecureinsecure' 'http://localhost:5680/incidents'
+[
+  {
+    "incident_id": "#23",
+    "object_tags": {
+      "host": "mailserver",
+      "service": "filesystem"
+    },
+    "severity": "crit"
+  },
+  {
+    "incident_id": "#42",
+    "object_tags": {
+      "host": "database",
+      "service": "load"
+    },
+    "severity": "err"
+  }
+]
+```
+
 ## Debugging Endpoints
 
 There are multiple endpoints for dumping specific configurations.

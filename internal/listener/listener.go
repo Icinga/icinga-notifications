@@ -46,6 +46,7 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 
 	l.mux.Handle("/debug/", http.StripPrefix("/debug", l.requireDebugAuth(debugMux)))
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
+	l.mux.HandleFunc("/incidents", l.GetIncidents)
 	return l
 }
 
@@ -102,25 +103,26 @@ func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request)
 	return nil, false
 }
 
-func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
-	// abort the current connection by sending the status code and an error both to the log and back to the client.
-	abort := func(statusCode int, ev *event.Event, format string, a ...any) {
-		msg := format
-		if len(a) > 0 {
-			msg = fmt.Sprintf(format, a...)
-		}
-
-		logger := l.logger.With(zap.Int("status_code", statusCode), zap.String("message", msg))
-		if ev != nil {
-			logger = logger.With(zap.Stringer("event", ev))
-		}
-
-		http.Error(w, msg, statusCode)
-		logger.Debugw("Abort listener submitted event processing")
+// abort the current connection by sending the status code and an error both to the log and back to the client.
+func (l *Listener) abort(w http.ResponseWriter, statusCode int, ev *event.Event, format string, a ...any) {
+	msg := format
+	if len(a) > 0 {
+		msg = fmt.Sprintf(format, a...)
 	}
 
+	logger := l.logger.With(zap.Int("status_code", statusCode), zap.String("message", msg))
+	if ev != nil {
+		logger = logger.With(zap.Stringer("event", ev))
+	}
+
+	http.Error(w, msg, statusCode)
+	logger.Debugw("Abort listener submitted event processing")
+}
+
+func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
+	// abort the current connection by sending the status code and an error both to the log and back to the client.
 	if r.Method != http.MethodPost {
-		abort(http.StatusMethodNotAllowed, nil, "POST required")
+		l.abort(w, http.StatusMethodNotAllowed, nil, "POST required")
 		return
 	}
 
@@ -132,7 +134,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	var ev event.Event
 	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
-		abort(http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
+		l.abort(w, http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
 		return
 	}
 
@@ -161,18 +163,18 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ev.Validate(); err != nil {
-		abort(http.StatusBadRequest, &ev, "%v", err)
+		l.abort(w, http.StatusBadRequest, &ev, "%v", err)
 		return
 	}
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
 	err := incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
 	if errors.Is(err, event.ErrSuperfluousStateChange) || errors.Is(err, event.ErrSuperfluousMuteUnmuteEvent) {
-		abort(http.StatusNotAcceptable, &ev, "%v", err)
+		l.abort(w, http.StatusNotAcceptable, &ev, "%v", err)
 		return
 	} else if err != nil {
 		l.logger.Errorw("Failed to successfully process event", zap.Stringer("event", &ev), zap.Error(err))
-		abort(http.StatusInternalServerError, &ev, "event could not be processed successfully, see server logs for details")
+		l.abort(w, http.StatusInternalServerError, &ev, "event could not be processed successfully, see server logs for details")
 		return
 	}
 
@@ -181,6 +183,49 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = fmt.Fprintln(w, "event processed successfully")
 	_, _ = fmt.Fprintln(w)
+}
+
+func (l *Listener) GetIncidents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		l.abort(w, http.StatusMethodNotAllowed, nil, "POST required")
+		return
+	}
+
+	src, isAuthenticated := l.sourceFromAuthOrAbort(w, r)
+	if !isAuthenticated {
+		// Listener.sourceFromAuthOrAbort writes 401 response by itself; no abort() necessary.
+		return
+	}
+
+	// Temporary struct type to use for incident serialization. The Incident type itself isn't directly passed to the
+	// JSON because that returns all fields for the DumpIncidents() debug endpoint.
+	type SerializableIncident struct {
+		Incident   string            `json:"incident"`
+		ObjectTags map[string]string `json:"object_tags"`
+		Severity   baseEv.Severity   `json:"severity"`
+	}
+
+	incidents := incident.GetCurrentIncidentsForSource(src.ID)
+	result := make([]*SerializableIncident, 0, len(incidents))
+	for _, inc := range incidents {
+		if inc.Object.SourceID == src.ID {
+			inc.Lock()
+			result = append(result, &SerializableIncident{
+				Incident:   inc.String(),
+				ObjectTags: inc.Object.Tags,
+				Severity:   inc.Severity,
+			})
+			inc.Unlock()
+		}
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	err := enc.Encode(result)
+	if err != nil {
+		l.logger.Errorw("Failed to serialize incidents for source", zap.Object("source", src), zap.Error(err))
+		return
+	}
 }
 
 // requireDebugAuth is a middleware that checks if the valid debug password was provided. If there is no password
