@@ -1,11 +1,5 @@
 # Icinga Notifications
 
-!!! warning
-
-    This is an early preview version for you to try, but do not use this in production.
-    There may still be severe bugs and incompatible changes may happen without any notice.
-    At the moment, we don't yet provide any support for this.
-
 Icinga Notifications is a set of components that processes received events from various sources, manages incidents and
 forwards notifications to predefined contacts, consisting of:
 
