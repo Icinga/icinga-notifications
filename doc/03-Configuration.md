@@ -4,12 +4,25 @@ The configuration for Icinga Notifications is twofold.
 The main configuration resides in the database,
 shared between the Icinga Notifications daemon and Icinga Notifications Web.
 However, as the Icinga Notifications daemon needs to know how to access this database and some further settings,
-it needs its own configuration file as well.
+it needs its own configuration as well.
 
-This configuration is stored in `/etc/icinga-notifications/config.yml`.
+This configuration may be a YAML file, environment variables, or both.
+Environment variables take precedence and override previously defined values from the configuration file.
+
+The YAML configuration file is stored in `/etc/icinga-notifications/config.yml`.
 See [config.example.yml](../config.example.yml) for an example configuration.
 
+The following subsections describe the configurations of the various modules.
+For the YAML configuration file, each option is written in lowercase, as shown in the tables.
+When using environment variables, the variable name is constructed by concatenating `ICINGA_NOTIFICATIONS_`,
+the module name in uppercase followed by an underscore, and the option name in uppercase.
+The hyphens in the names are to be replaced by underscores.
+For example, to set the database host, the `ICINGA_NOTIFICATIONS_DATABASE_HOST` environment variable is used.
+
 ## Top Level Configuration
+
+For YAML configuration, these options are on the top level, not part of a dictionary.
+For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_`.
 
 ### HTTP API Configuration
 
@@ -38,6 +51,9 @@ It may also be `/usr/lib/icinga-notifications/channels`, depending on the operat
 Connection configuration for the database where Icinga Notifications stores configuration and historical data.
 This is also the database used in Icinga Notifications Web to view and work with the data.
 
+For YAML configuration, the options are part of the `database` dictionary.
+For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_DATABASE_`.
+
 | Option   | Description                                                                                                                                               |
 |----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
 | type     | **Optional.** Either `mysql` (default) or `pgsql`.                                                                                                        |
@@ -64,6 +80,9 @@ manual adjustments.
 
     Do not change the defaults if you do not have to!
 
+For YAML configuration, the options are part of the `database.options` dictionary.
+For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_DATABASE_OPTIONS_`.
+
 | Option                         | Description                                                                                                                                                 |
 |--------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | max_connections                | **Optional.** Maximum number of database connections Icinga Notifications is allowed to open in parallel if necessary. Defaults to `16`.                    |
@@ -76,6 +95,9 @@ manual adjustments.
 
 Configuration of the logging component used by Icinga Notifications.
 
+For YAML configuration, the options are part of the `logging` dictionary.
+For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_LOGGING_`.
+
 | Option   | Description                                                                                                                                                                                                                                           |
 |----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | level    | **Optional.** Specifies the default logging level. Can be set to `fatal`, `error`, `warn`, `info` or `debug`. Defaults to `info`.                                                                                                                     |
@@ -84,6 +106,32 @@ Configuration of the logging component used by Icinga Notifications.
 | options  | **Optional.** Map of component name to logging level in order to set a different logging level for each component instead of the default one. See [logging components](#logging-components) for details.                                              |
 
 ### Logging Components
+
+The independent components of Icinga Notifications produce log entries.
+Each log entry is linked to its component and a log level.
+
+By default, any log message will be displayed if its log level is at or above the `level` configured above.
+However, it is possible to override the log level for each component individually to show more or less information.
+
+For YAML configuration, the options are part of the `logging.options` dictionary.
+For environment variables, `ICINGA_NOTIFICATIONS_LOGGING_OPTIONS` expects a single string of `component:level` pairs joined with `,`.
+
+The following example would log everything with at least info level, except database and listener entries, where the level is one time raised and one time lowered.
+
+```yaml
+# YAML Configuration File
+logging:
+  level: info
+  options:
+    database: error
+    listener: debug
+```
+
+```
+# Environment Variables
+ICINGA_NOTIFICATIONS_LOGGING_LEVEL=error
+ICINGA_NOTIFICATIONS_LOGGING_OPTIONS=database:error,listener:debug
+```
 
 | Component       | Description                                                               |
 |-----------------|---------------------------------------------------------------------------|
