@@ -154,7 +154,7 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
 	if err != nil {
 		return err
 	}
-	httpResp, err := http.DefaultClient.Do(httpReq)
+	httpResp, err := http.DefaultClient.Do(httpReq) // #nosec G704 -- no SSRF, trusted user input
 	if err != nil {
 		return err
 	}

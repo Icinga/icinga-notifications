@@ -110,7 +110,7 @@ func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 	request.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(request)
+	resp, err := client.Do(request) // #nosec G704 -- no SSRF, trusted user input
 	if err != nil {
 		return fmt.Errorf("error while sending http request to rocketchat server: %w", err)
 	}
