@@ -32,7 +32,7 @@ type Email struct {
 	SenderName string `json:"sender_name"`
 	SenderMail string `json:"sender_mail"`
 	User       string `json:"user"`
-	Password   string `json:"password"`
+	Password   string `json:"password"` // #nosec G117 -- exported password field
 	Encryption string `json:"encryption"`
 }
 
