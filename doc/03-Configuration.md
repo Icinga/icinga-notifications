@@ -19,6 +19,9 @@ the module name in uppercase followed by an underscore, and the option name in u
 The hyphens in the names are to be replaced by underscores.
 For example, to set the database host, the `ICINGA_NOTIFICATIONS_DATABASE_HOST` environment variable is used.
 
+Passwords can be set directly or stored in a separate file, referenced via the `password_file` YAML key or `PASSWORD_FILE` environment variable.
+Only one of these two options can be used.
+
 ## Top Level Configuration
 
 For YAML configuration, these options are on the top level, not part of a dictionary.
@@ -28,10 +31,11 @@ For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_`.
 
 The HTTP API listener can be used both for submission and for debugging purposes.
 
-| Option         | Description                                                          |
-|----------------|----------------------------------------------------------------------|
-| listen         | Address to bind to, port included. (Example: `localhost:5680`)       |
-| debug-password | Password expected via HTTP Basic Authentication for debug endpoints. |
+| Option              | Description                                                          |
+|---------------------|----------------------------------------------------------------------|
+| listen              | Address to bind to, port included. (Example: `localhost:5680`)       |
+| debug-password      | Password expected via HTTP Basic Authentication for debug endpoints. |
+| debug-password_file | `debug-password` in a file.                                          |
 
 ### Icinga Web 2
 
@@ -54,20 +58,21 @@ This is also the database used in Icinga Notifications Web to view and work with
 For YAML configuration, the options are part of the `database` dictionary.
 For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_DATABASE_`.
 
-| Option   | Description                                                                                                                                               |
-|----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| type     | **Optional.** Either `mysql` (default) or `pgsql`.                                                                                                        |
-| host     | **Required.** Database host or absolute Unix socket path.                                                                                                 |
-| port     | **Optional.** Database port. By default, the MySQL or PostgreSQL port, depending on the database type.                                                    |
-| database | **Required.** Database name.                                                                                                                              |
-| user     | **Required.** Database username.                                                                                                                          |
-| password | **Optional.** Database password.                                                                                                                          |
-| tls      | **Optional.** Whether to use TLS.                                                                                                                         |
-| cert     | **Optional.** Path to TLS client certificate.                                                                                                             |
-| key      | **Optional.** Path to TLS private key.                                                                                                                    |
-| ca       | **Optional.** Path to TLS CA certificate.                                                                                                                 |
-| insecure | **Optional.** Whether not to verify the peer.                                                                                                             |
-| options  | **Optional.** List of low-level [database options](#database-options) that can be set to influence some Icinga Notifications internal default behaviours. |
+| Option        | Description                                                                                                                                               |
+|---------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| type          | **Optional.** Either `mysql` (default) or `pgsql`.                                                                                                        |
+| host          | **Required.** Database host or absolute Unix socket path.                                                                                                 |
+| port          | **Optional.** Database port. By default, the MySQL or PostgreSQL port, depending on the database type.                                                    |
+| database      | **Required.** Database name.                                                                                                                              |
+| user          | **Required.** Database username.                                                                                                                          |
+| password      | **Optional.** Database password.                                                                                                                          |
+| password_file | **Optional.** Database password file.                                                                                                                     |
+| tls           | **Optional.** Whether to use TLS.                                                                                                                         |
+| cert          | **Optional.** Path to TLS client certificate.                                                                                                             |
+| key           | **Optional.** Path to TLS private key.                                                                                                                    |
+| ca            | **Optional.** Path to TLS CA certificate.                                                                                                                 |
+| insecure      | **Optional.** Whether not to verify the peer.                                                                                                             |
+| options       | **Optional.** List of low-level [database options](#database-options) that can be set to influence some Icinga Notifications internal default behaviours. |
 
 ### Database Options
 
