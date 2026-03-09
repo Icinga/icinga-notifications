@@ -1,8 +1,6 @@
 module github.com/icinga/icinga-notifications
 
-go 1.24.0
-
-toolchain go1.24.6
+go 1.25.0
 
 require (
 	github.com/creasty/defaults v1.8.0
@@ -18,7 +16,7 @@ require (
 	github.com/teambition/rrule-go v1.8.2
 	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.48.0
-	golang.org/x/sync v0.19.0
+	golang.org/x/sync v0.20.0
 )
 
 require (
