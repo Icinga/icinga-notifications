@@ -17,12 +17,13 @@ const (
 )
 
 type ConfigFile struct {
-	Listen        string          `yaml:"listen" default:"localhost:5680"`
-	DebugPassword string          `yaml:"debug-password"`
-	ChannelsDir   string          `yaml:"channels-dir"`
-	Icingaweb2URL string          `yaml:"icingaweb2-url"`
-	Database      database.Config `yaml:"database"`
-	Logging       logging.Config  `yaml:"logging"`
+	Listen            string          `yaml:"listen" env:"LISTEN" default:"localhost:5680"`
+	DebugPassword     string          `yaml:"debug-password" env:"DEBUG_PASSWORD"`
+	DebugPasswordFile string          `yaml:"debug-password_file" env:"DEBUG_PASSWORD_FILE"`
+	ChannelsDir       string          `yaml:"channels-dir" env:"CHANNELS_DIR"`
+	Icingaweb2URL     string          `yaml:"icingaweb2-url" env:"ICINGAWEB2_URL"`
+	Database          database.Config `yaml:"database" envPrefix:"DATABASE_"`
+	Logging           logging.Config  `yaml:"logging" envPrefix:"LOGGING_"`
 }
 
 // SetDefaults implements the defaults.Setter interface.
@@ -35,6 +36,9 @@ func (c *ConfigFile) SetDefaults() {
 // Validate implements the config.Validator interface.
 // Validates the entire daemon configuration on daemon startup.
 func (c *ConfigFile) Validate() error {
+	if err := config.LoadPasswordFile(&c.DebugPassword, c.DebugPasswordFile); err != nil {
+		return err
+	}
 	if err := c.Database.Validate(); err != nil {
 		return err
 	}
@@ -59,6 +63,20 @@ type Flags struct {
 	Config string `short:"c" long:"config" description:"path to config file"`
 }
 
+// GetConfigPath implements [config.Flags].
+func (f Flags) GetConfigPath() string {
+	if f.Config == "" {
+		return internal.SysConfDir + "/icinga-notifications/config.yml"
+	}
+
+	return f.Config
+}
+
+// IsExplicitConfigPath implements [config.Flags].
+func (f Flags) IsExplicitConfigPath() bool {
+	return f.Config != ""
+}
+
 // daemonConfig holds the configuration state as a singleton.
 // It is initialised by the ParseFlagsAndConfig func and exposed through the Config function.
 var daemonConfig *ConfigFile
@@ -76,7 +94,7 @@ func Config() *ConfigFile {
 // ParseFlagsAndConfig parses the CLI flags provided to the executable and tries to load the config from the YAML file.
 // Prints any error during parsing or config loading to os.Stderr and exits.
 func ParseFlagsAndConfig() {
-	flags := Flags{Config: internal.SysConfDir + "/icinga-notifications/config.yml"}
+	var flags Flags
 	if err := config.ParseFlags(&flags); err != nil {
 		if errors.Is(err, config.ErrInvalidArgument) {
 			panic(err)
@@ -91,7 +109,10 @@ func ParseFlagsAndConfig() {
 	}
 
 	daemonConfig = new(ConfigFile)
-	if err := config.FromYAMLFile(flags.Config, daemonConfig); err != nil {
+	if err := config.Load(daemonConfig, config.LoadOptions{
+		Flags:      flags,
+		EnvOptions: config.EnvOptions{Prefix: "ICINGA_NOTIFICATIONS_"},
+	}); err != nil {
 		if errors.Is(err, config.ErrInvalidArgument) {
 			panic(err)
 		}

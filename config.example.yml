@@ -7,6 +7,7 @@
 
 # Set credentials for some debug endpoints provided via HTTP. If not set, these are disabled.
 #debug-password: "put-something-secret-here"
+#debug-password_file: /run/secerets/icinga_notifications_debug_password
 
 # The base Icinga Web 2 URL being used as the base URL for all object, notification and event URLs.
 icingaweb2-url: http://localhost/icingaweb2/
@@ -36,6 +37,7 @@ database:
 
   # Database password.
   password: CHANGEME
+#  password_file: /run/secerets/icinga_notifications_database_password
 
 # Icinga Notifications logs its activities at various severity levels and any errors that occur either
 # on the console or in systemd's journal. The latter is used automatically when running under systemd.
