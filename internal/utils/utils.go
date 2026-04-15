@@ -18,6 +18,7 @@ func ExecAndApply[Row any](ctx context.Context, db *database.DB, stmt string, ar
 	}
 	defer sem.Release(1)
 
+	//nolint:sqlclosecheck // https://github.com/ryanrolds/sqlclosecheck/issues/43
 	rows, err := db.QueryxContext(ctx, db.Rebind(stmt), args...)
 	if err != nil {
 		return err

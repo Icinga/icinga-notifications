@@ -36,6 +36,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 	g.Go(func() error {
 		defer close(incidents)
 
+		//nolint:sqlclosecheck // https://github.com/ryanrolds/sqlclosecheck/issues/43
 		rows, err := db.QueryxContext(ctx, db.BuildSelectStmt(new(Incident), new(Incident))+` WHERE "recovered_at" IS NULL`)
 		if err != nil {
 			return err
