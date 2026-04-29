@@ -21,6 +21,13 @@ type Source struct {
 	ListenerPasswordHash  types.String `db:"listener_password_hash"`
 	listenerPassword      []byte       `db:"-"`
 	listenerPasswordMutex sync.Mutex
+
+	// ruleIDs is a list of rule IDs belonging to this source.
+	//
+	// Each of these IDs corresponds to a rule in the [ConfigSet.Rules] map and is used to quickly access
+	// the rules for a specific source without iterating over all rules. It is not stored in the database,
+	// but is updated when applying pending rules in [RuntimeConfig.applyPendingRules].
+	ruleIDs []int64
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
@@ -70,12 +77,24 @@ func (source *Source) PasswordCompare(password []byte) error {
 	return nil
 }
 
+// RuleIDs returns the list of rule IDs belonging to this source.
+func (source *Source) RuleIDs() []int64 { return source.ruleIDs }
+
 // applyPendingSources synchronizes changed sources.
 func (r *RuntimeConfig) applyPendingSources() {
 	incrementalApplyPending(
 		r,
 		&r.Sources, &r.configChange.Sources,
-		nil,
+		func(newElement *Source) error {
+			// When the event rules are loaded before the sources, the rule IDs are not yet added to the
+			// per-source rules cache. We need to add them here to make sure the cache is correct.
+			for _, rule := range r.Rules {
+				if rule.SourceID == newElement.ID {
+					newElement.ruleIDs = append(newElement.ruleIDs, rule.ID)
+				}
+			}
+			return nil
+		},
 		nil,
 		nil)
 }

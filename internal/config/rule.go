@@ -21,6 +21,11 @@ func (r *RuntimeConfig) applyPendingRules() {
 			}
 
 			newElement.Escalations = make(map[int64]*rule.Escalation)
+			// If the source this rule belongs to is already known, add this rule to the source's rule list.
+			// Otherwise, the rule will be added to that list when its source is being loaded.
+			if src, ok := r.Sources[newElement.SourceID]; ok {
+				src.ruleIDs = append(src.ruleIDs, newElement.ID)
+			}
 			return nil
 		},
 		func(curElement, update *rule.Rule) error {
@@ -44,7 +49,16 @@ func (r *RuntimeConfig) applyPendingRules() {
 
 			return nil
 		},
-		nil,
+		func(delElement *rule.Rule) error {
+			// If the source this rule belongs to is already known, remove this rule from the source's rule list.
+			// Otherwise, there's nothing more to do!
+			if src, ok := r.Sources[delElement.SourceID]; ok {
+				src.ruleIDs = slices.DeleteFunc(src.ruleIDs, func(id int64) bool {
+					return id == delElement.ID
+				})
+			}
+			return nil
+		},
 	)
 
 	incrementalApplyPending(
