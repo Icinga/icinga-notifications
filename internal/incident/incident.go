@@ -428,8 +428,20 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 		i.Rules = make(map[int64]struct{})
 	}
 
-	for _, r := range i.runtimeConfig.Rules {
-		if _, ok := i.Rules[r.ID]; !ok {
+	src, ok := i.runtimeConfig.Sources[ev.SourceId]
+	if !ok {
+		i.logger.Warnw("Received event from unknown source, might got deleted", zap.Int64("source_id", ev.SourceId))
+		return nil
+	}
+
+	for _, id := range src.RuleIDs() {
+		if _, ok := i.Rules[id]; !ok {
+			r, ok := i.runtimeConfig.Rules[id]
+			if !ok {
+				i.logger.Errorw("BUG: source references unknown event rule", zap.Object("source", src))
+				continue
+			}
+
 			matched, err := r.Eval(ev)
 			if err != nil {
 				i.logger.Errorw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
