@@ -7,8 +7,13 @@ import (
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
+	"github.com/icinga/icinga-notifications/internal/pool"
+	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
+	"github.com/theory/jsonpath"
 	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -32,6 +37,12 @@ type Event struct {
 	ID       int64     `json:"-"`
 
 	baseEv.Event `json:",inline"`
+
+	// evaluatedRelations caches the results of evaluating JSONPath exprs against the Relations field of this event.
+	//
+	// This is used to avoid evaluating the same JSONPath expression multiple times during rule evaluation of an event,
+	// as the same filter column can be used in multiple conditions of a rule or even multiple event rules.
+	evaluatedRelations map[string]jsonpath.NodeList
 }
 
 // CompleteURL prefixes the URL with the given Icinga Web 2 base URL unless it already carries a URL or is empty.
@@ -110,6 +121,82 @@ func (e *Event) Sync(ctx context.Context, tx *sqlx.Tx, db *database.DB, objectId
 	}
 
 	return err
+}
+
+func (e *Event) EvalEqual(attrs, value any) (bool, error) {
+	return slices.ContainsFunc(e.retrieveValuesFor(attrs), func(v any) bool {
+		result, err := utils.CompareAny(v, value)
+		if err != nil {
+			return false
+		}
+		return result == 0
+	}), nil
+}
+
+func (e *Event) EvalLess(attrs, value any) (bool, error) {
+	return slices.ContainsFunc(e.retrieveValuesFor(attrs), func(v any) bool {
+		result, err := utils.CompareAny(v, value)
+		if err != nil {
+			return false
+		}
+		return result < 0
+	}), nil
+}
+
+func (e *Event) EvalLike(attrs, value any) (bool, error) {
+	// Wildcard matching can't be implemented with types other than string, so convert it to a string unconditionally.
+	rgx, err := regexp.Compile(fmt.Sprint(value))
+	if err != nil {
+		return false, err
+	}
+
+	return slices.ContainsFunc(e.retrieveValuesFor(attrs), func(v any) bool {
+		if _, ok := v.(map[string]any); ok {
+			return false
+		}
+		if _, ok := v.([]any); ok {
+			return false
+		}
+		return rgx.MatchString(fmt.Sprint(v))
+	}), nil
+}
+
+func (e *Event) EvalLessOrEqual(attrs, value any) (bool, error) {
+	return slices.ContainsFunc(e.retrieveValuesFor(attrs), func(v any) bool {
+		result, err := utils.CompareAny(v, value)
+		if err != nil {
+			return false
+		}
+		return result <= 0
+	}), nil
+}
+
+func (e *Event) EvalExists(attrs any) bool { return len(e.retrieveValuesFor(attrs)) > 0 }
+
+// retrieveValuesFor retrieves the values for the given key from the Relations field of this event.
+func (e *Event) retrieveValuesFor(attrs any) jsonpath.NodeList {
+	if e.evaluatedRelations == nil {
+		e.evaluatedRelations = make(map[string]jsonpath.NodeList)
+	}
+
+	if attrs, ok := attrs.([]string); ok {
+		jpp := pool.GetJSONPathParser()
+		defer pool.PutJSONPathParser(jpp)
+
+		for _, attr := range attrs {
+			attr := fmt.Sprint(attr)
+			nodes, cached := e.evaluatedRelations[attr]
+			if !cached {
+				path := jpp.MustParse(utils.PrefixWithJSONPathRootSelector(attr))
+				nodes = path.Select(e.Relations)
+				e.evaluatedRelations[attr] = nodes
+			}
+			if len(nodes) > 0 {
+				return nodes
+			}
+		}
+	}
+	return nil
 }
 
 // EventRow represents a single event database row and isn't an in-memory representation of an event.
