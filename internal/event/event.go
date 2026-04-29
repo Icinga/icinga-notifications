@@ -123,6 +123,64 @@ func (e *Event) Sync(ctx context.Context, tx *sqlx.Tx, db *database.DB, objectId
 	return err
 }
 
+// ExtractMissingRelations determines which of the given filter columns are missing in the Relations field of this event.
+//
+// It evaluates the filter columns as JSONPath expressions against the Relations field and returns
+// a list of filter columns that do not have any matching nodes in the Relations field and are not
+// part of the CompleteRelations field. For filter columns that do have matching nodes, it caches
+// the evaluated nodes for potential later use during rules evaluation.
+func (e *Event) ExtractMissingRelations(filterColumns ...[]string) []string {
+	if e.evaluatedRelations == nil {
+		e.evaluatedRelations = make(map[string]jsonpath.NodeList)
+	}
+
+	jpp := pool.GetJSONPathParser()
+	defer pool.PutJSONPathParser(jpp)
+
+	// completePaths caches the parsed JSONPath expressions of the complete relations.
+	completePaths := map[string]*jsonpath.Path{}
+	var result []string
+filterColumnsLoop:
+	for _, columns := range filterColumns {
+		var missing []string
+		for _, filterColumn := range columns {
+			if _, cached := e.evaluatedRelations[filterColumn]; cached {
+				continue
+			}
+			// This should never panic, as the filter columns have already been validated when loading the rules.
+			path := jpp.MustParse(utils.PrefixWithJSONPathRootSelector(filterColumn))
+			if nodes := path.Select(e.Relations); len(nodes) == 0 {
+				isComplete := slices.ContainsFunc(e.CompleteRelations, func(relation string) bool {
+					completePath, ok := completePaths[relation]
+					if !ok {
+						// If we can't parse the provided relation as a JSONPath expression, just ignore it and treat
+						// it as a non-matching relation (but still cache the failed parsing result to avoid trying to
+						// parse it again for the next filter column).
+						completePath, _ = jpp.Parse(utils.PrefixWithJSONPathRootSelector(relation))
+						completePaths[relation] = completePath
+					}
+					return completePath != nil && strings.HasPrefix(path.String(), completePath.String())
+				})
+				if !isComplete {
+					missing = append(missing, filterColumn)
+				}
+			} else {
+				// Cache the evaluated nodes for this filter column for potentially later use during rules evaluation.
+				e.evaluatedRelations[filterColumn] = nodes
+				// Stop evaluating the remaining filter columns of this list, as we only need to
+				// find one matching column for the condition to be potentially satisfied.
+				continue filterColumnsLoop
+			}
+		}
+		for _, column := range missing {
+			if !slices.Contains(result, column) {
+				result = append(result, column)
+			}
+		}
+	}
+	return result
+}
+
 func (e *Event) EvalEqual(attrs, value any) (bool, error) {
 	return slices.ContainsFunc(e.retrieveValuesFor(attrs), func(v any) bool {
 		result, err := utils.CompareAny(v, value)

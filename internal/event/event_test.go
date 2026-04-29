@@ -13,6 +13,40 @@ import (
 func TestEvent(t *testing.T) {
 	t.Parallel()
 
+	t.Run("ExtractMissingRelations", func(t *testing.T) {
+		t.Parallel()
+
+		ev := &Event{
+			Event: baseEv.Event{
+				CompleteRelations: []string{"host.vars", "host", "services"},
+				Relations: map[string]any{
+					"host.vars": map[string]any{
+						"os": "Linux",
+					},
+					"services": []any{
+						map[string]any{
+							"name": "service",
+							"vars": map[string]any{
+								"department": "IT",
+							},
+						},
+					},
+				},
+			},
+		}
+
+		filterColumns := [][]string{
+			{"host.vars.os", "host.vars.arch", "hostgroups[*].name_ci", "services[*].name_ci"},
+			{"host.vars.department", "hostgroups[*].name_ci", "servicegroups[*].name"},
+			{"services[*].name", "services[*].name_ci", "services[*].vars.department", "hostgroups[*].name"},
+			{"services[*].vars.arch", "services[*].vars.department", "hostgroups[*].name", "hostgroups[*].name_ci"},
+		}
+		missingRelations := ev.ExtractMissingRelations(filterColumns...)
+		require.Lenf(t, missingRelations, 2, "%v", missingRelations)
+		assert.Equal(t, "hostgroups[*].name_ci", missingRelations[0])
+		assert.Equal(t, "servicegroups[*].name", missingRelations[1])
+	})
+
 	t.Run("Filter", func(t *testing.T) {
 		t.Parallel()
 
