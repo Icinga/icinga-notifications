@@ -63,14 +63,6 @@ func (e *Event) Validate() error {
 		}
 	}
 
-	for tag := range e.ExtraTags {
-		if len(tag) > 255 {
-			return fmt.Errorf(
-				"invalid event: extra tag %q is too long, at most 255 chars allowed, %d given", tag, len(tag),
-			)
-		}
-	}
-
 	if e.SourceId == 0 {
 		return fmt.Errorf("invalid event: source ID must not be empty")
 	}
