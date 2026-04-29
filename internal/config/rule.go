@@ -21,6 +21,11 @@ func (r *RuntimeConfig) applyPendingRules() {
 			}
 
 			newElement.Escalations = make(map[int64]*rule.Escalation)
+			// If the source this rule belongs to is already known, add this rule to the source's rule list.
+			// Otherwise, the rule will be added to that list when its source is being loaded.
+			if src, ok := r.Sources[newElement.SourceID]; ok {
+				src.appendRuleID(newElement.ID)
+			}
 			return nil
 		},
 		func(curElement, update *rule.Rule) error {
@@ -38,13 +43,30 @@ func (r *RuntimeConfig) applyPendingRules() {
 				curElement.TimePeriod = nil
 			}
 
+			if curElement.SourceID != update.SourceID {
+				if src, ok := r.Sources[curElement.SourceID]; ok {
+					src.deleteRuleID(curElement.ID)
+				}
+				if src, ok := r.Sources[update.SourceID]; ok {
+					src.appendRuleID(curElement.ID)
+				}
+				curElement.SourceID = update.SourceID
+			}
+
 			// ObjectFilter{,Expr} are being initialized by config.IncrementalConfigurableInitAndValidatable.
 			curElement.ObjectFilter = update.ObjectFilter
 			curElement.ObjectFilterExpr = update.ObjectFilterExpr
 
 			return nil
 		},
-		nil,
+		func(delElement *rule.Rule) error {
+			// If the source this rule belongs to is already known, remove this rule from the source's rule list.
+			// Otherwise, there's nothing more to do!
+			if src, ok := r.Sources[delElement.SourceID]; ok {
+				src.deleteRuleID(delElement.ID)
+			}
+			return nil
+		},
 	)
 
 	incrementalApplyPending(
