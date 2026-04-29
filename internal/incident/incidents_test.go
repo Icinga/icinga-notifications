@@ -156,10 +156,6 @@ func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID i
 				"host":    testutils.MakeRandomString(t),
 				"service": testutils.MakeRandomString(t),
 			},
-			ExtraTags: map[string]string{
-				"hostgroup/database-server": "",
-				"servicegroup/webserver":    "",
-			},
 		},
 	}
 
