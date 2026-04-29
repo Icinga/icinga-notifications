@@ -6,6 +6,7 @@ import (
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
+	"strings"
 )
 
 // ExecAndApply applies the provided restoreFunc callback for each successfully retrieved row of the specified type.
@@ -52,4 +53,19 @@ func ForEachRow[Row, Id any](ctx context.Context, db *database.DB, idColumn stri
 	}
 
 	return ExecAndApply(ctx, db, stmt, args, restoreFunc)
+}
+
+// PrefixWithJSONPathRootSelector ensures that the provided JSONPath expression starts with the root
+// selector ($) and the appropriate separator (dot or bracket).
+//
+// If the path already starts with a root selector, it is returned unchanged. Otherwise, the function
+// prefixes the path with "$." if it starts with an identifier or "$" if it starts with a bracket.
+func PrefixWithJSONPathRootSelector(path string) string {
+	if !strings.HasPrefix(path, "$.") && !strings.HasPrefix(path, "$[") {
+		if strings.HasPrefix(path, "[") {
+			return "$" + path
+		}
+		return "$." + path
+	}
+	return path
 }

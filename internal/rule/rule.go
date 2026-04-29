@@ -25,7 +25,16 @@ type Rule struct {
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
 func (r *Rule) IncrementalInitAndValidate() error {
 	if r.ObjectFilterExpr.Valid {
-		f, err := filter.Parse(r.ObjectFilterExpr.String)
+		data := map[string]json.RawMessage{}
+		if err := json.Unmarshal([]byte(r.ObjectFilterExpr.String), &data); err != nil {
+			return err
+		}
+		filterBytes, exists := data["ast"]
+		if !exists {
+			return errors.New("missing 'ast' field in object filter expression")
+		}
+
+		f, err := filter.UnmarshalJSON(filterBytes)
 		if err != nil {
 			return err
 		}
