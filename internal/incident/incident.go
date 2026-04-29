@@ -16,7 +16,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -429,33 +428,21 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 		i.Rules = make(map[int64]struct{})
 	}
 
-	for _, ruleId := range ev.RuleIds {
-		ruleIdInt, err := strconv.ParseInt(ruleId, 10, 64)
-		if err != nil {
-			i.logger.Errorw("Event rule is not an integer", zap.String("rule_id", ruleId), zap.Error(err))
-			return fmt.Errorf("cannot convert rule id %q to an int: %w", ruleId, err)
-		}
-
-		r, ok := i.runtimeConfig.Rules[ruleIdInt]
-		if !ok {
-			i.logger.Errorw("Event refers to non-existing event rule, might got deleted", zap.Int64("rule_id", ruleIdInt))
-			return fmt.Errorf("cannot apply unknown rule %d", ruleIdInt)
-		}
-
-		if r.SourceID != ev.SourceId {
-			i.logger.Errorw("Rule source ID does not match event source ID",
-				zap.Int64("event_source_id", ev.SourceId),
-				zap.Int64("rule_source_id", r.SourceID),
-				zap.Int64("rule_id", ruleIdInt))
-			return fmt.Errorf("rule %d source ID %d does not match event source %d", ruleIdInt, r.SourceID, ev.SourceId)
-		}
-
+	for _, r := range i.runtimeConfig.Rules {
 		if _, ok := i.Rules[r.ID]; !ok {
+			matched, err := r.Eval(i.Object)
+			if err != nil {
+				i.logger.Errorw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
+			}
+
+			if err != nil || !matched {
+				continue
+			}
+
 			i.Rules[r.ID] = struct{}{}
 			i.logger.Infow("Rule matches", zap.Object("rule", r))
 
-			err := i.AddRuleMatched(ctx, tx, r)
-			if err != nil {
+			if err := i.AddRuleMatched(ctx, tx, r); err != nil {
 				i.logger.Errorw("Failed to upsert incident rule", zap.Object("rule", r), zap.Error(err))
 				return err
 			}

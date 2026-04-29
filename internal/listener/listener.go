@@ -9,7 +9,6 @@ import (
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
-	baseSource "github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -17,7 +16,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"go.uber.org/zap"
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -135,19 +133,6 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	var ev event.Event
 	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
 		l.abort(w, http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
-		return
-	}
-
-	// If the client uses an outdated rules version, reject the request but also send the current rules version
-	// and rules for this source back to the client, so it can retry the request with the updated rules.
-	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(src.ID); ev.RulesVersion != latestRuleVersion {
-		w.WriteHeader(http.StatusPreconditionFailed)
-		l.writeSourceRulesInfo(w, src)
-
-		l.logger.Debugw("Abort event processing due to outdated rules version",
-			zap.String("current_version", latestRuleVersion),
-			zap.String("provided_version", ev.RulesVersion),
-			zap.String("source", src.Name))
 		return
 	}
 
@@ -345,37 +330,4 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(l.runtimeConfig.Rules)
-}
-
-// writeSourceRulesInfo writes the rules information for a specific source to the response writer.
-//
-// Internally, it converts the data to [baseSource.RulesInfo], being serialized JSON-encoded.
-func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.Source) {
-	rulesInfo := baseSource.RulesInfo{
-		Version: config.NoRulesVersion,
-	}
-
-	func() { // Use a function to ensure that the RLock and RUnlock are called before writing the response.
-		l.runtimeConfig.RLock()
-		defer l.runtimeConfig.RUnlock()
-
-		if sourceInfo, ok := l.runtimeConfig.RulesBySource[source.ID]; ok {
-			rulesInfo.Version = sourceInfo.Version.String()
-			rulesInfo.Rules = make(map[string]string)
-
-			for _, rID := range sourceInfo.RuleIDs {
-				id := strconv.FormatInt(rID, 10)
-				filterExpr := ""
-				if l.runtimeConfig.Rules[rID].ObjectFilterExpr.Valid {
-					filterExpr = l.runtimeConfig.Rules[rID].ObjectFilterExpr.String
-				}
-
-				rulesInfo.Rules[id] = filterExpr
-			}
-		}
-	}()
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(rulesInfo)
 }
