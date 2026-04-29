@@ -1,11 +1,13 @@
 package utils
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
+	"reflect"
 	"strings"
 )
 
@@ -68,4 +70,30 @@ func PrefixWithJSONPathRootSelector(path string) string {
 		return "$." + path
 	}
 	return path
+}
+
+// CompareAny compares two values of any type and returns an integer indicating their order (1 if a > b, -1 if a < b, 0 if equal).
+func CompareAny(a, b any) (int, error) {
+	atype := reflect.TypeOf(a)
+	btype := reflect.TypeOf(b)
+
+	switch atype.Kind() {
+	case reflect.String:
+		if btype.ConvertibleTo(atype) {
+			return strings.Compare(fmt.Sprint(a), fmt.Sprint(b)), nil
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if btype.ConvertibleTo(atype) {
+			return cmp.Compare(reflect.ValueOf(a).Int(), reflect.ValueOf(b).Convert(atype).Int()), nil
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if btype.ConvertibleTo(atype) {
+			return cmp.Compare(reflect.ValueOf(a).Uint(), reflect.ValueOf(b).Convert(atype).Uint()), nil
+		}
+	case reflect.Float32, reflect.Float64:
+		if btype.ConvertibleTo(atype) {
+			return cmp.Compare(reflect.ValueOf(a).Float(), reflect.ValueOf(b).Convert(atype).Float()), nil
+		}
+	}
+	return 0, errors.Errorf("cannot compare types %s and %s", atype.Kind(), btype.Kind())
 }
