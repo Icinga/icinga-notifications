@@ -18,16 +18,6 @@ The authentication is performed via HTTP Basic Authentication using the source's
     Before Icinga Notifications version 0.2.0, the username was a fixed string based on the source ID, such as `source-${id}`.
     When upgrading a setup from an earlier version, these usernames are still valid, but can be changed in Icinga Notifications Web.
 
-Events sent to Icinga Notifications are expected to match rules that describe further event escalations.
-These rules can be created in the web interface.
-Next to an array of `rule_ids`, a `rules_version` must be provided to ensure that the source has no outdated state.
-
-When the submitted `rules_version` is either outdated or empty, the `/process-event` endpoint returns an HTTP 412 response.
-The response's body is a JSON-encoded version of the
-[`RulesInfo`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/source/client.go),
-containing the latest `rules_version` together with all rules for this source.
-After reevaluating these rules, one can resubmit the event with the updated `rules_version`.
-
 ```
 curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-event' <<EOF
 {
@@ -40,9 +30,7 @@ curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-ev
   "type": "state",
   "severity": "crit",
   "username": "",
-  "message": "Something went somewhere very wrong.",
-  "rules_version": "23",
-  "rule_ids": ["0"]
+  "message": "Something went somewhere very wrong."
 }
 EOF
 ```
