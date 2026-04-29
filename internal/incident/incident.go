@@ -430,7 +430,7 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 
 	for _, r := range i.runtimeConfig.Rules {
 		if _, ok := i.Rules[r.ID]; !ok {
-			matched, err := r.Eval(i.Object)
+			matched, err := r.Eval(ev)
 			if err != nil {
 				i.logger.Errorw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
 			}

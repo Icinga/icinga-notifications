@@ -7,8 +7,13 @@ import (
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
+	"github.com/icinga/icinga-notifications/internal/pool"
+	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
+	"github.com/theory/jsonpath"
 	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -32,6 +37,12 @@ type Event struct {
 	ID       int64     `json:"-"`
 
 	baseEv.Event `json:",inline"`
+
+	// evaluatedRelations caches the results of evaluating JSONPath exprs against the Relations field of this event.
+	//
+	// This is used to avoid evaluating the same JSONPath expression multiple times during rule evaluation of an event,
+	// as the same filter column can be used in multiple conditions of a rule or even multiple event rules.
+	evaluatedRelations map[string]jsonpath.NodeList
 }
 
 // CompleteURL prefixes the URL with the given Icinga Web 2 base URL unless it already carries a URL or is empty.
@@ -110,6 +121,54 @@ func (e *Event) Sync(ctx context.Context, tx *sqlx.Tx, db *database.DB, objectId
 	}
 
 	return err
+}
+
+func (e *Event) EvalEqual(key string, value string) (bool, error) {
+	return slices.ContainsFunc(e.retrieveValuesFor(key), func(v any) bool { return fmt.Sprint(v) == value }), nil
+}
+
+func (e *Event) EvalLess(key string, value string) (bool, error) {
+	return slices.ContainsFunc(e.retrieveValuesFor(key), func(v any) bool { return fmt.Sprint(v) < value }), nil
+}
+
+func (e *Event) EvalLike(key string, value string) (bool, error) {
+	var builder strings.Builder
+	builder.WriteRune('^')
+	for segment := range strings.SplitSeq(value, "*") {
+		if segment == "" {
+			builder.WriteString(".*")
+		}
+		builder.WriteString(regexp.QuoteMeta(segment))
+	}
+	builder.WriteRune('$')
+
+	rgx := regexp.MustCompile(builder.String())
+
+	return slices.ContainsFunc(e.retrieveValuesFor(key), func(v any) bool { return rgx.MatchString(fmt.Sprint(v)) }), nil
+}
+
+func (e *Event) EvalLessOrEqual(key string, value string) (bool, error) {
+	return slices.ContainsFunc(e.retrieveValuesFor(key), func(v any) bool { return fmt.Sprint(v) <= value }), nil
+}
+
+func (e *Event) EvalExists(key string) bool { return len(e.retrieveValuesFor(key)) > 0 }
+
+// retrieveValuesFor retrieves the values for the given key from the Relations field of this event.
+func (e *Event) retrieveValuesFor(key string) jsonpath.NodeList {
+	if e.evaluatedRelations == nil {
+		e.evaluatedRelations = make(map[string]jsonpath.NodeList)
+	}
+
+	nodes, cached := e.evaluatedRelations[key]
+	if !cached {
+		jpp := pool.GetJSONPathParser()
+		defer pool.PutJSONPathParser(jpp)
+
+		path := jpp.MustParse(utils.PrefixWithJSONPathRootSelector(key))
+		nodes = path.Select(e.Relations)
+		e.evaluatedRelations[key] = nodes
+	}
+	return nodes
 }
 
 // EventRow represents a single event database row and isn't an in-memory representation of an event.
