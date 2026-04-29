@@ -62,42 +62,42 @@ func TestFilter(t *testing.T) {
 	t.Run("ParserIdentifiesAllKindOfFilters", func(t *testing.T) {
 		rule, err := Parse("foo=bar")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected := &Condition{op: Equal, column: "foo", value: "bar"}
+		expected := &Condition{op: Equal, attrs: "foo", value: "bar"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("foo!=bar")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Condition{op: UnEqual, column: "foo", value: "bar"}
+		expected = &Condition{op: UnEqual, attrs: "foo", value: "bar"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("foo=bar*")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Condition{op: Like, column: "foo", value: "bar*"}
+		expected = &Condition{op: Like, attrs: "foo", value: "bar*"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("foo!=bar*")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Condition{op: UnLike, column: "foo", value: "bar*"}
+		expected = &Condition{op: UnLike, attrs: "foo", value: "bar*"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("foo<bar")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Condition{op: LessThan, column: "foo", value: "bar"}
+		expected = &Condition{op: LessThan, attrs: "foo", value: "bar"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("foo<=bar")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Condition{op: LessThanEqual, column: "foo", value: "bar"}
+		expected = &Condition{op: LessThanEqual, attrs: "foo", value: "bar"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("foo>bar")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Condition{op: GreaterThan, column: "foo", value: "bar"}
+		expected = &Condition{op: GreaterThan, attrs: "foo", value: "bar"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("foo>=bar")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Condition{op: GreaterThanEqual, column: "foo", value: "bar"}
+		expected = &Condition{op: GreaterThanEqual, attrs: "foo", value: "bar"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("foo=bar&bar=foo")
@@ -125,12 +125,12 @@ func TestFilter(t *testing.T) {
 
 		expectedChain := &Chain{op: All, rules: []Filter{
 			&Chain{op: None, rules: []Filter{
-				&Condition{op: Equal, column: "foo", value: "bar"},
-				&Condition{op: Equal, column: "bar", value: "foo"},
+				&Condition{op: Equal, attrs: "foo", value: "bar"},
+				&Condition{op: Equal, attrs: "bar", value: "foo"},
 			}},
 			&Chain{op: Any, rules: []Filter{
-				&Condition{op: Equal, column: "foo", value: "bar"},
-				&Condition{op: Equal, column: "bar", value: "foo"},
+				&Condition{op: Equal, attrs: "foo", value: "bar"},
+				&Condition{op: Equal, attrs: "bar", value: "foo"},
 			}},
 		}}
 		assert.Equal(t, expectedChain, rule)
@@ -140,34 +140,34 @@ func TestFilter(t *testing.T) {
 		rule, err := Parse("foo=bar")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
 
-		expected := &Condition{op: Equal, column: "foo", value: "bar"}
+		expected := &Condition{op: Equal, attrs: "foo", value: "bar"}
 		assert.Equal(t, expected, rule, "Parser does not parse single condition correctly")
 	})
 
 	t.Run("UrlEncodedFilterExpression", func(t *testing.T) {
 		rule, err := Parse("col%3Cumn<val%3Cue")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected := &Condition{op: LessThan, column: "col<umn", value: "val<ue"}
+		expected := &Condition{op: LessThan, attrs: "col<umn", value: "val<ue"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("col%7Cumn=val%7Cue")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Condition{op: Equal, column: "col|umn", value: "val|ue"}
+		expected = &Condition{op: Equal, attrs: "col|umn", value: "val|ue"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("col%26umn<=val%26ue")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Condition{op: LessThanEqual, column: "col&umn", value: "val&ue"}
+		expected = &Condition{op: LessThanEqual, attrs: "col&umn", value: "val&ue"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("col%28umn>val%28ue")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Condition{op: GreaterThan, column: "col(umn", value: "val(ue"}
+		expected = &Condition{op: GreaterThan, attrs: "col(umn", value: "val(ue"}
 		assert.Equal(t, expected, rule)
 
 		rule, err = Parse("col%29umn>=val%29ue")
 		assert.Nil(t, err, "There should be no errors but got: %s", err)
-		expected = &Condition{op: GreaterThanEqual, column: "col)umn", value: "val)ue"}
+		expected = &Condition{op: GreaterThanEqual, attrs: "col)umn", value: "val)ue"}
 		assert.Equal(t, expected, rule)
 	})
 }

@@ -28,7 +28,7 @@ type EscalationFilter struct {
 func (e *EscalationFilter) ReevaluateAfter(escalationCond filter.Filter) time.Duration {
 	retryAfter := RetryNever
 	for _, condition := range escalationCond.ExtractConditions() {
-		if condition.Column() == "incident_age" {
+		if condition.Attributes() == "incident_age" {
 			v, err := time.ParseDuration(fmt.Sprint(condition.Value()))
 			if err == nil && v > e.IncidentAge {
 				// The incident age is compared with a value in the future. Once that age is
