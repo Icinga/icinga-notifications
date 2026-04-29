@@ -20,6 +20,12 @@ type Rule struct {
 	ObjectFilter     filter.Filter          `db:"-"`
 	ObjectFilterExpr types.String           `db:"object_filter"`
 	Escalations      map[int64]*Escalation  `db:"-"`
+
+	// FilterColumns is a set of all filter columns used in the rule's ObjectFilter.
+	//
+	// This is computed from the ObjectFilter once and can be used by sources to determine which
+	// columns they need to provide for the events to be able to evaluate the rule.
+	FilterColumns map[string]struct{} `db:"-"`
 }
 
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
@@ -31,6 +37,12 @@ func (r *Rule) IncrementalInitAndValidate() error {
 		}
 
 		r.ObjectFilter = f
+		if f != nil {
+			r.FilterColumns = make(map[string]struct{})
+			for _, condition := range f.ExtractConditions() {
+				r.FilterColumns[condition.Column()] = struct{}{}
+			}
+		}
 	}
 	return nil
 }

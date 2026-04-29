@@ -123,6 +123,42 @@ func (e *Event) Sync(ctx context.Context, tx *sqlx.Tx, db *database.DB, objectId
 	return err
 }
 
+// ExtractMissingRelations determines which of the given filter columns are missing in the Relations field of this event.
+//
+// It evaluates the filter columns as JSONPath expressions against the Relations field and returns
+// a list of filter columns that do not have any matching nodes in the Relations field and are not
+// part of the CompleteRelations field. For filter columns that do have matching nodes, it caches
+// the evaluated nodes for potential later use during rules evaluation.
+func (e *Event) ExtractMissingRelations(filterColumns ...string) []string {
+	if e.evaluatedRelations == nil {
+		e.evaluatedRelations = make(map[string]jsonpath.NodeList)
+	}
+
+	jpp := pool.GetJSONPathParser()
+	defer pool.PutJSONPathParser(jpp)
+
+	var missing []string
+	for _, filterColumn := range filterColumns {
+		if _, cached := e.evaluatedRelations[filterColumn]; cached {
+			continue
+		}
+		// This should never panic, as the filter columns have already been validated when loading the rules.
+		path := jpp.MustParse(utils.PrefixWithJSONPathRootSelector(filterColumn))
+		if nodes := path.Select(e.Relations); len(nodes) == 0 {
+			isComplete := slices.ContainsFunc(e.CompleteRelations, func(relation string) bool {
+				return strings.HasPrefix(filterColumn, relation)
+			})
+			if !isComplete {
+				missing = append(missing, filterColumn)
+			}
+		} else {
+			// Cache the evaluated nodes for this filter column for potentially later use during rules evaluation.
+			e.evaluatedRelations[filterColumn] = nodes
+		}
+	}
+	return missing
+}
+
 func (e *Event) EvalEqual(key string, value string) (bool, error) {
 	return slices.ContainsFunc(e.retrieveValuesFor(key), func(v any) bool { return fmt.Sprint(v) == value }), nil
 }

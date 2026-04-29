@@ -6,6 +6,29 @@ import (
 	"slices"
 )
 
+// GetRulesFilterColumnsForSource returns a set of all filter columns used in the rules of the given source.
+//
+// This can be used by sources to determine which columns they need to provide for the events to be
+// able to evaluate the rules of this source.
+func (r *RuntimeConfig) GetRulesFilterColumnsForSource(src *Source) []string {
+	r.RLock()
+	defer r.RUnlock()
+
+	var columns []string
+	for _, id := range src.RuleIDs() {
+		eventRule, ok := r.Rules[id]
+		if !ok {
+			continue
+		}
+		for column := range eventRule.FilterColumns {
+			if !slices.Contains(columns, column) {
+				columns = append(columns, column)
+			}
+		}
+	}
+	return columns
+}
+
 // applyPendingRules synchronizes changed rules.
 func (r *RuntimeConfig) applyPendingRules() {
 	incrementalApplyPending(
@@ -46,6 +69,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 			// ObjectFilter{,Expr} are being initialized by config.IncrementalConfigurableInitAndValidatable.
 			curElement.ObjectFilter = update.ObjectFilter
 			curElement.ObjectFilterExpr = update.ObjectFilterExpr
+			curElement.FilterColumns = update.FilterColumns
 
 			return nil
 		},

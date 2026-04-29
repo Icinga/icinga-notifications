@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/notifications"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -150,6 +151,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	if err := ev.Validate(); err != nil {
 		l.abort(w, http.StatusBadRequest, &ev, "%v", err)
 		return
+	}
+
+	if SupportsAttrsNegotiation(r) {
+		missingRelations := ev.ExtractMissingRelations(l.runtimeConfig.GetRulesFilterColumnsForSource(src)...)
+		if len(missingRelations) > 0 {
+			l.sendMissingAttrsError(w, &ev, missingRelations)
+			return
+		}
 	}
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
@@ -330,4 +339,34 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(l.runtimeConfig.Rules)
+}
+
+// sendMissingAttrsError sends a response with status code 422 Unprocessable Entity to the client.
+func (l *Listener) sendMissingAttrsError(w http.ResponseWriter, ev *event.Event, missingAttrs []string) {
+	l.logger.Infow(
+		"Event is missing attributes required for rule evaluation",
+		zap.Stringer("event", ev),
+		zap.Strings("missing_attributes", missingAttrs),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+
+	resp := map[string]any{
+		"type":       "attrs_negotiation",
+		"attributes": missingAttrs,
+	}
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		l.logger.Errorw("Failed to send missing attributes required for rule evaluation", zap.Error(err))
+		return
+	}
+}
+
+// SupportsAttrsNegotiation checks whether the source of the request supports attributes negotiation.
+//
+// Returns true if the request contains the header [notifications.XIcingaEnableAttributesNegotiation]
+// set to "true", false otherwise.
+func SupportsAttrsNegotiation(r *http.Request) bool {
+	return r.Header.Get(notifications.XIcingaEnableAttributesNegotiation) == "true"
 }
