@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/notifications"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
+	"github.com/icinga/icinga-notifications/internal/object"
 	"go.uber.org/zap"
 	"net/http"
 	"time"
@@ -149,6 +151,13 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	if err := ev.Validate(); err != nil {
 		l.abort(w, http.StatusBadRequest, &ev, "%v", err)
+		return
+	}
+
+	filterColumns, hasRulesWithoutFilter := l.runtimeConfig.GetRulesFilterColumnsForSource(src)
+	missingRelations := ev.ExtractMissingRelations(filterColumns...)
+	if len(missingRelations) > 0 && ShouldRejectRequestOnIncompleteRelations(r, &ev, hasRulesWithoutFilter) {
+		l.sendMissingAttrsError(w, &ev, missingRelations)
 		return
 	}
 
@@ -330,4 +339,42 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(l.runtimeConfig.Rules)
+}
+
+// sendMissingAttrsError sends a response with status code 422 Unprocessable Entity to the client.
+func (l *Listener) sendMissingAttrsError(w http.ResponseWriter, ev *event.Event, missingAttrs []string) {
+	l.logger.Debugw(
+		"Event is missing attributes required for rule evaluation",
+		zap.Stringer("event", ev),
+		zap.Strings("missing_attributes", missingAttrs),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+
+	resp := map[string]any{
+		"type":       "attribute negotiation",
+		"attributes": missingAttrs,
+	}
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		l.logger.Errorw("Failed to send missing attributes required for rule evaluation", zap.Error(err))
+		return
+	}
+}
+
+// ShouldRejectRequestOnIncompleteRelations determines whether a request with incomplete relations should be rejected.
+//
+// This function always returns true if the client explicitly requested to reject such events by setting the
+// [notifications.XIcingaRejectIfRelationsIncomplete] HTTP header. Otherwise, it only returns true when the
+// src doesn't have any rules without an object filter and the event doesn't cause a new incident to be opened
+// and there's no active one yet for the event's source object.
+func ShouldRejectRequestOnIncompleteRelations(r *http.Request, ev *event.Event, hasRulesWithoutFilter bool) bool {
+	if r.Header.Get(notifications.XIcingaRejectIfRelationsIncomplete) == "true" {
+		return true
+	}
+	if hasRulesWithoutFilter {
+		return false
+	}
+	return !incident.CanOpenNewIncident(ev) && !incident.HasCurrent(object.GetFromCache(object.ID(ev.SourceId, ev.Tags)))
 }
