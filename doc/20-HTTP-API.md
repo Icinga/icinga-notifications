@@ -19,14 +19,13 @@ The authentication is performed via HTTP Basic Authentication using the source's
     When upgrading a setup from an earlier version, these usernames are still valid, but can be changed in Icinga Notifications Web.
 
 Events sent to Icinga Notifications are expected to match rules that describe further event escalations.
-These rules can be created in the web interface.
-Next to an array of `rule_ids`, a `rules_version` must be provided to ensure that the source has no outdated state.
+These rules can be configured in Icinga Notifications Web and should be designed to match the `relations` of the
+submitted events. When submitting an event without the expected relations to evaluate the rules, Icinga Notifications
+will reject the request with a `422 Unprocessable Entity` status code and a message describing the missing relations
+when the `X-Icinga-Enable-Attributes-Negotiation` header is set to `true`. Otherwise, the request will be accepted
+nonetheless, but some or even all the configured rules might not match, and thus the event will not be escalated.
 
-When the submitted `rules_version` is either outdated or empty, the `/process-event` endpoint returns an HTTP 412 response.
-The response's body is a JSON-encoded version of the
-[`RulesInfo`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/source/client.go),
-containing the latest `rules_version` together with all rules for this source.
-After reevaluating these rules, one can resubmit the event with the updated `rules_version`.
+An example request to submit an event looks like this:
 
 ```
 curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-event' <<EOF
@@ -37,22 +36,40 @@ curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-ev
     "host": "dummy-809",
     "service": "random fortune"
   },
-  "extra_tags": {
-    "hostgroup/app-container": null,
-    "hostgroup/department-dev": null,
-    "hostgroup/env-qa": null,
-    "hostgroup/location-rome": null,
-    "servicegroup/app-mail": null,
-    "servicegroup/department-nms": null,
-    "servicegroup/env-prod": null,
-    "servicegroup/location-berlin": null
-  },
   "type": "state",
   "severity": "crit",
-  "username": "",
   "message": "Something went somewhere very wrong.",
-  "rules_version": "23",
-  "rule_ids": ["0"]
+  "relations": {
+    "host": {
+      "name": "dummy-809",
+      "display_name": "My Dummy Host",
+      "vars": {
+        "os": "linux"
+      }
+    },
+    "services": [
+      {
+        "name": "random fortune",
+        "display_name": "Random Fortune Service",
+        "vars": {
+          "env": "production",
+          "team": "devops"
+        }
+      }
+    ],
+    "hostgroups": [
+      {
+        "name": "linux-servers",
+        "display_name": "Linux Servers"
+      }
+    ],
+    "servicegroups": [
+      {
+        "name": "production-services",
+        "display_name": "Production Services"
+      }
+    ]
+  }
 }
 EOF
 ```

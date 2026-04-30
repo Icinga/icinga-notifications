@@ -1,7 +1,12 @@
 package filter
 
 import (
+	"encoding/json"
 	"fmt"
+
+	"github.com/icinga/icinga-go-library/types"
+	"github.com/icinga/icinga-notifications/internal/pool"
+	"github.com/icinga/icinga-notifications/internal/utils"
 )
 
 // LogicalOp is a type used for grouping the logical operators of a filter string.
@@ -209,3 +214,97 @@ var (
 	_ Filter = (*Exists)(nil)
 	_ Filter = (*Condition)(nil)
 )
+
+// UnmarshalJSON is a helper function to unmarshal a JSON representation of a filter into a [Filter] interface.
+//
+// It recursively parses the JSON data to deduce the filter type ([Chain] or [Condition]) based on the `op` field
+// and constructs the appropriate filter structure.
+//
+// Returns nil if JSON null value is provided, and an error if the JSON is invalid or if required fields are missing.
+func UnmarshalJSON(data []byte) (Filter, error) {
+	if string(data) == "null" {
+		return nil, nil
+	}
+
+	message := map[string]json.RawMessage{}
+	if err := types.UnmarshalJSON(data, &message); err != nil {
+		return nil, err
+	}
+
+	opBytes, opExists := message["op"]
+	if !opExists {
+		return nil, fmt.Errorf("missing required field: op")
+	}
+
+	var op string
+	if err := types.UnmarshalJSON(opBytes, &op); err != nil {
+		return nil, err
+	}
+
+	if isLogicalOp(op) {
+		rulesBytes, exists := message["rules"]
+		if !exists {
+			return nil, fmt.Errorf("missing required field: rules")
+		}
+
+		var rules []json.RawMessage
+		if err := json.Unmarshal(rulesBytes, &rules); err != nil {
+			return nil, err
+		}
+		chain := &Chain{op: LogicalOp(op)}
+		for _, rawRule := range rules {
+			filter, err := UnmarshalJSON(rawRule)
+			if err != nil {
+				return nil, err
+			}
+			chain.rules = append(chain.rules, filter)
+		}
+		return chain, nil
+	}
+
+	if isCompOperator(op) {
+		condition := &Condition{op: CompOperator(op)}
+		if column, exists := message["column"]; !exists {
+			return nil, fmt.Errorf("missing required filter condition field: column")
+		} else if err := types.UnmarshalJSON(column, &condition.column); err != nil {
+			return nil, err
+		}
+		jpp := pool.GetJSONPathParser()
+		defer pool.PutJSONPathParser(jpp)
+
+		// Validate the column as a JSONPath expression to ensure it's valid for evaluation later on.
+		if _, err := jpp.Parse(utils.PrefixWithJSONPathRootSelector(condition.Column())); err != nil {
+			return nil, err
+		}
+
+		var value any // The JSON value might represent any type, so we can't directly unmarshal it into a string.
+		if rawValue, exists := message["value"]; !exists {
+			return nil, fmt.Errorf("missing required filter condition field: value")
+		} else if err := types.UnmarshalJSON(rawValue, &value); err != nil {
+			return nil, err
+		}
+		condition.value = fmt.Sprint(value) // Convert the value to a string representation for consistent evaluation.
+		return condition, nil
+	}
+	return nil, fmt.Errorf("unknown filter operator: %s", op)
+}
+
+// isLogicalOp checks if the provided operator is a valid logical operator.
+func isLogicalOp(op string) bool {
+	switch LogicalOp(op) {
+	case All, Any, None:
+		return true
+	default:
+		return false
+	}
+}
+
+// isCompOperator checks if the provided operator is a valid comparison operator.
+func isCompOperator(op string) bool {
+	switch CompOperator(op) {
+	case Equal, UnEqual, Like, UnLike, GreaterThan, LessThan, GreaterThanEqual, LessThanEqual:
+		return true
+	default:
+		return false
+	}
+}

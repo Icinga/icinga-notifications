@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/notifications"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
-	baseSource "github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -17,7 +17,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"go.uber.org/zap"
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -138,19 +137,6 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If the client uses an outdated rules version, reject the request but also send the current rules version
-	// and rules for this source back to the client, so it can retry the request with the updated rules.
-	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(src.ID); ev.RulesVersion != latestRuleVersion {
-		w.WriteHeader(http.StatusPreconditionFailed)
-		l.writeSourceRulesInfo(w, src)
-
-		l.logger.Debugw("Abort event processing due to outdated rules version",
-			zap.String("current_version", latestRuleVersion),
-			zap.String("provided_version", ev.RulesVersion),
-			zap.String("source", src.Name))
-		return
-	}
-
 	ev.CompleteURL(daemon.Config().Icingaweb2URL)
 	ev.Time = time.Now()
 	ev.SourceId = src.ID
@@ -165,6 +151,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	if err := ev.Validate(); err != nil {
 		l.abort(w, http.StatusBadRequest, &ev, "%v", err)
 		return
+	}
+
+	if SupportsAttrsNegotiation(r) {
+		missingRelations := ev.ExtractMissingRelations(l.runtimeConfig.GetRulesFilterColumnsForSource(src)...)
+		if len(missingRelations) > 0 {
+			l.sendMissingAttrsError(w, &ev, missingRelations)
+			return
+		}
 	}
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
@@ -347,35 +341,32 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 	_ = enc.Encode(l.runtimeConfig.Rules)
 }
 
-// writeSourceRulesInfo writes the rules information for a specific source to the response writer.
-//
-// Internally, it converts the data to [baseSource.RulesInfo], being serialized JSON-encoded.
-func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.Source) {
-	rulesInfo := baseSource.RulesInfo{
-		Version: config.NoRulesVersion,
+// sendMissingAttrsError sends a response with status code 422 Unprocessable Entity to the client.
+func (l *Listener) sendMissingAttrsError(w http.ResponseWriter, ev *event.Event, missingAttrs []string) {
+	l.logger.Infow(
+		"Event is missing attributes required for rule evaluation",
+		zap.Stringer("event", ev),
+		zap.Strings("missing_attributes", missingAttrs),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+
+	resp := map[string]any{
+		"type":       "attrs_negotiation",
+		"attributes": missingAttrs,
 	}
 
-	func() { // Use a function to ensure that the RLock and RUnlock are called before writing the response.
-		l.runtimeConfig.RLock()
-		defer l.runtimeConfig.RUnlock()
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		l.logger.Errorw("Failed to send missing attributes required for rule evaluation", zap.Error(err))
+		return
+	}
+}
 
-		if sourceInfo, ok := l.runtimeConfig.RulesBySource[source.ID]; ok {
-			rulesInfo.Version = sourceInfo.Version.String()
-			rulesInfo.Rules = make(map[string]string)
-
-			for _, rID := range sourceInfo.RuleIDs {
-				id := strconv.FormatInt(rID, 10)
-				filterExpr := ""
-				if l.runtimeConfig.Rules[rID].ObjectFilterExpr.Valid {
-					filterExpr = l.runtimeConfig.Rules[rID].ObjectFilterExpr.String
-				}
-
-				rulesInfo.Rules[id] = filterExpr
-			}
-		}
-	}()
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(rulesInfo)
+// SupportsAttrsNegotiation checks whether the source of the request supports attributes negotiation.
+//
+// Returns true if the request contains the header [notifications.XIcingaEnableAttributesNegotiation]
+// set to "true", false otherwise.
+func SupportsAttrsNegotiation(r *http.Request) bool {
+	return r.Header.Get(notifications.XIcingaEnableAttributesNegotiation) == "true"
 }

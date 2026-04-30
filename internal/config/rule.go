@@ -4,78 +4,33 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"slices"
-	"time"
 )
 
-// SourceRuleVersion for SourceRulesInfo, consisting of two numbers, one static and one incrementable.
-type SourceRuleVersion struct {
-	Major int64
-	Minor int64
-}
+// GetRulesFilterColumnsForSource returns a set of all filter columns used in the rules of the given source.
+//
+// This can be used by sources to determine which columns they need to provide for the events to be
+// able to evaluate the rules of this source.
+func (r *RuntimeConfig) GetRulesFilterColumnsForSource(src *Source) []string {
+	r.RLock()
+	defer r.RUnlock()
 
-// NewSourceRuleVersion creates a new source version based on the current timestamp and a zero counter.
-func NewSourceRuleVersion() SourceRuleVersion {
-	return SourceRuleVersion{
-		Major: time.Now().UnixMilli(),
-		Minor: 0,
+	var columns []string
+	for _, id := range src.RuleIDs() {
+		eventRule, ok := r.Rules[id]
+		if !ok {
+			continue
+		}
+		for column := range eventRule.FilterColumns {
+			if !slices.Contains(columns, column) {
+				columns = append(columns, column)
+			}
+		}
 	}
-}
-
-// Increment the version counter.
-func (sourceVersion *SourceRuleVersion) Increment() {
-	sourceVersion.Minor++
-}
-
-// String implements fmt.Stringer and returns a pretty-printable representation.
-func (sourceVersion *SourceRuleVersion) String() string {
-	return fmt.Sprintf("%x-%x", sourceVersion.Major, sourceVersion.Minor)
-}
-
-// SourceRulesInfo holds information about the rules associated with a specific source.
-type SourceRulesInfo struct {
-	// Version is the version of the rules for the source.
-	//
-	// Multiple source's versions are independent of another.
-	Version SourceRuleVersion
-
-	// RuleIDs is a list of rule IDs associated with a specific source.
-	//
-	// It is used to quickly access the rules for a specific source without iterating over all rules.
-	RuleIDs []int64
+	return columns
 }
 
 // applyPendingRules synchronizes changed rules.
 func (r *RuntimeConfig) applyPendingRules() {
-	// Keep track of sources the rules were updated for, so we can update their version later.
-	updatedSources := make(map[int64]struct{})
-
-	if r.RulesBySource == nil {
-		r.RulesBySource = make(map[int64]*SourceRulesInfo)
-	}
-
-	addToRulesBySource := func(elem *rule.Rule) {
-		if sourceInfo, ok := r.RulesBySource[elem.SourceID]; ok {
-			sourceInfo.RuleIDs = append(sourceInfo.RuleIDs, elem.ID)
-		} else {
-			r.RulesBySource[elem.SourceID] = &SourceRulesInfo{
-				Version: NewSourceRuleVersion(),
-				RuleIDs: []int64{elem.ID},
-			}
-		}
-
-		updatedSources[elem.SourceID] = struct{}{}
-	}
-
-	delFromRulesBySource := func(elem *rule.Rule) {
-		if sourceInfo, ok := r.RulesBySource[elem.SourceID]; ok {
-			sourceInfo.RuleIDs = slices.DeleteFunc(sourceInfo.RuleIDs, func(id int64) bool {
-				return id == elem.ID
-			})
-		}
-
-		updatedSources[elem.SourceID] = struct{}{}
-	}
-
 	incrementalApplyPending(
 		r,
 		&r.Rules, &r.configChange.Rules,
@@ -89,9 +44,11 @@ func (r *RuntimeConfig) applyPendingRules() {
 			}
 
 			newElement.Escalations = make(map[int64]*rule.Escalation)
-
-			addToRulesBySource(newElement)
-
+			// If the source this rule belongs to is already known, add this rule to the source's rule list.
+			// Otherwise, the rule will be added to that list when its source is being loaded.
+			if src, ok := r.Sources[newElement.SourceID]; ok {
+				src.ruleIDs = append(src.ruleIDs, newElement.ID)
+			}
 			return nil
 		},
 		func(curElement, update *rule.Rule) error {
@@ -109,35 +66,24 @@ func (r *RuntimeConfig) applyPendingRules() {
 				curElement.TimePeriod = nil
 			}
 
-			if curElement.SourceID != update.SourceID {
-				delFromRulesBySource(curElement)
-				curElement.SourceID = update.SourceID
-				addToRulesBySource(curElement)
-			}
-
-			// ObjectFilterExpr is being initialized by config.IncrementalConfigurableInitAndValidatable.
+			// ObjectFilter{,Expr} are being initialized by config.IncrementalConfigurableInitAndValidatable.
+			curElement.ObjectFilter = update.ObjectFilter
 			curElement.ObjectFilterExpr = update.ObjectFilterExpr
-
-			updatedSources[curElement.SourceID] = struct{}{}
+			curElement.FilterColumns = update.FilterColumns
 
 			return nil
 		},
 		func(delElement *rule.Rule) error {
-			delFromRulesBySource(delElement)
-
+			// If the source this rule belongs to is already known, remove this rule from the source's rule list.
+			// Otherwise, there's nothing more to do!
+			if src, ok := r.Sources[delElement.SourceID]; ok {
+				src.ruleIDs = slices.DeleteFunc(src.ruleIDs, func(id int64) bool {
+					return id == delElement.ID
+				})
+			}
 			return nil
 		},
 	)
-
-	// After applying the rules, we need to update the version of the sources that were modified.
-	// This is done to ensure that the version is incremented whenever a rule is added, modified,
-	// or deleted only once per applyPendingRules call, even if multiple rules from the same source
-	// were changed.
-	for sourceID := range updatedSources {
-		if sourceInfo, ok := r.RulesBySource[sourceID]; ok {
-			sourceInfo.Version.Increment()
-		}
-	}
 
 	incrementalApplyPending(
 		r,
