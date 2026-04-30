@@ -18,8 +18,25 @@ The authentication is performed via HTTP Basic Authentication using the source's
     Before Icinga Notifications version 0.2.0, the username was a fixed string based on the source ID, such as `source-${id}`.
     When upgrading a setup from an earlier version, these usernames are still valid, but can be changed in Icinga Notifications Web.
 
+Events sent to Icinga Notifications are expected to match rules that describe further event escalations.
+These rules can be configured in Icinga Notifications Web and should be designed to match the `relations` of the
+submitted events. When submitting an event without the expected relations to evaluate the rules, Icinga Notifications
+will reject the request with a `422 Unprocessable Entity` status code and a message describing the missing relations
+when the `X-Icinga-Reject-If-Relations-Incomplete` header is set to `true`. Otherwise, the request will be accepted
+nonetheless, when either there's an existing incident for the event's objects, the ongoing event causes a new incident
+to be opened, or the source have at least one event rule without a configured object filter.
+
+Furthermore, the `complete_relations` field of the event can be used to specify which relations or attributes of the
+event should be considered as complete for the purpose of rule evaluation. For instance, if the `complete_relations`
+field contains `host.vars` and `services[*].vars`, Icinga Notifications will not reject the event even if there are
+rules that require custom variables that are not included in the event. This effectively tells Icinga Notifications
+to ignore any missing custom variables because the source has explicitly declared that the event is complete and no
+further information will be provided.
+
+An example request to submit an event looks like this:
+
 ```
-curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-event' <<EOF
+curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomplete: true' -d '@-' 'http://localhost:5680/process-event' <<EOF
 {
   "name": "dummy-809: random fortune",
   "url": "http://localhost/icingaweb2/icingadb/service?name=random%20fortune&host.name=dummy-809",
@@ -29,7 +46,44 @@ curl -v -u 'source-2:insecureinsecure' -d '@-' 'http://localhost:5680/process-ev
   },
   "type": "state",
   "severity": "crit",
-  "message": "Something went somewhere very wrong."
+  "message": "Something went somewhere very wrong.",
+  "complete_relations": [
+    "host",
+    "services",
+    "hostgroups",
+    "servicegroups"
+  ],
+  "relations": {
+    "host": {
+      "name": "dummy-809",
+      "display_name": "My Dummy Host",
+      "vars": {
+        "os": "linux"
+      }
+    },
+    "services": [
+      {
+        "name": "random fortune",
+        "display_name": "Random Fortune Service",
+        "vars": {
+          "env": "production",
+          "team": "devops"
+        }
+      }
+    ],
+    "hostgroups": [
+      {
+        "name": "linux-servers",
+        "display_name": "Linux Servers"
+      }
+    ],
+    "servicegroups": [
+      {
+        "name": "production-services",
+        "display_name": "Production Services"
+      }
+    ]
+  }
 }
 EOF
 ```
