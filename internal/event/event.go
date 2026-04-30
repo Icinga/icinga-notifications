@@ -1,7 +1,6 @@
 package event
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -104,44 +103,6 @@ func (e *Event) SetMute(muted bool, reason string) {
 
 func (e *Event) String() string {
 	return fmt.Sprintf("[time=%s type=%q severity=%s]", e.Time, e.Type, e.Severity.String())
-}
-
-func (e *Event) FullString() string {
-	var b bytes.Buffer
-	_, _ = fmt.Fprintf(&b, "Event:\n")
-	_, _ = fmt.Fprintf(&b, "  Name: %q\n", e.Name)
-	_, _ = fmt.Fprintf(&b, "  URL: %q\n", e.URL)
-	_, _ = fmt.Fprintf(&b, "  ID Tags:\n")
-	for tag, value := range e.Tags {
-		_, _ = fmt.Fprintf(&b, "    %q", tag)
-		if value != "" {
-			_, _ = fmt.Fprintf(&b, " = %q", value)
-		}
-		_, _ = fmt.Fprintf(&b, "\n")
-	}
-	_, _ = fmt.Fprintf(&b, "  Extra Tags:\n")
-	for tag, value := range e.ExtraTags {
-		_, _ = fmt.Fprintf(&b, "    %q", tag)
-		if value != "" {
-			_, _ = fmt.Fprintf(&b, " = %q", value)
-		}
-		_, _ = fmt.Fprintf(&b, "\n")
-	}
-	_, _ = fmt.Fprintf(&b, "  Time: %s\n", e.Time)
-	_, _ = fmt.Fprintf(&b, "  SourceId: %d\n", e.SourceId)
-	if e.Type != baseEv.TypeUnknown {
-		_, _ = fmt.Fprintf(&b, "  Type: %q\n", e.Type)
-	}
-	if e.Severity != 0 {
-		_, _ = fmt.Fprintf(&b, "  Severity: %s\n", e.Severity.String())
-	}
-	if e.Username != "" {
-		_, _ = fmt.Fprintf(&b, "  Username: %q\n", e.Username)
-	}
-	if e.Message != "" {
-		_, _ = fmt.Fprintf(&b, "  Message: %q\n", e.Message)
-	}
-	return b.String()
 }
 
 // Sync transforms this event to *event.EventRow and synchronises with the database.
