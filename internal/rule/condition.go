@@ -29,7 +29,7 @@ func (e *EscalationFilter) ReevaluateAfter(escalationCond filter.Filter) time.Du
 	retryAfter := RetryNever
 	for _, condition := range escalationCond.ExtractConditions() {
 		if condition.Column() == "incident_age" {
-			v, err := time.ParseDuration(condition.Value())
+			v, err := time.ParseDuration(fmt.Sprint(condition.Value()))
 			if err == nil && v > e.IncidentAge {
 				// The incident age is compared with a value in the future. Once that age is
 				// reached, the escalation could trigger, so consider that time for reevaluation.
@@ -41,17 +41,17 @@ func (e *EscalationFilter) ReevaluateAfter(escalationCond filter.Filter) time.Du
 	return retryAfter
 }
 
-func (e *EscalationFilter) EvalEqual(key string, value string) (bool, error) {
+func (e *EscalationFilter) EvalEqual(key, value any) (bool, error) {
 	switch key {
 	case "incident_age":
-		age, err := time.ParseDuration(value)
+		age, err := time.ParseDuration(fmt.Sprint(value))
 		if err != nil {
 			return false, err
 		}
 
 		return e.IncidentAge == age, nil
 	case "incident_severity":
-		severity, err := event.ParseSeverity(value)
+		severity, err := event.ParseSeverity(fmt.Sprint(value))
 		if err != nil {
 			return false, err
 		}
@@ -62,17 +62,17 @@ func (e *EscalationFilter) EvalEqual(key string, value string) (bool, error) {
 	}
 }
 
-func (e *EscalationFilter) EvalLess(key string, value string) (bool, error) {
+func (e *EscalationFilter) EvalLess(key, value any) (bool, error) {
 	switch key {
 	case "incident_age":
-		age, err := time.ParseDuration(value)
+		age, err := time.ParseDuration(fmt.Sprint(value))
 		if err != nil {
 			return false, err
 		}
 
 		return e.IncidentAge < age, nil
 	case "incident_severity":
-		severity, err := event.ParseSeverity(value)
+		severity, err := event.ParseSeverity(fmt.Sprint(value))
 		if err != nil {
 			return false, err
 		}
@@ -83,21 +83,21 @@ func (e *EscalationFilter) EvalLess(key string, value string) (bool, error) {
 	}
 }
 
-func (e *EscalationFilter) EvalLike(key string, value string) (bool, error) {
+func (e *EscalationFilter) EvalLike(_, _ any) (bool, error) {
 	return false, fmt.Errorf("escalation filter does not support wildcard matches")
 }
 
-func (e *EscalationFilter) EvalLessOrEqual(key string, value string) (bool, error) {
+func (e *EscalationFilter) EvalLessOrEqual(key, value any) (bool, error) {
 	switch key {
 	case "incident_age":
-		age, err := time.ParseDuration(value)
+		age, err := time.ParseDuration(fmt.Sprint(value))
 		if err != nil {
 			return false, err
 		}
 
 		return e.IncidentAge <= age, nil
 	case "incident_severity":
-		severity, err := event.ParseSeverity(value)
+		severity, err := event.ParseSeverity(fmt.Sprint(value))
 		if err != nil {
 			return false, err
 		}
@@ -108,7 +108,7 @@ func (e *EscalationFilter) EvalLessOrEqual(key string, value string) (bool, erro
 	}
 }
 
-func (e *EscalationFilter) EvalExists(key string) bool {
+func (e *EscalationFilter) EvalExists(key any) bool {
 	switch key {
 	case "incident_age":
 		fallthrough
