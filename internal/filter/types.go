@@ -101,8 +101,8 @@ const (
 // check the available exported methods.
 type Condition struct {
 	op     CompOperator
-	column string
-	value  string
+	column any
+	value  any
 }
 
 // Eval evaluates this Condition based on its operator.
@@ -179,12 +179,12 @@ func (c *Condition) ExtractConditions() []*Condition {
 }
 
 // Column returns the column of this Condition.
-func (c *Condition) Column() string {
+func (c *Condition) Column() any {
 	return c.column
 }
 
 // Value returns the value of this Condition.
-func (c *Condition) Value() string {
+func (c *Condition) Value() any {
 	return c.value
 }
 
