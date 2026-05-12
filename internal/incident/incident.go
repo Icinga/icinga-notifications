@@ -128,10 +128,10 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	// uniquely identify themselves why an incident is being muted, but are rather super generic types, and as
 	// such, we are ignoring superfluous ones that don't have any effect on that incident.
 	if i.isMuted && ev.Type == baseEv.TypeMute {
-		i.logger.Debugw("Ignoring superfluous mute event", zap.String("event", ev.String()))
+		i.logger.Debugw("Ignoring superfluous mute event", zap.Object("event", ev))
 		return event.ErrSuperfluousMuteUnmuteEvent
 	} else if !i.isMuted && ev.Type == baseEv.TypeUnmute {
-		i.logger.Debugw("Ignoring superfluous unmute event", zap.String("event", ev.String()))
+		i.logger.Debugw("Ignoring superfluous unmute event", zap.Object("event", ev))
 		return event.ErrSuperfluousMuteUnmuteEvent
 	}
 
@@ -142,11 +142,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err = ev.Sync(ctx, tx, i.db, i.Object.ID); err != nil {
-		i.logger.Errorw("Failed to insert event and fetch its ID", zap.String("event", ev.String()), zap.Error(err))
-		return err
-	}
-
 	isNew := i.StartedAt.Time().IsZero()
 	if isNew {
 		err = i.processIncidentOpenedEvent(ctx, tx, ev)
@@ -155,11 +150,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 
 		i.logger = i.logger.With(zap.String("incident", i.String()))
-	}
-
-	if err = i.AddEvent(ctx, tx, ev); err != nil {
-		i.logger.Errorw("Cannot insert incident event to the database", zap.Error(err))
-		return err
 	}
 
 	if ev.Type == baseEv.TypeState {
@@ -188,7 +178,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	// below appear logically after the unmute event. This way, when viewing the incident history in the UI, the
 	// unmute event will appear before the notifications that were sent after unmuting.
 	if err := i.handleUnmute(ctx, tx, ev); err != nil {
-		i.logger.Errorw("Cannot insert incident muted history", zap.String("event", ev.String()), zap.Error(err))
+		i.logger.Errorw("Cannot insert incident muted history", zap.Error(err))
 		return err
 	}
 
@@ -201,7 +191,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	// So that the incident muted history appears logically after the just generated notifications, we must insert
 	// the muted history last. This way, the history entries will make sense when viewed in chronological order.
 	if err := i.handleMute(ctx, tx, ev); err != nil {
-		i.logger.Errorw("Cannot insert incident muted history", zap.Stringer("event", ev), zap.Error(err))
+		i.logger.Errorw("Cannot insert incident muted history", zap.Error(err))
 		return err
 	}
 
@@ -230,7 +220,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 	}
 
 	if !time.Now().After(ev.Time) {
-		i.logger.DPanicw("Event from the future", zap.Time("event_time", ev.Time), zap.Any("event", ev))
+		i.logger.DPanicw("Event from the future", zap.Time("event_time", ev.Time), zap.Object("event", ev))
 		return
 	}
 
@@ -248,15 +238,6 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 	var notifications []*NotificationEntry
 	ctx := context.Background()
 	err = i.db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
-		err := ev.Sync(ctx, tx, i.db, i.Object.ID)
-		if err != nil {
-			return err
-		}
-
-		if err = i.AddEvent(ctx, tx, ev); err != nil {
-			return fmt.Errorf("cannot insert incident event to the database: %w", err)
-		}
-
 		if err = i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
 			return err
 		}
@@ -293,7 +274,6 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 	hr := &HistoryRow{
 		IncidentID:  i.Id,
-		EventID:     types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Time:        types.UnixMilli(time.Now()),
 		Type:        IncidentSeverityChanged,
 		NewSeverity: newSeverity,
@@ -314,7 +294,6 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 		hr = &HistoryRow{
 			IncidentID: i.Id,
-			EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 			Time:       i.RecoveredAt,
 			Type:       Closed,
 		}
@@ -352,7 +331,6 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 		IncidentID:  i.Id,
 		Type:        Opened,
 		Time:        types.UnixMilli(ev.Time),
-		EventID:     types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		NewSeverity: i.Severity,
 		Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 	}
@@ -374,11 +352,10 @@ func (i *Incident) handleUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.Even
 		return nil
 	}
 
-	i.logger.Infow("Unmuting incident", zap.Stringer("event", ev), zap.String("reason", i.Object.MuteReason.String))
+	i.logger.Infow("Unmuting incident", zap.String("reason", i.Object.MuteReason.String))
 
 	hr := &HistoryRow{
 		IncidentID: i.Id,
-		EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Time:       types.UnixMilli(time.Now()),
 		Type:       Unmuted,
 		// On the other hand, if an object is unmuted, its mute reason is already reset, and we can't access it anymore.
@@ -396,11 +373,10 @@ func (i *Incident) handleMute(ctx context.Context, tx *sqlx.Tx, ev *event.Event)
 		return nil
 	}
 
-	i.logger.Infow("Muting incident", zap.Stringer("event", ev), zap.String("reason", i.Object.MuteReason.String))
+	i.logger.Infow("Muting incident", zap.String("reason", i.Object.MuteReason.String))
 
 	hr := &HistoryRow{
 		IncidentID: i.Id,
-		EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Time:       types.UnixMilli(time.Now()),
 		Type:       Muted,
 		// Since the object may have already been muted with previous events before this incident even
@@ -450,7 +426,6 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 			hr := &HistoryRow{
 				IncidentID: i.Id,
 				Time:       types.UnixMilli(time.Now()),
-				EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 				RuleID:     types.MakeInt(r.ID, types.TransformZeroIntToNull),
 				Type:       RuleMatched,
 			}
@@ -560,7 +535,6 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 		hr := &HistoryRow{
 			IncidentID:       i.Id,
 			Time:             state.TriggeredAt,
-			EventID:          types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 			RuleEscalationID: types.MakeInt(state.RuleEscalationID, types.TransformZeroIntToNull),
 			RuleID:           types.MakeInt(r.ID, types.TransformZeroIntToNull),
 			Type:             EscalationTriggered,
@@ -574,7 +548,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 			return err
 		}
 
-		if err := i.AddRecipient(ctx, tx, escalation, ev.ID); err != nil {
+		if err := i.AddRecipient(ctx, tx, escalation); err != nil {
 			return err
 		}
 	}

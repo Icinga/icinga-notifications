@@ -163,15 +163,15 @@ func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request)
 }
 
 // abort the current connection by sending the status code and an error both to the log and back to the client.
-func (l *Listener) abort(w http.ResponseWriter, statusCode int, ev *event.Event, format string, a ...any) {
+func (l *Listener) abort(w http.ResponseWriter, statusCode int, src *config.Source, format string, a ...any) {
 	msg := format
 	if len(a) > 0 {
 		msg = fmt.Sprintf(format, a...)
 	}
 
 	logger := l.logger.With(zap.Int("status_code", statusCode), zap.String("message", msg))
-	if ev != nil {
-		logger = logger.With(zap.Stringer("event", ev))
+	if src != nil {
+		logger = logger.With(zap.String("source", src.Name))
 	}
 
 	http.Error(w, msg, statusCode)
@@ -209,29 +209,30 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := ev.Validate(); err != nil {
-		l.abort(w, http.StatusBadRequest, &ev, "%v", err)
+		l.abort(w, http.StatusBadRequest, src, "%v", err)
 		return
 	}
+
+	l.logger.Debugw("Processing event", zap.String("source", src.Name), zap.Object("event", &ev))
 
 	filterColumns, hasRulesWithoutFilter := l.runtimeConfig.GetRulesFilterColumnsForSource(src)
 	missingRelations := ev.ExtractMissingRelations(filterColumns...)
 	if len(missingRelations) > 0 && ShouldRejectRequestOnIncompleteRelations(r, &ev, hasRulesWithoutFilter) {
-		l.sendMissingAttrsError(w, &ev, missingRelations)
+		l.sendMissingAttrsError(w, src, missingRelations)
 		return
 	}
 
-	l.logger.Infow("Processing event", zap.String("event", ev.String()))
 	err := incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
 	if errors.Is(err, event.ErrSuperfluousStateChange) || errors.Is(err, event.ErrSuperfluousMuteUnmuteEvent) {
-		l.abort(w, http.StatusNotAcceptable, &ev, "%v", err)
+		l.abort(w, http.StatusNotAcceptable, src, "%v", err)
 		return
 	} else if err != nil {
-		l.logger.Errorw("Failed to successfully process event", zap.Stringer("event", &ev), zap.Error(err))
-		l.abort(w, http.StatusInternalServerError, &ev, "event could not be processed successfully, see server logs for details")
+		l.logger.Errorw("Failed to successfully process event", zap.String("source", src.Name), zap.Error(err))
+		l.abort(w, http.StatusInternalServerError, src, "event could not be processed successfully, see server logs for details")
 		return
 	}
 
-	l.logger.Infow("Successfully processed event", zap.String("event", ev.String()))
+	l.logger.Infow("Successfully processed event", zap.String("source", src.Name))
 
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = fmt.Fprintln(w, "event processed successfully")
@@ -405,10 +406,10 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 }
 
 // sendMissingAttrsError sends a response with status code 422 Unprocessable Entity to the client.
-func (l *Listener) sendMissingAttrsError(w http.ResponseWriter, ev *event.Event, missingAttrs []string) {
+func (l *Listener) sendMissingAttrsError(w http.ResponseWriter, src *config.Source, missingAttrs []string) {
 	l.logger.Debugw(
 		"Event is missing attributes required for rule evaluation",
-		zap.Stringer("event", ev),
+		zap.String("source", src.Name),
 		zap.Strings("missing_attributes", missingAttrs),
 	)
 

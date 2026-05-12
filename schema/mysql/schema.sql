@@ -283,23 +283,6 @@ CREATE TABLE object_id_tag (
     CONSTRAINT fk_object_id_tag_object FOREIGN KEY (object_id) REFERENCES object(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-CREATE TABLE event (
-    id bigint NOT NULL AUTO_INCREMENT,
-    time bigint NOT NULL,
-    object_id binary(32) NOT NULL,
-    -- NOT NULL is enforced via CHECK not to default to 'acknowledgement-cleared'
-    type enum('acknowledgement-cleared', 'acknowledgement-set', 'custom', 'downtime-end', 'downtime-removed', 'downtime-start', 'flapping-end', 'flapping-start', 'incident-age', 'mute', 'state', 'unmute'),
-    severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg'),
-    message mediumtext,
-    username text COLLATE utf8mb4_unicode_ci,
-    mute enum('n', 'y'),
-    mute_reason mediumtext,
-
-    CONSTRAINT pk_event PRIMARY KEY (id),
-    CONSTRAINT ck_event_type_notnull CHECK (type IS NOT NULL),
-    CONSTRAINT fk_event_object FOREIGN KEY (object_id) REFERENCES object(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
-
 CREATE TABLE rule (
     id bigint NOT NULL AUTO_INCREMENT,
     name text NOT NULL COLLATE utf8mb4_unicode_ci,
@@ -377,15 +360,6 @@ CREATE TABLE incident (
     CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-CREATE TABLE incident_event (
-    incident_id bigint NOT NULL,
-    event_id bigint NOT NULL,
-
-    CONSTRAINT pk_incident_event PRIMARY KEY (incident_id, event_id),
-    CONSTRAINT fk_incident_event_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
-    CONSTRAINT fk_incident_event_event FOREIGN KEY (event_id) REFERENCES event(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
-
 CREATE TABLE incident_contact (
     incident_id bigint NOT NULL,
     contact_id bigint,
@@ -428,7 +402,6 @@ CREATE TABLE incident_history (
     id bigint NOT NULL AUTO_INCREMENT,
     incident_id bigint NOT NULL,
     rule_escalation_id bigint,
-    event_id bigint,
     contact_id bigint,
     contactgroup_id bigint,
     schedule_id bigint,
@@ -451,7 +424,6 @@ CREATE TABLE incident_history (
     CONSTRAINT fk_incident_history_incident_rule_escalation_state FOREIGN KEY (incident_id, rule_escalation_id) REFERENCES incident_rule_escalation_state(incident_id, rule_escalation_id),
     CONSTRAINT fk_incident_history_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
     CONSTRAINT fk_incident_history_rule_escalation FOREIGN KEY (rule_escalation_id) REFERENCES rule_escalation(id),
-    CONSTRAINT fk_incident_history_event FOREIGN KEY (event_id) REFERENCES event(id),
     CONSTRAINT fk_incident_history_contact FOREIGN KEY (contact_id) REFERENCES contact(id),
     CONSTRAINT fk_incident_history_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
     CONSTRAINT fk_incident_history_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id),
