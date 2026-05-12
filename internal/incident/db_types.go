@@ -9,17 +9,6 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-// EventRow represents a single incident event database entry.
-type EventRow struct {
-	IncidentID int64 `db:"incident_id"`
-	EventID    int64 `db:"event_id"`
-}
-
-// TableName implements the contracts.TableNamer interface.
-func (e *EventRow) TableName() string {
-	return "incident_event"
-}
-
 // ContactRow represents a single incident contact database entry.
 type ContactRow struct {
 	IncidentID    int64 `db:"incident_id"`
@@ -68,7 +57,6 @@ type HistoryRow struct {
 	ID                int64     `db:"id"`
 	IncidentID        int64     `db:"incident_id"`
 	RuleEscalationID  types.Int `db:"rule_escalation_id"`
-	EventID           types.Int `db:"event_id"`
 	recipient.Key     `db:",inline"`
 	RuleID            types.Int         `db:"rule_id"`
 	Time              types.UnixMilli   `db:"time"`

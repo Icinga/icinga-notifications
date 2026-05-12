@@ -1,13 +1,11 @@
 package event
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
-	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap/zapcore"
 	"net/url"
 	"strings"
 	"time"
@@ -29,7 +27,6 @@ var ErrSuperfluousMuteUnmuteEvent = errors.New("ignoring superfluous (un)mute ev
 type Event struct {
 	Time     time.Time `json:"-"`
 	SourceId int64     `json:"-"`
-	ID       int64     `json:"-"`
 
 	baseEv.Event `json:",inline"`
 }
@@ -101,52 +98,21 @@ func (e *Event) SetMute(muted bool, reason string) {
 	e.MuteReason = reason
 }
 
-func (e *Event) String() string {
-	return fmt.Sprintf("[time=%s type=%q severity=%s]", e.Time, e.Type, e.Severity.String())
-}
+func (e *Event) String() string { return e.Name }
 
-// Sync transforms this event to *event.EventRow and synchronises with the database.
-func (e *Event) Sync(ctx context.Context, tx *sqlx.Tx, db *database.DB, objectId types.Binary) error {
-	if e.ID != 0 {
+// MarshalLogObject implements the [zapcore.ObjectMarshaler] interface to allow logging the event as a structured object.
+func (e *Event) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+	encoder.AddString("name", e.Name)
+	encoder.AddTime("time", e.Time)
+	encoder.AddInt64("source_id", e.SourceId)
+	encoder.AddString("type", e.Type.String())
+	encoder.AddString("severity", e.Severity.String())
+	encoder.AddString("username", e.Username)
+	_ = encoder.AddObject("tags", zapcore.ObjectMarshalerFunc(func(objectEncoder zapcore.ObjectEncoder) error {
+		for key, value := range e.Tags {
+			objectEncoder.AddString(key, value)
+		}
 		return nil
-	}
-
-	eventRow := NewEventRow(e, objectId)
-	eventID, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, eventRow, "id"), eventRow)
-	if err == nil {
-		e.ID = eventID
-	}
-
-	return err
-}
-
-// EventRow represents a single event database row and isn't an in-memory representation of an event.
-type EventRow struct {
-	ID         int64           `db:"id"`
-	Time       types.UnixMilli `db:"time"`
-	ObjectID   types.Binary    `db:"object_id"`
-	Type       types.String    `db:"type"`
-	Severity   baseEv.Severity `db:"severity"`
-	Username   types.String    `db:"username"`
-	Message    types.String    `db:"message"`
-	Mute       types.Bool      `db:"mute"`
-	MuteReason types.String    `db:"mute_reason"`
-}
-
-// TableName implements the contracts.TableNamer interface.
-func (er *EventRow) TableName() string {
-	return "event"
-}
-
-func NewEventRow(e *Event, objectId types.Binary) *EventRow {
-	return &EventRow{
-		Time:       types.UnixMilli(e.Time),
-		ObjectID:   objectId,
-		Type:       types.MakeString(e.Type.String(), types.TransformEmptyStringToNull),
-		Severity:   e.Severity,
-		Username:   types.MakeString(e.Username, types.TransformEmptyStringToNull),
-		Message:    types.MakeString(e.Message, types.TransformEmptyStringToNull),
-		Mute:       e.Mute,
-		MuteReason: types.MakeString(e.MuteReason, types.TransformEmptyStringToNull),
-	}
+	}))
+	return nil
 }

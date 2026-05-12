@@ -144,11 +144,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err = ev.Sync(ctx, tx, i.db, i.Object.ID); err != nil {
-		i.logger.Errorw("Failed to insert event and fetch its ID", zap.String("event", ev.String()), zap.Error(err))
-		return err
-	}
-
 	isNew := i.StartedAt.Time().IsZero()
 	if isNew {
 		err = i.processIncidentOpenedEvent(ctx, tx, ev)
@@ -157,11 +152,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 
 		i.logger = i.logger.With(zap.String("incident", i.String()))
-	}
-
-	if err = i.AddEvent(ctx, tx, ev); err != nil {
-		i.logger.Errorw("Cannot insert incident event to the database", zap.Error(err))
-		return err
 	}
 
 	switch ev.Type {
@@ -261,15 +251,6 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 	var notifications []*NotificationEntry
 	ctx := context.Background()
 	err = i.db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
-		err := ev.Sync(ctx, tx, i.db, i.Object.ID)
-		if err != nil {
-			return err
-		}
-
-		if err = i.AddEvent(ctx, tx, ev); err != nil {
-			return fmt.Errorf("cannot insert incident event to the database: %w", err)
-		}
-
 		if err = i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
 			return err
 		}
@@ -306,7 +287,6 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 	hr := &HistoryRow{
 		IncidentID:  i.Id,
-		EventID:     types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Time:        types.UnixMilli(time.Now()),
 		Type:        IncidentSeverityChanged,
 		NewSeverity: newSeverity,
@@ -327,7 +307,6 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 		hr = &HistoryRow{
 			IncidentID: i.Id,
-			EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 			Time:       i.RecoveredAt,
 			Type:       Closed,
 		}
@@ -365,7 +344,6 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 		IncidentID:  i.Id,
 		Type:        Opened,
 		Time:        types.UnixMilli(ev.Time),
-		EventID:     types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		NewSeverity: i.Severity,
 		Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 	}
@@ -391,7 +369,6 @@ func (i *Incident) handleUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.Even
 
 	hr := &HistoryRow{
 		IncidentID: i.Id,
-		EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Time:       types.UnixMilli(time.Now()),
 		Type:       Unmuted,
 		// On the other hand, if an object is unmuted, its mute reason is already reset, and we can't access it anymore.
@@ -413,7 +390,6 @@ func (i *Incident) handleMute(ctx context.Context, tx *sqlx.Tx, ev *event.Event)
 
 	hr := &HistoryRow{
 		IncidentID: i.Id,
-		EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Time:       types.UnixMilli(time.Now()),
 		Type:       Muted,
 		// Since the object may have already been muted with previous events before this incident even
@@ -463,7 +439,6 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 			hr := &HistoryRow{
 				IncidentID: i.Id,
 				Time:       types.UnixMilli(time.Now()),
-				EventID:    types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 				RuleID:     types.MakeInt(r.ID, types.TransformZeroIntToNull),
 				Type:       RuleMatched,
 			}
@@ -573,7 +548,6 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 		hr := &HistoryRow{
 			IncidentID:       i.Id,
 			Time:             state.TriggeredAt,
-			EventID:          types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 			RuleEscalationID: types.MakeInt(state.RuleEscalationID, types.TransformZeroIntToNull),
 			RuleID:           types.MakeInt(r.ID, types.TransformZeroIntToNull),
 			Type:             EscalationTriggered,
@@ -587,7 +561,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, ev *even
 			return err
 		}
 
-		if err := i.AddRecipient(ctx, tx, escalation, ev.ID); err != nil {
+		if err := i.AddRecipient(ctx, tx, escalation); err != nil {
 			return err
 		}
 	}
@@ -688,7 +662,6 @@ func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx,
 	hr := &HistoryRow{
 		IncidentID:       i.Id,
 		Key:              recipientKey,
-		EventID:          types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 		Type:             RecipientRoleChanged,
 		Time:             types.UnixMilli(time.Now()),
 		NewRecipientRole: newRole,
