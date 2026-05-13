@@ -1,8 +1,12 @@
 package rule
 
 import (
+	"encoding/json"
+	"errors"
+
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
+	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"go.uber.org/zap/zapcore"
@@ -16,12 +20,46 @@ type Rule struct {
 	TimePeriod       *timeperiod.TimePeriod `db:"-"`
 	TimePeriodID     types.Int              `db:"timeperiod_id"`
 	SourceID         int64                  `db:"source_id"`
+	ObjectFilter     filter.Filter          `db:"-"`
 	ObjectFilterExpr types.String           `db:"object_filter"`
 	Escalations      map[int64]*Escalation  `db:"-"`
+
+	// FilterColumns is a set of all filter columns used in the rule's ObjectFilter.
+	//
+	// This is computed from the ObjectFilter once and can be used by sources to determine which
+	// columns they need to provide for the events to be able to evaluate the rule.
+	FilterColumns FilterAttrsType `db:"-"`
 }
+
+// FilterAttrsType represents a list of filter attributes for a given list of filter conditions.
+type FilterAttrsType [][]string
 
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
 func (r *Rule) IncrementalInitAndValidate() error {
+	if r.ObjectFilterExpr.Valid {
+		data := map[string]json.RawMessage{}
+		if err := json.Unmarshal([]byte(r.ObjectFilterExpr.String), &data); err != nil {
+			return err
+		}
+		filterBytes, exists := data["ast"]
+		if !exists {
+			return errors.New("missing 'ast' field in object filter expression")
+		}
+
+		f, err := filter.UnmarshalJSON(filterBytes)
+		if err != nil {
+			return err
+		}
+
+		r.ObjectFilter = f
+		if f != nil {
+			for _, condition := range f.ExtractConditions() {
+				if attrs, ok := condition.Attributes().([]string); ok {
+					r.FilterColumns = append(r.FilterColumns, attrs)
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -39,6 +77,16 @@ func (r *Rule) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	}
 
 	return nil
+}
+
+// Eval evaluates the configured object filter for the provided filterable.
+//
+// Returns always true if the current rule doesn't have a configured object filter.
+func (r *Rule) Eval(filterable filter.Filterable) (bool, error) {
+	if r.ObjectFilter == nil {
+		return true, nil
+	}
+	return r.ObjectFilter.Eval(filterable)
 }
 
 // ContactChannels stores a set of channel IDs for each set of individual contacts.

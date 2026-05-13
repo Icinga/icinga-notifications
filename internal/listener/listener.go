@@ -8,16 +8,16 @@ import (
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/notifications"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
-	baseSource "github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
+	"github.com/icinga/icinga-notifications/internal/object"
 	"go.uber.org/zap"
 	"net/http"
-	"strconv"
 	"time"
 )
 
@@ -138,19 +138,6 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If the client uses an outdated rules version, reject the request but also send the current rules version
-	// and rules for this source back to the client, so it can retry the request with the updated rules.
-	if latestRuleVersion := l.runtimeConfig.GetRulesVersionFor(src.ID); ev.RulesVersion != latestRuleVersion {
-		w.WriteHeader(http.StatusPreconditionFailed)
-		l.writeSourceRulesInfo(w, src)
-
-		l.logger.Debugw("Abort event processing due to outdated rules version",
-			zap.String("current_version", latestRuleVersion),
-			zap.String("provided_version", ev.RulesVersion),
-			zap.String("source", src.Name))
-		return
-	}
-
 	ev.CompleteURL(daemon.Config().Icingaweb2URL)
 	ev.Time = time.Now()
 	ev.SourceId = src.ID
@@ -164,6 +151,13 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	if err := ev.Validate(); err != nil {
 		l.abort(w, http.StatusBadRequest, &ev, "%v", err)
+		return
+	}
+
+	filterColumns, hasRulesWithoutFilter := l.runtimeConfig.GetRulesFilterColumnsForSource(src)
+	missingRelations := ev.ExtractMissingRelations(filterColumns...)
+	if len(missingRelations) > 0 && ShouldRejectRequestOnIncompleteRelations(r, &ev, hasRulesWithoutFilter) {
+		l.sendMissingAttrsError(w, &ev, missingRelations)
 		return
 	}
 
@@ -347,35 +341,40 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 	_ = enc.Encode(l.runtimeConfig.Rules)
 }
 
-// writeSourceRulesInfo writes the rules information for a specific source to the response writer.
-//
-// Internally, it converts the data to [baseSource.RulesInfo], being serialized JSON-encoded.
-func (l *Listener) writeSourceRulesInfo(w http.ResponseWriter, source *config.Source) {
-	rulesInfo := baseSource.RulesInfo{
-		Version: config.NoRulesVersion,
+// sendMissingAttrsError sends a response with status code 422 Unprocessable Entity to the client.
+func (l *Listener) sendMissingAttrsError(w http.ResponseWriter, ev *event.Event, missingAttrs []string) {
+	l.logger.Infow(
+		"Event is missing attributes required for rule evaluation",
+		zap.Stringer("event", ev),
+		zap.Strings("missing_attributes", missingAttrs),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+
+	resp := map[string]any{
+		"type":       "attrs_negotiation",
+		"attributes": missingAttrs,
 	}
 
-	func() { // Use a function to ensure that the RLock and RUnlock are called before writing the response.
-		l.runtimeConfig.RLock()
-		defer l.runtimeConfig.RUnlock()
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		l.logger.Errorw("Failed to send missing attributes required for rule evaluation", zap.Error(err))
+		return
+	}
+}
 
-		if sourceInfo, ok := l.runtimeConfig.RulesBySource[source.ID]; ok {
-			rulesInfo.Version = sourceInfo.Version.String()
-			rulesInfo.Rules = make(map[string]string)
-
-			for _, rID := range sourceInfo.RuleIDs {
-				id := strconv.FormatInt(rID, 10)
-				filterExpr := ""
-				if l.runtimeConfig.Rules[rID].ObjectFilterExpr.Valid {
-					filterExpr = l.runtimeConfig.Rules[rID].ObjectFilterExpr.String
-				}
-
-				rulesInfo.Rules[id] = filterExpr
-			}
-		}
-	}()
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(rulesInfo)
+// ShouldRejectRequestOnIncompleteRelations determines whether a request with incomplete relations should be rejected.
+//
+// This function always returns true if the client explicitly requested to reject such events by setting the
+// [notifications.XIcingaRejectIfRelationsIncomplete] HTTP header. Otherwise, it only returns true when the
+// src doesn't have any rules without an object filter and the event doesn't cause a new incident to be opened
+// and there's no active one yet for the event's source object.
+func ShouldRejectRequestOnIncompleteRelations(r *http.Request, ev *event.Event, hasRulesWithoutFilter bool) bool {
+	if r.Header.Get(notifications.XIcingaRejectIfRelationsIncomplete) == "true" {
+		return true
+	}
+	if hasRulesWithoutFilter {
+		return false
+	}
+	return !incident.CanOpenNewIncident(ev) && !incident.HasCurrent(object.GetFromCache(object.ID(ev.SourceId, ev.Tags)))
 }

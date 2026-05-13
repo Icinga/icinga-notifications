@@ -238,14 +238,13 @@ func ProcessEvent(
 		return fmt.Errorf("cannot sync event object: %w", err)
 	}
 
-	createIncident := ev.Severity != baseEv.SeverityNone && ev.Severity != baseEv.SeverityOK
 	currentIncident, err := GetCurrent(
 		ctx,
 		db,
 		obj,
 		logs.GetChildLogger("incident"),
 		runtimeConfig,
-		createIncident)
+		CanOpenNewIncident(ev))
 	if err != nil {
 		return fmt.Errorf("cannot get current incident for %q: %w", obj.DisplayName(), err)
 	}
@@ -277,4 +276,17 @@ func ProcessEvent(
 	}
 
 	return currentIncident.ProcessEvent(ctx, ev)
+}
+
+// CanOpenNewIncident returns true if the given event can open a new incident if there is no active one yet.
+func CanOpenNewIncident(ev *event.Event) bool {
+	return ev.Severity != baseEv.SeverityNone && ev.Severity != baseEv.SeverityOK
+}
+
+// HasCurrent returns true if there is an active incident for the given object.
+func HasCurrent(obj *object.Object) bool {
+	currentIncidentsMu.Lock()
+	defer currentIncidentsMu.Unlock()
+
+	return currentIncidents[obj] != nil
 }
