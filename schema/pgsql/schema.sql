@@ -297,36 +297,7 @@ CREATE TABLE object_extra_tag (
     CONSTRAINT fk_object_extra_tag_object FOREIGN KEY (object_id) REFERENCES object(id)
 );
 
-CREATE TYPE event_type AS ENUM (
-    'acknowledgement-cleared',
-    'acknowledgement-set',
-    'custom',
-    'downtime-end',
-    'downtime-removed',
-    'downtime-start',
-    'flapping-end',
-    'flapping-start',
-    'incident-age',
-    'mute',
-    'state',
-    'unmute'
-);
 CREATE TYPE severity AS ENUM ('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg');
-
-CREATE TABLE event (
-    id bigserial,
-    time bigint NOT NULL,
-    object_id bytea NOT NULL,
-    type event_type NOT NULL,
-    severity severity,
-    message text,
-    username citext,
-    mute boolenum,
-    mute_reason text,
-
-    CONSTRAINT pk_event PRIMARY KEY (id),
-    CONSTRAINT fk_event_object FOREIGN KEY (object_id) REFERENCES object(id)
-);
 
 CREATE TABLE rule (
     id bigserial,
@@ -403,15 +374,6 @@ CREATE TABLE incident (
     CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id)
 );
 
-CREATE TABLE incident_event (
-    incident_id bigint NOT NULL,
-    event_id bigint NOT NULL,
-
-    CONSTRAINT pk_incident_event PRIMARY KEY (incident_id, event_id),
-    CONSTRAINT fk_incident_event_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
-    CONSTRAINT fk_incident_event_event FOREIGN KEY (event_id) REFERENCES event(id)
-);
-
 CREATE TYPE incident_contact_role AS ENUM ('recipient', 'subscriber', 'manager');
 
 CREATE TABLE incident_contact (
@@ -456,7 +418,6 @@ CREATE TABLE incident_history (
     id bigserial,
     incident_id bigint NOT NULL,
     rule_escalation_id bigint,
-    event_id bigint,
     contact_id bigint,
     contactgroup_id bigint,
     schedule_id bigint,
@@ -476,7 +437,6 @@ CREATE TABLE incident_history (
     CONSTRAINT fk_incident_history_incident_rule_escalation_state FOREIGN KEY (incident_id, rule_escalation_id) REFERENCES incident_rule_escalation_state(incident_id, rule_escalation_id),
     CONSTRAINT fk_incident_history_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
     CONSTRAINT fk_incident_history_rule_escalation FOREIGN KEY (rule_escalation_id) REFERENCES rule_escalation(id),
-    CONSTRAINT fk_incident_history_event FOREIGN KEY (event_id) REFERENCES event(id),
     CONSTRAINT fk_incident_history_contact FOREIGN KEY (contact_id) REFERENCES contact(id),
     CONSTRAINT fk_incident_history_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
     CONSTRAINT fk_incident_history_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id),

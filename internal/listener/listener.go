@@ -168,6 +168,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	l.logger.Infow("Processing event", zap.String("event", ev.String()))
+	l.logger.Debugw("Event details", zap.Object("event", &ev))
+
 	err := incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
 	if errors.Is(err, event.ErrSuperfluousStateChange) || errors.Is(err, event.ErrSuperfluousMuteUnmuteEvent) {
 		l.abort(w, http.StatusNotAcceptable, &ev, "%v", err)
