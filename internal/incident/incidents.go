@@ -149,8 +149,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 }
 
 func GetCurrent(
-	ctx context.Context, db *database.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
-	create bool,
+	db *database.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig, create bool,
 ) (*Incident, error) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
@@ -162,17 +161,6 @@ func GetCurrent(
 		currentIncident = NewIncident(db, obj, runtimeConfig, incidentLogger)
 
 		currentIncidents[obj] = currentIncident
-	}
-
-	if currentIncident != nil {
-		currentIncident.Lock()
-		defer currentIncident.Unlock()
-
-		if !currentIncident.StartedAt.Time().IsZero() {
-			if err := currentIncident.restoreRecipients(ctx); err != nil {
-				return nil, err
-			}
-		}
 	}
 
 	return currentIncident, nil
@@ -240,7 +228,6 @@ func ProcessEvent(
 
 	createIncident := ev.Severity != baseEv.SeverityNone && ev.Severity != baseEv.SeverityOK
 	currentIncident, err := GetCurrent(
-		ctx,
 		db,
 		obj,
 		logs.GetChildLogger("incident"),

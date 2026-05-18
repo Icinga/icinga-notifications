@@ -759,27 +759,6 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	return contactChs
 }
 
-// restoreRecipients reloads the current incident recipients from the database.
-// Returns error on database failure.
-func (i *Incident) restoreRecipients(ctx context.Context) error {
-	contact := &ContactRow{}
-	var contacts []*ContactRow
-	err := i.db.SelectContext(ctx, &contacts, i.db.Rebind(i.db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), i.Id)
-	if err != nil {
-		i.logger.Errorw("Failed to restore incident recipients from the database", zap.Error(err))
-		return err
-	}
-
-	recipients := make(map[recipient.Key]*RecipientState)
-	for _, contact := range contacts {
-		recipients[contact.Key] = &RecipientState{Role: contact.Role}
-	}
-
-	i.Recipients = recipients
-
-	return nil
-}
-
 // isRecipientNotifiable checks whether the given recipient should be notified about the current incident.
 // If the specified recipient has not yet been notified of this incident, it always returns false.
 // Otherwise, the recipient role is forwarded to IsNotifiable and may or may not return true.
