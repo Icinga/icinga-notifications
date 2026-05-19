@@ -276,7 +276,6 @@ or if the channel is missing required configuration values.
     "event": {
       "time": "2024-07-12T10:47:30.445439055Z",
       "type": "state",
-      "username": "",
       "message": "Q:\tWhat looks like a cat, flies like a bat, brays like a donkey, and\n\tplays like a monkey?\nA:\tNothing."
     }
   },

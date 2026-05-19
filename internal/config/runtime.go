@@ -13,7 +13,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
-	"strings"
 	"sync"
 	"time"
 )
@@ -186,18 +185,6 @@ func (r *RuntimeConfig) GetRulesVersionFor(srcId int64) string {
 	}
 
 	return NoRulesVersion
-}
-
-// GetContact returns *recipient.Contact by the given username (case-insensitive).
-// Returns nil when the given username doesn't exist.
-func (r *RuntimeConfig) GetContact(username string) *recipient.Contact {
-	for _, contact := range r.Contacts {
-		if strings.EqualFold(contact.Username.String, username) {
-			return contact
-		}
-	}
-
-	return nil
 }
 
 // GetSourceFromCredentials verifies a credential pair against known Sources.

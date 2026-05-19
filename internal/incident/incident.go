@@ -2,7 +2,6 @@ package incident
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
@@ -164,8 +163,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		return err
 	}
 
-	switch ev.Type {
-	case baseEv.TypeState:
+	if ev.Type == baseEv.TypeState {
 		if !isNew {
 			if err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
 				return err
@@ -183,16 +181,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 
 		if err := i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
-			return err
-		}
-	case baseEv.TypeAcknowledgementSet:
-		if err := i.processAcknowledgementEvent(ctx, tx, ev); err != nil {
-			if errors.Is(err, errSuperfluousAckEvent) {
-				// That ack error type indicates that the acknowledgement author was already a manager, thus
-				// we can safely ignore that event and return without even committing the DB transaction.
-				return nil
-			}
-
 			return err
 		}
 	}
@@ -652,67 +640,6 @@ func (i *Incident) notifyContact(contact *recipient.Contact, ev *event.Event, ch
 	return nil
 }
 
-// errSuperfluousAckEvent is returned when the same ack author submits two successive ack set events on an incident.
-// This is error is going to be used only within this incident package.
-var errSuperfluousAckEvent = errors.New("superfluous acknowledgement set event, author is already a manager")
-
-// processAcknowledgementEvent processes the given ack event.
-// Promotes the ack author to incident.RoleManager if it's not already the case and generates a history entry.
-// Returns error on database failure.
-func (i *Incident) processAcknowledgementEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	contact := i.runtimeConfig.GetContact(ev.Username)
-	if contact == nil {
-		i.logger.Warnw("Ignoring acknowledgement event from an unknown author", zap.String("author", ev.Username))
-
-		return fmt.Errorf("unknown acknowledgment author %q", ev.Username)
-	}
-
-	recipientKey := recipient.ToKey(contact)
-	state := i.Recipients[recipientKey]
-	oldRole := RoleNone
-	newRole := RoleManager
-	if state != nil {
-		oldRole = state.Role
-
-		if oldRole == RoleManager {
-			// The user is already a manager
-			i.logger.Debugw("Ignoring acknowledgement-set event, author is already a manager", zap.String("author", ev.Username))
-			return errSuperfluousAckEvent
-		}
-	} else {
-		i.Recipients[recipientKey] = &RecipientState{Role: newRole}
-	}
-
-	i.logger.Infof("Contact %q role changed from %s to %s", contact.String(), oldRole.String(), newRole.String())
-
-	hr := &HistoryRow{
-		IncidentID:       i.Id,
-		Key:              recipientKey,
-		EventID:          types.MakeInt(ev.ID, types.TransformZeroIntToNull),
-		Type:             RecipientRoleChanged,
-		Time:             types.UnixMilli(time.Now()),
-		NewRecipientRole: newRole,
-		OldRecipientRole: oldRole,
-		Message:          types.MakeString(ev.Message, types.TransformEmptyStringToNull),
-	}
-
-	if err := hr.Sync(ctx, i.db, tx); err != nil {
-		i.logger.Errorw("Failed to add recipient role changed history", zap.String("recipient", contact.String()), zap.Error(err))
-		return err
-	}
-
-	cr := &ContactRow{IncidentID: hr.IncidentID, Key: recipientKey, Role: newRole}
-
-	stmt, _ := i.db.BuildUpsertStmt(cr)
-	_, err := tx.NamedExecContext(ctx, stmt, cr)
-	if err != nil {
-		i.logger.Errorw("Failed to upsert incident contact", zap.String("contact", contact.String()), zap.Error(err))
-		return err
-	}
-
-	return nil
-}
-
 // getRecipientsChannel returns all the configured channels of the current incident and escalation recipients.
 func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	contactChs := make(rule.ContactChannels)
@@ -728,8 +655,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	}
 
 	// Check whether all the incident recipients do have an appropriate contact channel configured.
-	// When a recipient has subscribed/managed this incident via the UI or using an ACK, fallback
-	// to the default contact channel.
+	// When a recipient has subscribed/managed this incident via the UI, fallback to the default contact channel.
 	for recipientKey, state := range i.Recipients {
 		r := i.runtimeConfig.GetRecipient(recipientKey)
 		if r == nil {
