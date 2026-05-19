@@ -166,11 +166,7 @@ func RemoveCurrent(obj *object.Object) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
 
-	currentIncident := currentIncidents[obj]
-
-	if currentIncident != nil {
-		delete(currentIncidents, obj)
-	}
+	delete(currentIncidents, obj)
 }
 
 // GetCurrentIncidents returns a map of all incidents for debugging purposes.
