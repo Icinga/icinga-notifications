@@ -153,6 +153,13 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 
 		i.logger = i.logger.With(zap.String("incident", i.String()))
+	} else {
+		// For all existing incidents, we have to reload the recipients from the database to ensure that we have the
+		// most up-to-date recipient list, since the recipients or recipients roles might have changed since users
+		// are allowed to subscribe or manage incidents from within Icinga Notifications Web.
+		if err := i.restoreRecipients(ctx); err != nil {
+			return err
+		}
 	}
 
 	if ev.Type == baseEv.TypeState {
