@@ -1,17 +1,26 @@
 # Icinga Notifications | (c) 2023 Icinga GmbH | GPLv2+
 
-FROM docker.io/library/golang AS build
-ENV CGO_ENABLED=0
-COPY . /src/icinga-notifications
-WORKDIR /src/icinga-notifications
+FROM docker.io/library/golang AS base
 
+WORKDIR /icinga-notifications
+
+COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
+	go mod download
+
+FROM base AS build
+
+# The source code is mounted read-only, so all build artifacts are written to a separate build directory,
+# which is cleaned up once the binaries have been installed into /target.
+RUN --mount=type=bind,source=.,target=.,ro \
+	--mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    make all
+    CGO_ENABLED=0 make builddir=/icinga-notifications-build all && \
+    make test && \
+    make builddir=/icinga-notifications-build DESTDIR=/target install && \
+    make builddir=/icinga-notifications-build clean
 
-RUN make DESTDIR=/target install
-
-FROM docker.io/library/alpine
+FROM docker.io/library/alpine AS runtime
 
 COPY --from=build /target /
 
