@@ -1,0 +1,28 @@
+name: Container Image
+
+on:
+  push:
+    branches:
+      - main
+  pull_request: {}
+  release:
+    types:
+      - published
+
+jobs:
+  container-image:
+    # Required by the base Container Image Action [^1].
+    # [^1]: https://github.com/Icinga/github-actions/blob/main/.github/workflows/container-image.yml#L54-L58
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    name: Build and Public Container Image
+    uses: icinga/github-actions/.github/workflows/container-image.yml@main
+    with:
+      documentation_url: https://icinga.com/docs/icinga-notifications
+    secrets:
+      dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+      dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
