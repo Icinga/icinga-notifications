@@ -208,14 +208,9 @@ func ProcessEvent(
 	runtimeConfig *config.RuntimeConfig,
 	ev *event.Event,
 ) error {
-	obj, err := object.FromEvent(ctx, db, ev)
-	if err != nil {
-		return fmt.Errorf("cannot sync event object: %w", err)
-	}
-
 	currentIncident := GetCurrent(
 		db,
-		obj,
+		object.Get(db, ev),
 		logs.GetChildLogger("incident"),
 		runtimeConfig,
 		CanOpenNewIncident(ev))

@@ -145,6 +145,11 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := i.Object.SyncFromEvent(ctx, tx, ev); err != nil {
+		i.logger.Errorw("Cannot sync event object", zap.Error(err))
+		return fmt.Errorf("cannot sync event object: %w", err)
+	}
+
 	isNew := i.StartedAt.Time().IsZero()
 	if isNew {
 		err = i.processIncidentOpenedEvent(ctx, tx, ev)
