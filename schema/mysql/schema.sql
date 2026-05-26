@@ -267,8 +267,6 @@ CREATE TABLE object (
     name text NOT NULL,
 
     url text,
-    -- mute_reason indicates whether an object is currently muted by its source, and its non-zero value is mapped to true.
-    mute_reason mediumtext,
 
     CONSTRAINT pk_object PRIMARY KEY (id),
     CONSTRAINT fk_object_source FOREIGN KEY (source_id) REFERENCES source(id)
@@ -354,6 +352,8 @@ CREATE TABLE incident (
     recovered_at bigint,
     -- NOT NULL is enforced via CHECK not to default to 'ok'
     severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg'),
+    -- mute_reason indicates whether this incident is currently muted, and its non-null value is mapped to true.
+    mute_reason mediumtext,
 
     CONSTRAINT pk_incident PRIMARY KEY (id),
     CONSTRAINT ck_incident_severity_notnull CHECK (severity IS NOT NULL),

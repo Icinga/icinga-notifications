@@ -28,6 +28,8 @@ type Incident struct {
 	StartedAt   types.UnixMilli `db:"started_at"`
 	RecoveredAt types.UnixMilli `db:"recovered_at"`
 	Severity    baseEv.Severity `db:"severity"`
+	// MuteReason indicates whether this incident is currently muted; its non-null value contains the mute reason.
+	MuteReason types.String `db:"mute_reason"`
 
 	Object *object.Object `db:"-"`
 
@@ -42,10 +44,6 @@ type Incident struct {
 	// old, timer will fire after 2h, and if the incident is already older than 2h, no future escalations can
 	// be reached solely based on the incident aging, so no more timer is necessary and timer stores nil.
 	timer *time.Timer
-
-	// isMuted indicates whether the current Object was already muted before the ongoing event.Event being processed.
-	// This prevents us from generating multiple muted histories when receiving several events that mute our Object.
-	isMuted bool
 
 	db            *database.DB
 	logger        *zap.SugaredLogger
@@ -90,6 +88,11 @@ func (i *Incident) ID() int64 {
 	return i.Id
 }
 
+// IsMuted returns whether this incident is currently muted.
+func (i *Incident) IsMuted() bool {
+	return i.MuteReason.Valid
+}
+
 func (i *Incident) HasManager() bool {
 	for recipientKey, state := range i.Recipients {
 		if i.runtimeConfig.GetRecipient(recipientKey) == nil {
@@ -127,10 +130,10 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	// These event types are not like the others used to mute an object/incident, such as DowntimeStart, which
 	// uniquely identify themselves why an incident is being muted, but are rather super generic types, and as
 	// such, we are ignoring superfluous ones that don't have any effect on that incident.
-	if i.isMuted && ev.Type == baseEv.TypeMute {
+	if i.IsMuted() && ev.Type == baseEv.TypeMute {
 		i.logger.Debugw("Ignoring superfluous mute event", zap.Object("event", ev))
 		return event.ErrSuperfluousMuteUnmuteEvent
-	} else if !i.isMuted && ev.Type == baseEv.TypeUnmute {
+	} else if !i.IsMuted() && ev.Type == baseEv.TypeUnmute {
 		i.logger.Debugw("Ignoring superfluous unmute event", zap.Object("event", ev))
 		return event.ErrSuperfluousMuteUnmuteEvent
 	}
@@ -199,9 +202,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		i.logger.Errorw("Cannot commit db transaction", zap.Error(err))
 		return err
 	}
-
-	// We've just committed the DB transaction and can safely update the incident muted flag.
-	i.isMuted = i.Object.IsMuted()
 
 	return i.notifyContacts(ctx, ev, notifications)
 }
@@ -343,45 +343,54 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 	return nil
 }
 
-// handleUnmute generates the corresponding Unmuted history if the incident is going to be unmuted now.
+// handleUnmute clears the incident mute reason and generates the corresponding Unmuted history if the incident
+// is going to be unmuted now.
 //
-// If the incident is already unmuted, or the object is still muted, this is a no-op.
-// Returns an error if fails to insert the generated history to the database.
+// If the incident is already unmuted, or the event does not unmute, this is a no-op.
+// Returns an error if fails to persist the cleared mute reason or insert the generated history to the database.
 func (i *Incident) handleUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	if !i.isMuted || i.Object.IsMuted() {
+	if !i.IsMuted() || !ev.Mute.Valid || ev.Mute.Bool {
 		return nil
 	}
 
-	i.logger.Infow("Unmuting incident", zap.String("reason", i.Object.MuteReason.String))
+	i.logger.Infow("Unmuting incident", zap.String("reason", i.MuteReason.String))
+
+	i.MuteReason = types.String{}
+	if err := i.Sync(ctx, tx); err != nil {
+		return fmt.Errorf("failed to persist incident unmute state: %w", err)
+	}
 
 	hr := &HistoryRow{
 		IncidentID: i.Id,
 		Time:       types.UnixMilli(time.Now()),
 		Type:       Unmuted,
-		// On the other hand, if an object is unmuted, its mute reason is already reset, and we can't access it anymore.
-		Message: types.MakeString(ev.MuteReason, types.TransformEmptyStringToNull),
+		Message:    types.MakeString(ev.MuteReason, types.TransformEmptyStringToNull),
 	}
 	return hr.Sync(ctx, i.db, tx)
 }
 
-// handleMute generates the corresponding Muted history if the incident is not yet muted but is going to be muted now.
+// handleMute sets the incident mute reason and generates the corresponding Muted history if the incident
+// is not yet muted but is going to be muted now.
 //
-// If the incident is already muted, or the object is not muted at all, this is a no-op.
-// Returns an error if fails to insert the generated history to the database.
+// If the incident is already muted, or the event does not mute, this is a no-op.
+// Returns an error if fails to persist the mute reason or insert the generated history to the database.
 func (i *Incident) handleMute(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	if i.isMuted || !i.Object.IsMuted() {
+	if i.IsMuted() || !ev.Mute.Valid || !ev.Mute.Bool {
 		return nil
 	}
 
-	i.logger.Infow("Muting incident", zap.String("reason", i.Object.MuteReason.String))
+	i.MuteReason = types.MakeString(ev.MuteReason, types.TransformEmptyStringToNull)
+	i.logger.Infow("Muting incident", zap.String("reason", i.MuteReason.String))
+
+	if err := i.Sync(ctx, tx); err != nil {
+		return fmt.Errorf("failed to persist incident mute state: %w", err)
+	}
 
 	hr := &HistoryRow{
 		IncidentID: i.Id,
 		Time:       types.UnixMilli(time.Now()),
 		Type:       Muted,
-		// Since the object may have already been muted with previous events before this incident even
-		// existed, we have to use the mute reason from this object and not from the ongoing event.
-		Message: i.Object.MuteReason,
+		Message:    i.MuteReason,
 	}
 	return hr.Sync(ctx, i.db, tx)
 }

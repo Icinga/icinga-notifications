@@ -121,7 +121,6 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 
 					for _, i := range incidentsById {
 						i.Object = object.GetFromCache(i.ObjectID)
-						i.isMuted = i.Object.IsMuted()
 						i.logger = logger.With(zap.String("object", i.Object.DisplayName()),
 							zap.String("incident", i.String()))
 
