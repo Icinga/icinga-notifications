@@ -64,11 +64,20 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 func (l *Listener) Run(ctx context.Context) error {
 	conf := daemon.Config().Listener
 	l.logger.Infof("Starting listener on http://%s", conf.Addr)
+
+	stdlogger, err := zap.NewStdLogAt(l.logger.Desugar(), zap.ErrorLevel)
+	if err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Addr:        conf.Addr,
 		Handler:     l,
 		ReadTimeout: 10 * time.Second,
 		IdleTimeout: 30 * time.Second,
+		// Redirect the standard library's HTTP server error log to our logger with error level because these
+		// errors are usually unexpected and indicate a problem with the server that should be investigated.
+		ErrorLog: stdlogger,
 	}
 
 	serverErr := make(chan error)
