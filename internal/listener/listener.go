@@ -21,6 +21,22 @@ import (
 	"time"
 )
 
+// responseWriter is a wrapper around [http.ResponseWriter] that captures the status code written to the response.
+//
+// Note: This struct satisfies only the [http.ResponseWriter] interface, but not the optional [http.Flusher],
+// [http.Hijacker], and [http.Pusher] interfaces. If the underlying [http.ResponseWriter] implements any of
+// these interfaces, the caller must use the [http.ResponseWriter] directly to access them.
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+// WriteHeader captures the status code and writes it to the underlying [ResponseWriter].
+func (rw *responseWriter) WriteHeader(status int) {
+	rw.status = status
+	rw.ResponseWriter.WriteHeader(status)
+}
+
 type Listener struct {
 	db            *database.DB
 	logger        *logging.Logger
@@ -50,9 +66,26 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 	return l
 }
 
+// ServeHTTP implements the [http.Handler] interface for the Listener, allowing it to be used as an actual HTTP handler.
+//
+// It just sets a Server header and then delegates the request handling to the internal [http.ServeMux].
+// The status code of the response is captured and logged together with other request information after
+// the request has been handled.
 func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	rw.Header().Set("Server", "icinga-notifications/"+internal.Version.Version)
-	l.mux.ServeHTTP(rw, req)
+	// Default to OK, so that if a handler just writes to the response without explicitly setting a status,
+	// we still log the request as successful instead of logging it with a misleading 0 status code.
+	crw := &responseWriter{ResponseWriter: rw, status: http.StatusOK}
+	l.mux.ServeHTTP(crw, req)
+
+	// We're not using a `defer` here because we don't actually care logging these info if the handler panics,
+	// so we want to let the panic propagate instead of logging a potentially misleading request log with OK status.
+	l.logger.Debugw("Handled request",
+		zap.String("method", req.Method),
+		zap.String("target_url", req.RequestURI),
+		zap.String("remote_addr", req.RemoteAddr),
+		zap.String("user_agent", req.UserAgent()),
+		zap.String("status", http.StatusText(crw.status)))
 }
 
 // Run the Listener's web server and block until the server has finished.
