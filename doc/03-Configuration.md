@@ -27,28 +27,31 @@ Only one of these two options can be used.
 For YAML configuration, these options are on the top level, not part of a dictionary.
 For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_`.
 
-### HTTP API Configuration
-
-The HTTP API listener can be used both for submission and for debugging purposes.
-
-| Option              | Description                                                          |
-|---------------------|----------------------------------------------------------------------|
-| listen              | Address to bind to, port included. (Example: `localhost:5680`)       |
-| debug-password      | Password expected via HTTP Basic Authentication for debug endpoints. |
-| debug-password_file | `debug-password` in a file.                                          |
-
 ### Icinga Web 2
 
-The `icingaweb2-url` is expected to point to the base directory of your Icinga Web 2 installation,
+The `icingaweb2_url` is expected to point to the base directory of your Icinga Web 2 installation,
 i.e., `https://example.com/icingaweb2/`, to be used for URL creation.
 
 ### Channels Directory
 
-All available Icinga Notifications channels should reside in the `channels-dir` directory.
+All available Icinga Notifications channels should reside in the `channels_dir` directory.
 For a package installation, the default will point to the correct location and must not be changed.
 
 This directory should be `/usr/libexec/icinga-notifications/channels` on systems that follow the Filesystem Hierarchy Standard.
 It may also be `/usr/lib/icinga-notifications/channels`, depending on the operating system conventions.
+
+## HTTP API Configuration
+
+Configuration of the HTTP API listener for event submission and debugging endpoints.
+
+For YAML configuration, the options are part of the `listener` section.
+For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_LISTENER_`.
+
+| Option              | Description                                                          |
+|---------------------|----------------------------------------------------------------------|
+| address             | Address to bind to, port included. (Example: `localhost:5680`)       |
+| debug_password      | Password expected via HTTP Basic Authentication for debug endpoints. |
+| debug_password_file | `debug_password` in a file.                                          |
 
 ## Database Configuration
 

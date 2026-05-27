@@ -61,6 +61,56 @@ Afterwards, restart Icinga Notifications.
 systemctl start icinga-notifications
 ```
 
+## Upgrading to Icinga Notifications v1.0
+
+This Icinga Notifications release is the first stable release of this project. It includes a database schema upgrade,
+which is required to be applied before starting the new version. Please follow the steps in the previous section to
+apply the schema upgrade. Apart from the schema upgrade, there are also some configuration changes, which are described
+in the [configuration changes section](#configuration-changes) below.
+
+### Schema
+
+Something about the schema upgrade.
+
+### Configuration Changes
+
+Starting with version v1.0, the Icinga Notifications configuration options have been restructured.
+Specifically, the `listen`, `debug-password`, and `debug-password_file` global options have been moved under a new
+`listener` section. If you are upgrading to version v1.0 from an earlier version, you will need to update your existing
+configuration file to reflect this change. Also, the `debug-password`, `debug-password_file`, and `listen` options have
+been renamed to `debug_password`, `debug_password_file`, and `address` respectively. Last but not least, the
+`icingaweb2-url` and `channels-dir` global options have been renamed to `icingaweb2_url` and `channels_dir` as well.
+
+!!! info
+
+    If you're using environment variables to set these options, you will need to update the environment variable names
+    accordingly. For example, `ICINGA_NOTIFICATIONS_LISTEN` should be changed to `ICINGA_NOTIFICATIONS_LISTENER_ADDRESS`.
+
+Please make sure to update your configuration file accordingly to ensure that Icinga Notifications continues to
+function properly after the upgrade. Below is an example of how to update your configuration file usually located
+at `/etc/icinga-notifications/config.yml`.
+
+```yaml
+# Before (pre-v1.0)
+
+listen: "localhost:5680"
+debug-password: "my-debug-password"
+#debug-password_file: "/path/to/debug-password-file"
+
+icingaweb2-url: http://localhost/icingaweb2
+channels-dir: /usr/libexec/icinga-notifications/channels
+
+# After (v1.0 and later)
+
+icingaweb2_url: http://localhost/icingaweb2
+channels_dir: /usr/libexec/icinga-notifications/channels
+
+listener:
+  address: "localhost:5680"
+  debug_password: "my-debug-password"
+  #debug_password_file: "/path/to/debug-password-file"
+```
+
 ## Upgrading to Icinga Notifications v0.2.0
 
 This Icinga Notifications release moves the Icinga event source from Icinga 2 to Icinga DB.

@@ -62,10 +62,10 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 //
 // An error is returned in every case except for a gracefully context-based shutdown without hitting the time limit.
 func (l *Listener) Run(ctx context.Context) error {
-	listenAddr := daemon.Config().Listen
-	l.logger.Infof("Starting listener on http://%s", listenAddr)
+	conf := daemon.Config().Listener
+	l.logger.Infof("Starting listener on http://%s", conf.Addr)
 	server := &http.Server{
-		Addr:        listenAddr,
+		Addr:        conf.Addr,
 		Handler:     l,
 		ReadTimeout: 10 * time.Second,
 		IdleTimeout: 30 * time.Second,
@@ -226,7 +226,7 @@ func (l *Listener) GetIncidents(w http.ResponseWriter, r *http.Request) {
 // configured or the supplied password is incorrect, it sends an error code and does not redirect the request.
 func (l *Listener) requireDebugAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expectedPassword := daemon.Config().DebugPassword
+		expectedPassword := daemon.Config().Listener.DebugPassword
 		if expectedPassword == "" {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = fmt.Fprintln(w, "config dump disabled, no debug-password set in config")
