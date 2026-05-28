@@ -254,6 +254,7 @@ func (l *Listener) GetIncidents(w http.ResponseWriter, r *http.Request) {
 			inc.Unlock()
 		}
 	}
+	w.Header().Add("Content-Type", "application/json")
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -298,6 +299,7 @@ func (l *Listener) DumpConfig(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintln(w, "GET required")
 		return
 	}
+	w.Header().Add("Content-Type", "application/json")
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -311,6 +313,7 @@ func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintln(w, "GET required")
 		return
 	}
+	w.Header().Add("Content-Type", "application/json")
 
 	incidents := incident.GetCurrentIncidents()
 	encodedIncidents := make(map[int64]json.RawMessage)
@@ -374,6 +377,7 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintln(w, "GET required")
 		return
 	}
+	w.Header().Add("Content-Type", "application/json")
 
 	l.runtimeConfig.RLock()
 	defer l.runtimeConfig.RUnlock()
