@@ -47,11 +47,27 @@ Configuration of the HTTP API listener for event submission and debugging endpoi
 For YAML configuration, the options are part of the `listener` section.
 For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_LISTENER_`.
 
-| Option              | Description                                                          |
-|---------------------|----------------------------------------------------------------------|
-| address             | Address to bind to, port included. (Example: `localhost:5680`)       |
-| debug_password      | Password expected via HTTP Basic Authentication for debug endpoints. |
-| debug_password_file | `debug_password` in a file.                                          |
+| Option              | Description                                                                       |
+|---------------------|-----------------------------------------------------------------------------------|
+| address             | Address to bind to, port included. (Example: `localhost:5680`)                    |
+| debug_password      | Password expected via HTTP Basic Authentication for debug endpoints.              |
+| debug_password_file | `debug_password` in a file.                                                       |
+| tls                 | **Optional.** Whether to require TLS for the listener. Defaults to `false`.       |
+| cert                | **Optional.** Path to TLS server certificate. Required if `tls` is set to `true`. |
+| key                 | **Optional.** Path to the TLS private key. Required if `tls` is `true`.           |
+| ca                  | **Optional.** Path to TLS CA cert to verify client certificates.                  |
+| client_auth         | **Optional.** TLS client authentication mode. Defaults to `NoClientCert`.         |
+
+!!! info
+
+    When the `client_auth` option is set to `VerifyClientCertIfGiven` or `RequireAndVerifyClientCert`, the `ca`
+    option must be set to a valid TLS CA cert to verify client certificates against. Otherwise, it's optional and
+    can be left out.
+
+    The TLS `client_auth` option can either be set to `NoClientCert` to disable client authentication,
+    `RequestClientCert` to request but not require and verify client certificates if provided, `RequireAnyClientCert`
+    to require any client certificate without verification, `VerifyClientCertIfGiven` to verify client certificates if
+    provided, or `RequireAndVerifyClientCert` to always require and verify client certificates.
 
 ## Database Configuration
 

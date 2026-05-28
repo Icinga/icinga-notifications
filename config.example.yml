@@ -20,6 +20,34 @@ listener:
   #debug_password: "put-something-secret-here"
   #debug_password_file: /run/secrets/icinga_notifications_debug_password
 
+  # Set tls to true to enable only secure connections to the Icinga Notifications HTTP listener.
+  # If enabled, the certificate and private key must be set as well. If not set, defaults to false.
+  #tls: false
+
+  # Set the path to the server's public TLS certificate or PEM-encoded multiline string.
+  # If TLS is enabled, this is required and must be set to a valid certificate.
+  #cert: /path/to/server.crt
+
+  # Set the path to the server's private TLS key or PEM-encoded multiline string.
+  # If TLS is enabled, this is required and must be set to a valid private key corresponding to the certificate.
+  #key: /path/to/server.key
+
+  # Set the path to a CA certificate or PEM-encoded multiline string to enable client certificate authentication.
+  #
+  # If the `client_auth` option is set to 'VerifyClientCertIfGiven' or 'RequireAndVerifyClientCert', this option
+  # must be set to a valid CA certificate to verify client certificates against. Otherwise, it's optional and can
+  # be left unset.
+  #ca: /path/to/ca.crt
+
+  # Set the client authentication mode for the Icinga Notifications HTTP listener.
+  #
+  # This can be set to 'NoClientCert' to disable client certificate authentication, 'RequestClientCert' to
+  # request but not require client certificates, 'RequireAnyClientCert' to require any client cert without
+  # verification, 'VerifyClientCertIfGiven' to verify client certificates if provided but not require them,
+  # or 'RequireAndVerifyClientCert' to always require and verify client certificates. If not set, defaults
+  # to 'NoClientCert'.
+  #client_auth: NoClientCert
+
 # Connection configuration for the database where Icinga Notifications stores configuration and historical data.
 # This is also the database used in Icinga Notifications Web to view and work with the data.
 database:

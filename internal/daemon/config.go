@@ -18,13 +18,20 @@ const (
 
 // Listener defines the configuration for the Icinga Notifications API listener.
 type Listener struct {
-	Addr              string `yaml:"address" env:"ADDRESS" default:"localhost:5680"`
-	DebugPassword     string `yaml:"debug_password" env:"DEBUG_PASSWORD"`
-	DebugPasswordFile string `yaml:"debug_password_file" env:"DEBUG_PASSWORD_FILE"`
+	Addr              string           `yaml:"address" env:"ADDRESS" default:"localhost:5680"`
+	DebugPassword     string           `yaml:"debug_password" env:"DEBUG_PASSWORD"`
+	DebugPasswordFile string           `yaml:"debug_password_file" env:"DEBUG_PASSWORD_FILE"`
+	TLSOptions        config.ServerTLS `yaml:",inline"`
 }
 
 func (l *Listener) Validate() error {
-	return config.LoadPasswordFile(&l.DebugPassword, l.DebugPasswordFile)
+	if err := config.LoadPasswordFile(&l.DebugPassword, l.DebugPasswordFile); err != nil {
+		return err
+	}
+	if err := l.TLSOptions.Validate(); err != nil {
+		return err
+	}
+	return nil
 }
 
 type ConfigFile struct {

@@ -96,7 +96,16 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 // An error is returned in every case except for a gracefully context-based shutdown without hitting the time limit.
 func (l *Listener) Run(ctx context.Context) error {
 	conf := daemon.Config().Listener
-	l.logger.Infof("Starting listener on http://%s", conf.Addr)
+	tlsConfig, err := conf.TLSOptions.MakeConfig()
+	if err != nil {
+		return err
+	}
+
+	var https string
+	if conf.TLSOptions.Enable {
+		https = "s"
+	}
+	l.logger.Infof("Starting listener on http%s://%s", https, conf.Addr)
 
 	stdlogger, err := zap.NewStdLogAt(l.logger.Desugar(), zap.ErrorLevel)
 	if err != nil {
@@ -106,6 +115,7 @@ func (l *Listener) Run(ctx context.Context) error {
 	server := &http.Server{
 		Addr:        conf.Addr,
 		Handler:     l,
+		TLSConfig:   tlsConfig,
 		ReadTimeout: 10 * time.Second,
 		IdleTimeout: 30 * time.Second,
 		// Redirect the standard library's HTTP server error log to our logger with error level because these
@@ -115,7 +125,14 @@ func (l *Listener) Run(ctx context.Context) error {
 
 	serverErr := make(chan error)
 	go func() {
-		serverErr <- server.ListenAndServe()
+		if conf.TLSOptions.Enable {
+			// We've already created the TLS config for the server, so we can pass empty strings
+			// for certFile and keyFile, which makes ListenAndServeTLS use the TLS config directly
+			// instead of trying to load certs from files.
+			serverErr <- server.ListenAndServeTLS("", "")
+		} else {
+			serverErr <- server.ListenAndServe()
+		}
 	}()
 
 	select {
