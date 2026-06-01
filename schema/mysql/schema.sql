@@ -219,6 +219,7 @@ CREATE TABLE source (
 
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
+    locked enum('n', 'y') NOT NULL DEFAULT 'n',  -- set to 'y' when the source is maintained by an integration
 
     CONSTRAINT uk_source_listener_username UNIQUE (listener_username),
     CONSTRAINT ck_source_listener_username_or_deleted CHECK (deleted = 'y' OR listener_username IS NOT NULL),
