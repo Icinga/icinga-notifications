@@ -45,6 +45,10 @@ func main() {
 		logger.Fatalf("Cannot connect to the database: %+v", err)
 	}
 
+	if err := internal.CheckSchema(ctx, db); err != nil {
+		logger.Fatalf("%+v", err)
+	}
+
 	channel.UpsertPlugins(ctx, conf.ChannelsDir, logs.GetChildLogger("channel"), db)
 
 	runtimeConfig := config.NewRuntimeConfig(logs, db)
