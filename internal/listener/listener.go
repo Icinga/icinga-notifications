@@ -123,7 +123,7 @@ func (l *Listener) Run(ctx context.Context) error {
 		ErrorLog: stdlogger,
 	}
 
-	serverErr := make(chan error)
+	serverErr := make(chan error, 1)
 	go func() {
 		if conf.TLSOptions.Enable {
 			// We've already created the TLS config for the server, so we can pass empty strings
