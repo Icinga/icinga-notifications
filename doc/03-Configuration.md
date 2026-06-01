@@ -27,28 +27,47 @@ Only one of these two options can be used.
 For YAML configuration, these options are on the top level, not part of a dictionary.
 For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_`.
 
-### HTTP API Configuration
-
-The HTTP API listener can be used both for submission and for debugging purposes.
-
-| Option              | Description                                                          |
-|---------------------|----------------------------------------------------------------------|
-| listen              | Address to bind to, port included. (Example: `localhost:5680`)       |
-| debug-password      | Password expected via HTTP Basic Authentication for debug endpoints. |
-| debug-password_file | `debug-password` in a file.                                          |
-
 ### Icinga Web 2
 
-The `icingaweb2-url` is expected to point to the base directory of your Icinga Web 2 installation,
+The `icingaweb2_url` is expected to point to the base directory of your Icinga Web 2 installation,
 i.e., `https://example.com/icingaweb2/`, to be used for URL creation.
 
 ### Channels Directory
 
-All available Icinga Notifications channels should reside in the `channels-dir` directory.
+All available Icinga Notifications channels should reside in the `channels_dir` directory.
 For a package installation, the default will point to the correct location and must not be changed.
 
 This directory should be `/usr/libexec/icinga-notifications/channels` on systems that follow the Filesystem Hierarchy Standard.
 It may also be `/usr/lib/icinga-notifications/channels`, depending on the operating system conventions.
+
+## HTTP API Configuration
+
+Configuration of the HTTP API listener for event submission and debugging endpoints.
+
+For YAML configuration, the options are part of the `listener` section.
+For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_LISTENER_`.
+
+| Option              | Description                                                                       |
+|---------------------|-----------------------------------------------------------------------------------|
+| address             | Address to bind to, port included. (Example: `localhost:5680`)                    |
+| debug_password      | Password expected via HTTP Basic Authentication for debug endpoints.              |
+| debug_password_file | `debug_password` in a file.                                                       |
+| tls                 | **Optional.** Whether to require TLS for the listener. Defaults to `false`.       |
+| cert                | **Optional.** Path to TLS server certificate. Required if `tls` is set to `true`. |
+| key                 | **Optional.** Path to the TLS private key. Required if `tls` is `true`.           |
+| ca                  | **Optional.** Path to TLS CA cert to verify client certificates.                  |
+| client_auth         | **Optional.** TLS client authentication mode. Defaults to `NoClientCert`.         |
+
+!!! info
+
+    When the `client_auth` option is set to `VerifyClientCertIfGiven` or `RequireAndVerifyClientCert`, the `ca`
+    option must be set to a valid TLS CA cert to verify client certificates against. Otherwise, it's optional and
+    can be left out.
+
+    The TLS `client_auth` option can either be set to `NoClientCert` to disable client authentication,
+    `RequestClientCert` to request but not require and verify client certificates if provided, `RequireAnyClientCert`
+    to require any client certificate without verification, `VerifyClientCertIfGiven` to verify client certificates if
+    provided, or `RequireAndVerifyClientCert` to always require and verify client certificates.
 
 ## Database Configuration
 

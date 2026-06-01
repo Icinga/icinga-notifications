@@ -21,6 +21,22 @@ import (
 	"time"
 )
 
+// responseWriter is a wrapper around [http.ResponseWriter] that captures the status code written to the response.
+//
+// Note: This struct satisfies only the [http.ResponseWriter] interface, but not the optional [http.Flusher],
+// [http.Hijacker], and [http.Pusher] interfaces. If the underlying [http.ResponseWriter] implements any of
+// these interfaces, the caller must use the [http.ResponseWriter] directly to access them.
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+// WriteHeader captures the status code and writes it to the underlying [ResponseWriter].
+func (rw *responseWriter) WriteHeader(status int) {
+	rw.status = status
+	rw.ResponseWriter.WriteHeader(status)
+}
+
 type Listener struct {
 	db            *database.DB
 	logger        *logging.Logger
@@ -50,9 +66,26 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 	return l
 }
 
+// ServeHTTP implements the [http.Handler] interface for the Listener, allowing it to be used as an actual HTTP handler.
+//
+// It just sets a Server header and then delegates the request handling to the internal [http.ServeMux].
+// The status code of the response is captured and logged together with other request information after
+// the request has been handled.
 func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	rw.Header().Set("Server", "icinga-notifications/"+internal.Version.Version)
-	l.mux.ServeHTTP(rw, req)
+	// Default to OK, so that if a handler just writes to the response without explicitly setting a status,
+	// we still log the request as successful instead of logging it with a misleading 0 status code.
+	crw := &responseWriter{ResponseWriter: rw, status: http.StatusOK}
+	l.mux.ServeHTTP(crw, req)
+
+	// We're not using a `defer` here because we don't actually care logging these info if the handler panics,
+	// so we want to let the panic propagate instead of logging a potentially misleading request log with OK status.
+	l.logger.Debugw("Handled request",
+		zap.String("method", req.Method),
+		zap.String("target_url", req.RequestURI),
+		zap.String("remote_addr", req.RemoteAddr),
+		zap.String("user_agent", req.UserAgent()),
+		zap.String("status", http.StatusText(crw.status)))
 }
 
 // Run the Listener's web server and block until the server has finished.
@@ -62,18 +95,44 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 //
 // An error is returned in every case except for a gracefully context-based shutdown without hitting the time limit.
 func (l *Listener) Run(ctx context.Context) error {
-	listenAddr := daemon.Config().Listen
-	l.logger.Infof("Starting listener on http://%s", listenAddr)
-	server := &http.Server{
-		Addr:        listenAddr,
-		Handler:     l,
-		ReadTimeout: 10 * time.Second,
-		IdleTimeout: 30 * time.Second,
+	conf := daemon.Config().Listener
+	tlsConfig, err := conf.TLSOptions.MakeConfig()
+	if err != nil {
+		return err
 	}
 
-	serverErr := make(chan error)
+	var https string
+	if conf.TLSOptions.Enable {
+		https = "s"
+	}
+	l.logger.Infof("Starting listener on http%s://%s", https, conf.Addr)
+
+	stdlogger, err := zap.NewStdLogAt(l.logger.Desugar(), zap.ErrorLevel)
+	if err != nil {
+		return err
+	}
+
+	server := &http.Server{
+		Addr:        conf.Addr,
+		Handler:     l,
+		TLSConfig:   tlsConfig,
+		ReadTimeout: 10 * time.Second,
+		IdleTimeout: 30 * time.Second,
+		// Redirect the standard library's HTTP server error log to our logger with error level because these
+		// errors are usually unexpected and indicate a problem with the server that should be investigated.
+		ErrorLog: stdlogger,
+	}
+
+	serverErr := make(chan error, 1)
 	go func() {
-		serverErr <- server.ListenAndServe()
+		if conf.TLSOptions.Enable {
+			// We've already created the TLS config for the server, so we can pass empty strings
+			// for certFile and keyFile, which makes ListenAndServeTLS use the TLS config directly
+			// instead of trying to load certs from files.
+			serverErr <- server.ListenAndServeTLS("", "")
+		} else {
+			serverErr <- server.ListenAndServe()
+		}
 	}()
 
 	select {
@@ -212,6 +271,7 @@ func (l *Listener) GetIncidents(w http.ResponseWriter, r *http.Request) {
 			inc.Unlock()
 		}
 	}
+	w.Header().Add("Content-Type", "application/json")
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -226,7 +286,7 @@ func (l *Listener) GetIncidents(w http.ResponseWriter, r *http.Request) {
 // configured or the supplied password is incorrect, it sends an error code and does not redirect the request.
 func (l *Listener) requireDebugAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		expectedPassword := daemon.Config().DebugPassword
+		expectedPassword := daemon.Config().Listener.DebugPassword
 		if expectedPassword == "" {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = fmt.Fprintln(w, "config dump disabled, no debug-password set in config")
@@ -256,6 +316,7 @@ func (l *Listener) DumpConfig(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintln(w, "GET required")
 		return
 	}
+	w.Header().Add("Content-Type", "application/json")
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -269,6 +330,7 @@ func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintln(w, "GET required")
 		return
 	}
+	w.Header().Add("Content-Type", "application/json")
 
 	incidents := incident.GetCurrentIncidents()
 	encodedIncidents := make(map[int64]json.RawMessage)
@@ -332,6 +394,7 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintln(w, "GET required")
 		return
 	}
+	w.Header().Add("Content-Type", "application/json")
 
 	l.runtimeConfig.RLock()
 	defer l.runtimeConfig.RUnlock()

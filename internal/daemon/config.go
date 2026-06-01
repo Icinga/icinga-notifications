@@ -16,14 +16,30 @@ const (
 	ExitFailure = 1
 )
 
+// Listener defines the configuration for the Icinga Notifications API listener.
+type Listener struct {
+	Addr              string           `yaml:"address" env:"ADDRESS" default:"localhost:5680"`
+	DebugPassword     string           `yaml:"debug_password" env:"DEBUG_PASSWORD"`
+	DebugPasswordFile string           `yaml:"debug_password_file" env:"DEBUG_PASSWORD_FILE"`
+	TLSOptions        config.ServerTLS `yaml:",inline"`
+}
+
+func (l *Listener) Validate() error {
+	if err := config.LoadPasswordFile(&l.DebugPassword, l.DebugPasswordFile); err != nil {
+		return err
+	}
+	if err := l.TLSOptions.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
 type ConfigFile struct {
-	Listen            string          `yaml:"listen" env:"LISTEN" default:"localhost:5680"`
-	DebugPassword     string          `yaml:"debug-password" env:"DEBUG_PASSWORD"`
-	DebugPasswordFile string          `yaml:"debug-password_file" env:"DEBUG_PASSWORD_FILE"`
-	ChannelsDir       string          `yaml:"channels-dir" env:"CHANNELS_DIR"`
-	Icingaweb2URL     string          `yaml:"icingaweb2-url" env:"ICINGAWEB2_URL"`
-	Database          database.Config `yaml:"database" envPrefix:"DATABASE_"`
-	Logging           logging.Config  `yaml:"logging" envPrefix:"LOGGING_"`
+	ChannelsDir   string          `yaml:"channels_dir" env:"CHANNELS_DIR"`
+	Icingaweb2URL string          `yaml:"icingaweb2_url" env:"ICINGAWEB2_URL"`
+	Listener      Listener        `yaml:"listener" envPrefix:"LISTENER_"`
+	Database      database.Config `yaml:"database" envPrefix:"DATABASE_"`
+	Logging       logging.Config  `yaml:"logging" envPrefix:"LOGGING_"`
 }
 
 // SetDefaults implements the defaults.Setter interface.
@@ -36,7 +52,7 @@ func (c *ConfigFile) SetDefaults() {
 // Validate implements the config.Validator interface.
 // Validates the entire daemon configuration on daemon startup.
 func (c *ConfigFile) Validate() error {
-	if err := config.LoadPasswordFile(&c.DebugPassword, c.DebugPasswordFile); err != nil {
+	if err := c.Listener.Validate(); err != nil {
 		return err
 	}
 	if err := c.Database.Validate(); err != nil {
