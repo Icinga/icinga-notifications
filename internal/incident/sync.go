@@ -54,18 +54,9 @@ func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, stat
 	return err
 }
 
-// AddEvent Inserts incident history record to the database and returns an error on db failure.
-func (i *Incident) AddEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	ie := &EventRow{IncidentID: i.Id, EventID: ev.ID}
-	stmt, _ := i.db.BuildInsertStmt(ie)
-	_, err := tx.NamedExecContext(ctx, stmt, ie)
-
-	return err
-}
-
 // AddRecipient adds recipient from the given *rule.Escalation to this incident.
 // Syncs also all the recipients with the database and returns an error on db failure.
-func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation, eventId int64) error {
+func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation) error {
 	newRole := RoleRecipient
 	if i.HasManager() {
 		newRole = RoleSubscriber
@@ -90,7 +81,6 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 
 				hr := &HistoryRow{
 					IncidentID:       i.Id,
-					EventID:          types.MakeInt(eventId, types.TransformZeroIntToNull),
 					Key:              cr.Key,
 					Time:             types.UnixMilli(time.Now()),
 					Type:             RecipientRoleChanged,
@@ -148,7 +138,6 @@ func (i *Incident) generateNotifications(
 			hr := &HistoryRow{
 				IncidentID:        i.Id,
 				Key:               recipient.ToKey(contact),
-				EventID:           types.MakeInt(ev.ID, types.TransformZeroIntToNull),
 				Time:              types.UnixMilli(time.Now()),
 				Type:              Notified,
 				ChannelID:         types.MakeInt(chID, types.TransformZeroIntToNull),
