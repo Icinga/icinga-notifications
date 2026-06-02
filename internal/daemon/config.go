@@ -1,14 +1,16 @@
 package daemon
 
 import (
+	"crypto/tls"
 	"errors"
+	"os"
+
 	"github.com/creasty/defaults"
 	"github.com/icinga/icinga-go-library/config"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/utils"
 	"github.com/icinga/icinga-notifications/internal"
-	"os"
 )
 
 const (
@@ -21,17 +23,31 @@ type Listener struct {
 	Addr              string           `yaml:"address" env:"ADDRESS" default:"localhost:5680"`
 	DebugPassword     string           `yaml:"debug_password" env:"DEBUG_PASSWORD"`
 	DebugPasswordFile string           `yaml:"debug_password_file" env:"DEBUG_PASSWORD_FILE"`
-	TLSOptions        config.ServerTLS `yaml:",inline"`
+	TLSOptions        config.TLSCommon `yaml:",inline"`
 }
 
 func (l *Listener) Validate() error {
 	if err := config.LoadPasswordFile(&l.DebugPassword, l.DebugPasswordFile); err != nil {
 		return err
 	}
-	if err := l.TLSOptions.Validate(); err != nil {
-		return err
+
+	if l.TLSOptions.Enable {
+		if l.TLSOptions.Ca == "" {
+			return errors.New("missing CA certificate")
+		}
+
+		tlsOpts := &config.ServerTLS{TLSCommon: l.TLSOptions, ClientAuth: config.TlsClientAuthType(tls.VerifyClientCertIfGiven)}
+		if err := tlsOpts.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// GetTlsConfig returns a *[tls.Config] based on the TLS options specified in the Listener configuration.
+func (l *Listener) GetTlsConfig() (*tls.Config, error) {
+	tlsOpts := &config.ServerTLS{TLSCommon: l.TLSOptions, ClientAuth: config.TlsClientAuthType(tls.VerifyClientCertIfGiven)}
+	return tlsOpts.MakeConfig()
 }
 
 type ConfigFile struct {

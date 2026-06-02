@@ -96,7 +96,7 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 // An error is returned in every case except for a gracefully context-based shutdown without hitting the time limit.
 func (l *Listener) Run(ctx context.Context) error {
 	conf := daemon.Config().Listener
-	tlsConfig, err := conf.TLSOptions.MakeConfig()
+	tlsConfig, err := conf.GetTlsConfig()
 	if err != nil {
 		return err
 	}
