@@ -3,6 +3,8 @@ package daemon
 import (
 	"crypto/tls"
 	"errors"
+	"fmt"
+	"net/url"
 	"os"
 
 	"github.com/creasty/defaults"
@@ -56,6 +58,12 @@ type ConfigFile struct {
 	Listener      Listener        `yaml:"listener" envPrefix:"LISTENER_"`
 	Database      database.Config `yaml:"database" envPrefix:"DATABASE_"`
 	Logging       logging.Config  `yaml:"logging" envPrefix:"LOGGING_"`
+
+	// IcingaWeb2UrlParsed holds the parsed Icinga Web 2 URL after validation of the config file.
+	//
+	// This field is not part of the YAML config and is only populated after successful validation.
+	// The resulting URL always ends with a trailing slash, making it easier to resolve relative paths against it.
+	IcingaWeb2UrlParsed *url.URL
 }
 
 // SetDefaults implements the defaults.Setter interface.
@@ -77,6 +85,23 @@ func (c *ConfigFile) Validate() error {
 	if err := c.Logging.Validate(); err != nil {
 		return err
 	}
+
+	if c.Icingaweb2URL == "" {
+		return errors.New("icingaweb2_url must be set")
+	}
+
+	parsedUrl, err := url.Parse(c.Icingaweb2URL)
+	if err != nil {
+		return fmt.Errorf("invalid icingaweb2_url: %w", err)
+	}
+
+	if !parsedUrl.IsAbs() {
+		return errors.New("icingaweb2_url must be an absolute URL")
+	}
+
+	parsedUrl.RawQuery = "" // Ignore query params if provided, as they are not relevant for resolving event URLs
+	// Ensure the URL ends with a trailing slash for easier resolution of relative paths.
+	c.IcingaWeb2UrlParsed = parsedUrl.JoinPath("/")
 
 	return nil
 }

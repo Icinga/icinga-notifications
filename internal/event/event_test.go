@@ -2,6 +2,7 @@ package event
 
 import (
 	"encoding/json"
+	"net/url"
 	"testing"
 
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
@@ -12,6 +13,55 @@ import (
 
 func TestEvent(t *testing.T) {
 	t.Parallel()
+
+	t.Run("CompleteURL", func(t *testing.T) {
+		t.Parallel()
+
+		baseUrl, err := url.Parse("https://example.com/icingaweb")
+		require.NoError(t, err)
+
+		testCases := []struct {
+			name     string
+			eventURL string
+			expected string
+		}{
+			{
+				name:     "Absolute URL",
+				eventURL: "https://example.org/path/123",
+				expected: "https://example.org/path/123",
+			},
+			{
+				name:     "Relative URL With Leading Slash",
+				eventURL: "/icingadb/host?name=testhost",
+				expected: "https://example.com/icingaweb/icingadb/host?name=testhost",
+			},
+			{
+				name:     "Relative URL Without Leading slash",
+				eventURL: "icingadb/service?host.name=testhost&name=testservice",
+				expected: "https://example.com/icingaweb/icingadb/service?host.name=testhost&name=testservice",
+			},
+			{
+				name:     "Invalid URL",
+				eventURL: "http://[invalid-url",
+				expected: "http://[invalid-url",
+			},
+			{
+				name:     "Empty URL",
+				eventURL: "",
+				expected: "",
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				ev := &Event{Event: baseEv.Event{URL: tc.eventURL}}
+				ev.CompleteURL(baseUrl)
+				assert.Equal(t, tc.expected, ev.URL)
+			})
+		}
+	})
 
 	t.Run("ExtractMissingRelations", func(t *testing.T) {
 		t.Parallel()
