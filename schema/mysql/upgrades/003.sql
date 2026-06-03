@@ -18,8 +18,7 @@ BEGIN
         SET error_message = CONCAT('Schema version mismatch: expected ', expected_version, ', got ', actual_version, '. Please apply all previous upgrade scripts in order before applying this one.');
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = error_message;
     END IF;
-END;
-//
+END //
 DELIMITER ;
 
 CREATE TABLE notifications_schema (
