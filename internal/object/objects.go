@@ -26,16 +26,6 @@ func DeleteFromCache(id types.Binary) {
 	delete(cache, id.String())
 }
 
-// RestoreMutedObjects restores all muted objects and their extra / ID tags from the database.
-// Note, this function only retrieves muted objects without non-recovered incident.
-//
-// Returns an error on any database failure and panics when trying to cache an object that's already in the cache store.
-func RestoreMutedObjects(ctx context.Context, db *database.DB) error {
-	query := db.BuildSelectStmt(new(Object), new(Object)) + " WHERE mute_reason IS NOT NULL " +
-		"AND NOT EXISTS((SELECT 1 FROM incident WHERE object_id = object.id AND recovered_at IS NULL))"
-	return restoreObjectsFromQuery(ctx, db, query)
-}
-
 // RestoreObjects restores all objects and their (extra)tags matching the given IDs from the database.
 // Returns error on any database failures and panics when trying to cache an object that's already in the cache store.
 func RestoreObjects(ctx context.Context, db *database.DB, ids []types.Binary) error {

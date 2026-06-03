@@ -3,6 +3,8 @@ package incident
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
@@ -11,7 +13,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
-	"time"
 )
 
 // Upsert implements the contracts.Upserter interface.
@@ -19,7 +20,8 @@ func (i *Incident) Upsert() interface{} {
 	return &struct {
 		Severity    baseEv.Severity `db:"severity"`
 		RecoveredAt types.UnixMilli `db:"recovered_at"`
-	}{Severity: i.Severity, RecoveredAt: i.RecoveredAt}
+		MuteReason  types.String    `db:"mute_reason"`
+	}{Severity: i.Severity, RecoveredAt: i.RecoveredAt, MuteReason: i.MuteReason}
 }
 
 // Sync initiates an *incident.IncidentRow from the current incident state and syncs it with the database.
@@ -126,13 +128,16 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 // generateNotifications generates incident notification histories of the given recipients.
 //
 // This function will just insert NotificationStateSuppressed incident histories and return an empty slice if
-// the current Object is muted, otherwise a slice of pending *NotificationEntry(ies) that can be used to update
+// the incident is muted, otherwise a slice of pending *NotificationEntry(ies) that can be used to update
 // the corresponding histories after the actual notifications have been sent out.
+//
+// Note: handleUnmute clears i.MuteReason before this function runs, and handleMute sets it after, so a single
+// i.IsMuted() check captures the correct transitional state for mute/unmute and steady-state events alike.
 func (i *Incident) generateNotifications(
 	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
 ) ([]*NotificationEntry, error) {
 	var notifications []*NotificationEntry
-	suppress := i.isMuted && i.Object.IsMuted()
+	suppress := i.IsMuted()
 	for contact, channels := range contactChannels {
 		for chID := range channels {
 			hr := &HistoryRow{
@@ -151,8 +156,7 @@ func (i *Incident) generateNotifications(
 			if err := hr.Sync(ctx, i.db, tx); err != nil {
 				i.logger.Errorw("Failed to insert incident notification history",
 					zap.String("contact", contact.FullName),
-					zap.Bool("incident_muted", i.isMuted),
-					zap.Bool("object_muted", i.Object.IsMuted()),
+					zap.Bool("incident_muted", i.IsMuted()),
 					zap.Error(err))
 				return nil, err
 			}
