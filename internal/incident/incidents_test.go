@@ -159,10 +159,7 @@ func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID i
 		},
 	}
 
-	o, err := object.FromEvent(ctx, db, ev)
-	require.NoError(t, err)
-
-	i := NewIncident(db, o, &config.RuntimeConfig{}, nil)
+	i := NewIncident(db, object.Get(db, ev), &config.RuntimeConfig{}, nil)
 	i.StartedAt = types.UnixMilli(time.Now().Add(-2 * time.Hour).Truncate(time.Second))
 	i.Severity = baseEv.SeverityCrit
 	if recovered {
@@ -170,10 +167,12 @@ func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID i
 		i.RecoveredAt = types.UnixMilli(time.Now())
 	}
 
-	tx, err := db.BeginTxx(ctx, nil)
-	require.NoError(t, err, "starting a transaction should not fail")
-	require.NoError(t, i.Sync(ctx, tx), "failed to insert incident")
-	require.NoError(t, tx.Commit(), "committing a transaction should not fail")
+	require.NoError(t, db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
+		if err := i.Object.SyncFromEvent(ctx, tx, ev); err != nil {
+			return err
+		}
+		return i.Sync(ctx, tx)
+	}))
 
 	return i
 }

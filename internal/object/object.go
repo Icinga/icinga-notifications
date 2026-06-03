@@ -8,10 +8,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
-	"sort"
+	"github.com/jmoiron/sqlx"
 )
 
 type Object struct {
@@ -54,57 +56,30 @@ func ClearCache() {
 	cache = make(map[string]*Object)
 }
 
-// FromEvent creates an object from the provided event tags if it's not in the cache
-// and syncs all object related types with the database.
-// Returns error on any database failure
-func FromEvent(ctx context.Context, db *database.DB, ev *event.Event) (*Object, error) {
-	id := ID(ev.SourceId, ev.Tags)
+// SyncFromEvent syncs the current object with the given event.
+//
+// It updates all relevant fields and tags of the object and saves it to the database within the given transaction.
+// The current object is updated with the new values only if the database update is successful, otherwise it remains
+// unchanged.
+//
+// Returns error on any database failure.
+func (o *Object) SyncFromEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
+	newObject := *o
+	newObject.Name = ev.Name
+	newObject.URL = types.MakeString(ev.URL, types.TransformEmptyStringToNull)
 
-	cacheMu.Lock()
-	defer cacheMu.Unlock()
-
-	newObject := new(Object)
-	object, objectExists := cache[id.String()]
-	if !objectExists {
-		newObject = New(db, ev)
-		newObject.ID = id
-	} else {
-		*newObject = *object
-
-		newObject.Name = ev.Name
-		newObject.URL = types.MakeString(ev.URL, types.TransformEmptyStringToNull)
+	stmt, _ := o.db.BuildUpsertStmt(o)
+	if _, err := tx.NamedExecContext(ctx, stmt, &newObject); err != nil {
+		return fmt.Errorf("failed to insert object: %w", err)
 	}
 
-	tx, err := db.BeginTxx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to start object database transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	stmt, _ := db.BuildUpsertStmt(&Object{})
-	_, err = tx.NamedExecContext(ctx, stmt, newObject)
-	if err != nil {
-		return nil, fmt.Errorf("failed to insert object: %w", err)
+	stmt, _ = o.db.BuildUpsertStmt(new(IdTagRow))
+	if _, err := tx.NamedExecContext(ctx, stmt, mapToIdTagRows(newObject.ID, ev.Tags)); err != nil {
+		return fmt.Errorf("failed to upsert object id tags: %w", err)
 	}
 
-	stmt, _ = db.BuildUpsertStmt(&IdTagRow{})
-	_, err = tx.NamedExecContext(ctx, stmt, mapToIdTagRows(newObject.ID, ev.Tags))
-	if err != nil {
-		return nil, fmt.Errorf("failed to upsert object id tags: %w", err)
-	}
-
-	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("cannot commit object database transaction: %w", err)
-	}
-
-	if !objectExists {
-		cache[id.String()] = newObject
-		return newObject, nil
-	}
-
-	*object = *newObject
-
-	return object, nil
+	*o = newObject
+	return nil
 }
 
 func (o *Object) DisplayName() string {

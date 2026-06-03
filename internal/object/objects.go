@@ -3,14 +3,16 @@ package object
 import (
 	"context"
 	"fmt"
+	"sync"
+
 	"github.com/icinga/icinga-go-library/com"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/types"
+	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
-	"sync"
 )
 
 var (
@@ -24,6 +26,24 @@ func DeleteFromCache(id types.Binary) {
 	defer cacheMu.Unlock()
 
 	delete(cache, id.String())
+}
+
+// Get either fetches an object from cache or creates a new one, adds it to the cache and returns it.
+func Get(db *database.DB, ev *event.Event) *Object {
+	id := ID(ev.SourceId, ev.Tags)
+
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+
+	if object, ok := cache[id.String()]; ok {
+		return object
+	}
+
+	object := New(db, ev)
+	object.ID = id
+	cache[id.String()] = object
+
+	return object
 }
 
 // RestoreObjects restores all objects and their (extra)tags matching the given IDs from the database.

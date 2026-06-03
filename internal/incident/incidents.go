@@ -146,10 +146,7 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 	return g.Wait()
 }
 
-func GetCurrent(
-	ctx context.Context, db *database.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig,
-	create bool,
-) (*Incident, error) {
+func GetCurrent(db *database.DB, obj *object.Object, logger *logging.Logger, runtimeConfig *config.RuntimeConfig, create bool) *Incident {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
 
@@ -162,29 +159,14 @@ func GetCurrent(
 		currentIncidents[obj] = currentIncident
 	}
 
-	if currentIncident != nil {
-		currentIncident.Lock()
-		defer currentIncident.Unlock()
-
-		if !currentIncident.StartedAt.Time().IsZero() {
-			if err := currentIncident.restoreRecipients(ctx); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	return currentIncident, nil
+	return currentIncident
 }
 
 func RemoveCurrent(obj *object.Object) {
 	currentIncidentsMu.Lock()
 	defer currentIncidentsMu.Unlock()
 
-	currentIncident := currentIncidents[obj]
-
-	if currentIncident != nil {
-		delete(currentIncidents, obj)
-	}
+	delete(currentIncidents, obj)
 }
 
 // GetCurrentIncidents returns a map of all incidents for debugging purposes.
@@ -226,21 +208,12 @@ func ProcessEvent(
 	runtimeConfig *config.RuntimeConfig,
 	ev *event.Event,
 ) error {
-	obj, err := object.FromEvent(ctx, db, ev)
-	if err != nil {
-		return fmt.Errorf("cannot sync event object: %w", err)
-	}
-
-	currentIncident, err := GetCurrent(
-		ctx,
+	currentIncident := GetCurrent(
 		db,
-		obj,
+		object.Get(db, ev),
 		logs.GetChildLogger("incident"),
 		runtimeConfig,
 		CanOpenNewIncident(ev))
-	if err != nil {
-		return fmt.Errorf("cannot get current incident for %q: %w", obj.DisplayName(), err)
-	}
 
 	if currentIncident == nil {
 		if ev.Severity == baseEv.SeverityOK {
