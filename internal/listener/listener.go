@@ -197,7 +197,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ev.CompleteURL(daemon.Config().Icingaweb2URL)
+	ev.CompleteURL(daemon.Config().IcingaWeb2UrlParsed)
 	ev.Time = time.Now()
 	ev.SourceId = src.ID
 	if ev.Type == baseEv.TypeUnknown {

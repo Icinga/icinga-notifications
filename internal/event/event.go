@@ -43,19 +43,25 @@ type Event struct {
 	evaluatedRelations map[string]jsonpath.NodeList
 }
 
-// CompleteURL prefixes the URL with the given Icinga Web 2 base URL unless it already carries a URL or is empty.
-func (e *Event) CompleteURL(icingaWebBaseUrl string) {
+// CompleteURL returns the complete URL for this event by combining the Icinga Web 2 URL with the event's own url field.
+//
+// If the event's url field is an absolute URL, is empty, or it can't be URL parsed, then this method is a no-op.
+// Otherwise, it is resolved against the provided Icinga Web 2 URL to form a complete URL.
+func (e *Event) CompleteURL(icingaWebBaseUrl *url.URL) {
 	if e.URL == "" {
 		return
 	}
 
-	if !strings.HasSuffix(icingaWebBaseUrl, "/") {
-		icingaWebBaseUrl += "/"
+	u, err := url.Parse(strings.TrimLeft(e.URL, "/"))
+	if err != nil {
+		return // leave it as is if it cannot be parsed as a URL
 	}
 
-	u, err := url.Parse(e.URL)
-	if err != nil || u.Scheme == "" {
-		e.URL = icingaWebBaseUrl + e.URL
+	if !u.IsAbs() {
+		// Actually, the Icinga Web 2 base url should always contain the trailing slash, but just in
+		// case it doesn't, make sure to add it before resolving the event URL against it to avoid
+		// losing the last path segment of the base url.
+		e.URL = icingaWebBaseUrl.JoinPath("/").ResolveReference(u).String()
 	}
 }
 
