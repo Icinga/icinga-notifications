@@ -110,6 +110,10 @@ func (e *Event) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 // field and are not part of the CompleteRelations field. For filter columns that do have matching
 // nodes, it caches the evaluated nodes for potential later use during rules evaluation.
 func (e *Event) ExtractMissingRelations(filterColumns ...[]string) []string {
+	if len(filterColumns) == 0 {
+		return nil
+	}
+
 	if e.evaluatedRelations == nil {
 		e.evaluatedRelations = make(map[string]jsonpath.NodeList)
 	}
