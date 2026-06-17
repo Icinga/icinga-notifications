@@ -64,8 +64,7 @@ func ClearCache() {
 //
 // Returns error on any database failure.
 func (o *Object) SyncFromEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
-	newObject := *o
-	newObject.Name = ev.Name
+	newObject := Object{ID: o.ID, SourceID: o.SourceID, Name: ev.Name}
 	newObject.URL = types.MakeString(ev.URL, types.TransformEmptyStringToNull)
 
 	stmt, _ := o.db.BuildUpsertStmt(o)
@@ -78,7 +77,8 @@ func (o *Object) SyncFromEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event
 		return fmt.Errorf("failed to upsert object id tags: %w", err)
 	}
 
-	*o = newObject
+	o.Name = newObject.Name
+	o.URL = newObject.URL
 	return nil
 }
 
