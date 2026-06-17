@@ -21,6 +21,7 @@ func (i *Incident) Upsert() interface{} {
 		Severity    baseEv.Severity `db:"severity"`
 		RecoveredAt types.UnixMilli `db:"recovered_at"`
 		MuteReason  types.String    `db:"mute_reason"`
+		Message     types.String    `db:"message"`
 	}{Severity: i.Severity, RecoveredAt: i.RecoveredAt, MuteReason: i.MuteReason}
 }
 

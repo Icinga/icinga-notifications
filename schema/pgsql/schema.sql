@@ -381,6 +381,7 @@ CREATE TABLE incident (
     severity severity NOT NULL,
     -- mute_reason indicates whether this incident is currently muted, and its non-null value is mapped to true.
     mute_reason text,
+    message text, -- contains the latest plugin output of the respective object.
 
     CONSTRAINT pk_incident PRIMARY KEY (id),
     CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id)
