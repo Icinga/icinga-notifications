@@ -184,6 +184,11 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		// If we have managed to trigger any new escalations, we must trigger notifications as well,
 		// even if the event itself doesn't request it.
 		triggerNotifications = triggerNotifications || len(escalations) > 0
+
+		if !isNew {
+			// Even if the severity didn't change, we want to update the message nonetheless.
+			i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
+		}
 	}
 
 	// The unmute history entry, on the other hand, must be inserted first, so that the notifications generated
@@ -210,9 +215,14 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 
 	if ev.CloseIncident() {
-		if err := i.Close(ctx, tx); err != nil {
+		if err := i.Close(ctx, tx, false); err != nil {
 			return err
 		}
+	}
+
+	if err := i.Sync(ctx, tx); err != nil {
+		i.logger.Errorw("Failed to update incident", zap.Error(err))
+		return err
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -283,7 +293,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 //
 // If the incident is already recovered, this is a no-op. Returns an error if fails
 // to persist the recovery time or insert the generated history to the database.
-func (i *Incident) Close(ctx context.Context, tx *sqlx.Tx) error {
+func (i *Incident) Close(ctx context.Context, tx *sqlx.Tx, persist bool) error {
 	if i.RecoveredAt.Time().IsZero() {
 		i.RecoveredAt = types.UnixMilli(time.Now())
 		i.logger.Info("Received request to close the incident, marking it as recovered")
@@ -304,7 +314,9 @@ func (i *Incident) Close(ctx context.Context, tx *sqlx.Tx) error {
 		if i.timer != nil {
 			i.timer.Stop()
 		}
-		return i.Sync(ctx, tx)
+		if persist {
+			return i.Sync(ctx, tx)
+		}
 	}
 	return nil
 }
@@ -343,13 +355,6 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		}
 
 		i.Severity = ev.Severity
-	}
-
-	// Even if the severity didn't change, we want to update the message nonetheless.
-	i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
-	if err := i.Sync(ctx, tx); err != nil {
-		i.logger.Errorw("Failed to update incident", zap.Error(err))
-		return false, err
 	}
 
 	return sevChanged, nil
@@ -395,9 +400,6 @@ func (i *Incident) handleUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.Even
 	i.logger.Infow("Unmuting incident", zap.String("reason", i.MuteReason.String))
 
 	i.MuteReason = types.String{}
-	if err := i.Sync(ctx, tx); err != nil {
-		return fmt.Errorf("failed to persist incident unmute state: %w", err)
-	}
 
 	hr := &HistoryRow{
 		IncidentID: i.Id,
@@ -420,10 +422,6 @@ func (i *Incident) handleMute(ctx context.Context, tx *sqlx.Tx, ev *event.Event)
 
 	i.MuteReason = types.MakeString(ev.MutedReason, types.TransformEmptyStringToNull)
 	i.logger.Infow("Muting incident", zap.String("reason", i.MuteReason.String))
-
-	if err := i.Sync(ctx, tx); err != nil {
-		return fmt.Errorf("failed to persist incident mute state: %w", err)
-	}
 
 	hr := &HistoryRow{
 		IncidentID: i.Id,
