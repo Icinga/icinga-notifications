@@ -11,4 +11,5 @@ UPDATE incident_contact SET changed_at = ih.time
     COALESCE(incident_contact.contactgroup_id, 0),
     COALESCE(incident_contact.schedule_id, 0)
   );
+UPDATE incident_contact SET changed_at = EXTRACT(EPOCH from NOW()) * 1000 WHERE changed_at IS NULL;
 ALTER TABLE incident_contact ALTER COLUMN changed_at SET NOT NULL;

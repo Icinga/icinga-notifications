@@ -7,4 +7,5 @@ UPDATE incident_contact
     AND COALESCE(ih.schedule_id, 0) = COALESCE(incident_contact.schedule_id, 0)
   )
   SET incident_contact.changed_at = ih.time;
+UPDATE incident_contact SET changed_at = UNIX_TIMESTAMP() * 1000 WHERE changed_at IS NULL;
 ALTER TABLE incident_contact MODIFY COLUMN changed_at bigint NOT NULL;
