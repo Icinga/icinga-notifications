@@ -394,6 +394,7 @@ CREATE TABLE incident_contact (
     contactgroup_id bigint,
     schedule_id bigint,
     role incident_contact_role NOT NULL,
+    changed_at bigint NOT NULL, -- used only by Notifications Web to show when the recipients role was last changed.
 
     -- Keep in sync with internal/incident/db_types.go!
     CONSTRAINT uk_incident_contact_incident_id_contact_id UNIQUE (incident_id, contact_id),

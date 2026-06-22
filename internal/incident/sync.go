@@ -66,7 +66,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 
 	for _, escalationRecipient := range escalation.Recipients {
 		r := escalationRecipient.Recipient
-		cr := &ContactRow{IncidentID: i.Id, Role: newRole}
+		cr := &ContactRow{IncidentID: i.Id, Role: newRole, ChangedAt: types.UnixMilli(time.Now())}
 
 		recipientKey := recipient.ToKey(r)
 		cr.Key = recipientKey

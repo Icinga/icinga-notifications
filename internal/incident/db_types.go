@@ -2,6 +2,7 @@ package incident
 
 import (
 	"context"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
@@ -13,7 +14,8 @@ import (
 type ContactRow struct {
 	IncidentID    int64 `db:"incident_id"`
 	recipient.Key `db:",inline"`
-	Role          ContactRole `db:"role"`
+	Role          ContactRole     `db:"role"`
+	ChangedAt     types.UnixMilli `db:"changed_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.
@@ -24,8 +26,9 @@ func (c *ContactRow) TableName() string {
 // Upsert implements the contracts.Upserter interface.
 func (c *ContactRow) Upsert() interface{} {
 	return &struct {
-		Role ContactRole `db:"role"`
-	}{Role: c.Role}
+		Role      ContactRole     `db:"role"`
+		ChangedAt types.UnixMilli `db:"changed_at"`
+	}{}
 }
 
 // PgsqlOnConflictConstraint implements the database.PgsqlOnConflictConstrainter interface.
