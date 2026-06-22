@@ -386,6 +386,8 @@ CREATE TABLE incident (
     CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id)
 );
 
+CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
+
 CREATE TYPE incident_contact_role AS ENUM ('recipient', 'subscriber', 'manager');
 
 CREATE TABLE incident_contact (

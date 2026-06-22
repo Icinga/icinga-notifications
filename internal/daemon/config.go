@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/creasty/defaults"
 	"github.com/icinga/icinga-go-library/config"
@@ -57,6 +58,7 @@ type ConfigFile struct {
 	Icingaweb2URL string          `yaml:"icingaweb2_url" env:"ICINGAWEB2_URL"`
 	Listener      Listener        `yaml:"listener" envPrefix:"LISTENER_"`
 	Database      database.Config `yaml:"database" envPrefix:"DATABASE_"`
+	Retention     Retention       `yaml:"retention" envPrefix:"RETENTION_"`
 	Logging       logging.Config  `yaml:"logging" envPrefix:"LOGGING_"`
 
 	// IcingaWeb2UrlParsed holds the parsed Icinga Web 2 URL after validation of the config file.
@@ -85,6 +87,9 @@ func (c *ConfigFile) Validate() error {
 	if err := c.Logging.Validate(); err != nil {
 		return err
 	}
+	if err := c.Retention.Validate(); err != nil {
+		return err
+	}
 
 	if c.Icingaweb2URL == "" {
 		return errors.New("icingaweb2_url must be set")
@@ -106,10 +111,51 @@ func (c *ConfigFile) Validate() error {
 	return nil
 }
 
+// RetentionOpts defines additional overrides for retention periods of specific components.
+//
+// Currently, we only have a single component (incidents), but this leaves room for future expansion
+// without breaking the config structure. The fields here must be pointers to distinguish between
+// "not set" and "set to zero" (i.e. no retention) when overriding the default retention period.
+type RetentionOpts struct {
+	Incident *time.Duration `yaml:"incident" env:"INCIDENT"`
+}
+
+// Validate implements the [config.Validator] interface.
+func (r *RetentionOpts) Validate() error {
+	if r.Incident != nil && *r.Incident < 0 {
+		return errors.New("invalid retention period for incidents")
+	}
+	return nil
+}
+
+// Retention defines the retention policy for Icinga Notifications history cleanups.
+type Retention struct {
+	Period    time.Duration `yaml:"period" env:"PERIOD"`
+	Interval  time.Duration `yaml:"interval" env:"INTERVAL" default:"1h"`
+	BatchSize uint64        `yaml:"batch_size" env:"BATCH_SIZE" default:"5000"`
+	Options   RetentionOpts `yaml:"options" envPrefix:"OPTIONS_"`
+}
+
+// Validate implements the [config.Validator] interface.
+func (r *Retention) Validate() error {
+	if r.Period < 0 {
+		return errors.New("invalid retention period")
+	}
+	if r.Interval <= 0 {
+		return errors.New("interval must be greater than zero")
+	}
+	if r.BatchSize == 0 {
+		return errors.New("'batch_size' must be greater than zero")
+	}
+	return r.Options.Validate()
+}
+
 // Assert interface compliance.
 var (
 	_ defaults.Setter  = (*ConfigFile)(nil)
 	_ config.Validator = (*ConfigFile)(nil)
+	_ config.Validator = (*Listener)(nil)
+	_ config.Validator = (*Retention)(nil)
 )
 
 // Flags defines the CLI flags supported by Icinga Notifications.
