@@ -2,6 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/utils"
@@ -11,10 +16,8 @@ import (
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
+	"github.com/icinga/icinga-notifications/internal/retention"
 	"github.com/okzk/sdnotify"
-	"os/signal"
-	"syscall"
-	"time"
 )
 
 func main() {
@@ -61,6 +64,13 @@ func main() {
 	if err != nil {
 		logger.Fatalf("Cannot load incidents from database: %+v", err)
 	}
+
+	ret := retention.New(db, logs.GetChildLogger("retention"))
+	go func() {
+		if err := ret.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Fatalf("Retention has finished with an error: %+v", err)
+		}
+	}()
 
 	// When Icinga Notifications is started by systemd, we've to notify systemd that we're ready.
 	_ = sdnotify.Ready()
