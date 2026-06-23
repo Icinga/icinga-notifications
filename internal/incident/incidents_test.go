@@ -31,7 +31,7 @@ func TestLoadOpenIncidents(t *testing.T) {
 	source.ChangedAt = types.UnixMilli(time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC))
 	source.Deleted = types.Bool{Bool: false, Valid: true}
 
-	err := db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
+	err := db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) error {
 		id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, source, "id"), source)
 		require.NoError(t, err, "populating source table should not fail")
 
@@ -167,7 +167,7 @@ func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID i
 		i.RecoveredAt = types.UnixMilli(time.Now())
 	}
 
-	require.NoError(t, db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
+	require.NoError(t, db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) error {
 		if err := i.Object.SyncFromEvent(ctx, tx, ev); err != nil {
 			return err
 		}

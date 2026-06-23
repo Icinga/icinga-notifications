@@ -249,7 +249,7 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 
 	var notifications []*NotificationEntry
 	ctx := context.Background()
-	err = i.db.ExecTx(ctx, func(ctx context.Context, tx *sqlx.Tx) error {
+	err = i.db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) error {
 		if err = i.triggerEscalations(ctx, tx, ev, escalations); err != nil {
 			return err
 		}
