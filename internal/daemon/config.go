@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 
 	"github.com/creasty/defaults"
 	"github.com/icinga/icinga-go-library/config"
@@ -22,7 +23,10 @@ const (
 
 // Listener defines the configuration for the Icinga Notifications API listener.
 type Listener struct {
-	Addr              string           `yaml:"address" env:"ADDRESS" default:"localhost:5680"`
+	Addr              string           `yaml:"address" env:"ADDRESS"`
+	Socket            string           `yaml:"socket" env:"SOCKET"`
+	SocketMode        string           `yaml:"socket_mode" env:"SOCKET_MODE" default:"0600"`
+	SocketGroup       string           `yaml:"socket_group" env:"SOCKET_GROUP"`
 	DebugPassword     string           `yaml:"debug_password" env:"DEBUG_PASSWORD"`
 	DebugPasswordFile string           `yaml:"debug_password_file" env:"DEBUG_PASSWORD_FILE"`
 	TLSOptions        config.TLSCommon `yaml:",inline"`
@@ -31,6 +35,19 @@ type Listener struct {
 func (l *Listener) Validate() error {
 	if err := config.LoadPasswordFile(&l.DebugPassword, l.DebugPasswordFile); err != nil {
 		return err
+	}
+
+	if l.Socket != "" {
+		if _, err := strconv.ParseUint(l.SocketMode, 8, 32); err != nil {
+			return fmt.Errorf(
+				"invalid listen-unix-mode %q: expected an octal value like 0660: %w",
+				l.SocketMode,
+				err,
+			)
+		}
+	} else if l.Addr == "" {
+		// Only set the default Address for TCP server if no socket path is provided
+		l.Addr = "localhost:5680"
 	}
 
 	if l.TLSOptions.Enable {

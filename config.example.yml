@@ -14,6 +14,20 @@ listener:
   # Defaults to "localhost:5680".
   #address: "localhost:5680"
 
+  # Path to a Unix domain socket for local sources to submit events.
+  # When set, sources connecting via this socket identify themselves by username only; no password is required.
+  # This transport is recommended when the source and daemon run on the same host. Leave unset (the default) to disable.
+  #socket: "/run/icinga/icinga-notifications.sock"
+
+  # Permission bits for the Unix socket file, given as an octal string. Defaults to "0600".
+  # With "0660", the socket's group (see socket_group) gets access; the connecting user must be a member of that group.
+  # Note: granting access to the socket grants event-submission rights for all registered sources.
+  #socket_mode: "0600"
+
+  # OS group to assign to the Unix socket file. When socket_mode grants group access (e.g. "0660"),
+  # this controls which group gets that access. Defaults to the primary group of the daemon process.
+  #socket_group: "icinga-notifications"
+
   # Set credentials for all the HTTP debug endpoints. This can be set either directly or read from a file.
   # Setting both options is not allowed and will result in a configuration error. If both options are left
   # unset, the debug endpoints will be disabled and won't be accessible at all.

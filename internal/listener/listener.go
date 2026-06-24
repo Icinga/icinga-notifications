@@ -6,6 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"net"
+	"net/http"
+	"os"
+	"os/user"
+	"strconv"
+	"time"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/notifications"
@@ -17,8 +25,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"go.uber.org/zap"
-	"net/http"
-	"time"
 )
 
 // responseWriter is a wrapper around [http.ResponseWriter] that captures the status code written to the response.
@@ -42,16 +48,18 @@ type Listener struct {
 	logger        *logging.Logger
 	runtimeConfig *config.RuntimeConfig
 
-	logs *logging.Logging
-	mux  http.ServeMux
+	logs      *logging.Logging
+	mux       http.ServeMux
+	useSocket bool
 }
 
-func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *logging.Logging) *Listener {
+func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *logging.Logging, useSocket bool) *Listener {
 	l := &Listener{
 		db:            db,
 		logger:        logs.GetChildLogger("listener"),
 		logs:          logs,
 		runtimeConfig: runtimeConfig,
+		useSocket:     useSocket,
 	}
 
 	debugMux := http.NewServeMux()
@@ -88,34 +96,19 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		zap.String("status", http.StatusText(crw.status)))
 }
 
-// Run the Listener's web server and block until the server has finished.
+// Run starts the HTTP listener and blocks until the server finishes.
 //
-// The web server either returns (early) when its ListenAndServe fails or when the given context is finished. After the
-// context is done, the web server shuts down gracefully with a hard limit of three seconds.
-//
-// An error is returned in every case except for a gracefully context-based shutdown without hitting the time limit.
+// An error is returned in all cases except for a graceful shutdown triggered by the context being done within the
+// hard time limit.
 func (l *Listener) Run(ctx context.Context) error {
-	conf := daemon.Config().Listener
-	tlsConfig, err := conf.GetTlsConfig()
-	if err != nil {
-		return err
-	}
-
-	var https string
-	if conf.TLSOptions.Enable {
-		https = "s"
-	}
-	l.logger.Infof("Starting listener on http%s://%s", https, conf.Addr)
-
+	var listeningFunc func() error
 	stdlogger, err := zap.NewStdLogAt(l.logger.Desugar(), zap.ErrorLevel)
 	if err != nil {
 		return err
 	}
 
 	server := &http.Server{
-		Addr:        conf.Addr,
 		Handler:     l,
-		TLSConfig:   tlsConfig,
 		ReadTimeout: 10 * time.Second,
 		IdleTimeout: 30 * time.Second,
 		// Redirect the standard library's HTTP server error log to our logger with error level because these
@@ -123,16 +116,18 @@ func (l *Listener) Run(ctx context.Context) error {
 		ErrorLog: stdlogger,
 	}
 
+	if l.useSocket {
+		listeningFunc, err = l.initSocketServer(server)
+	} else {
+		listeningFunc, err = l.initTcpServer(server)
+	}
+	if err != nil {
+		return err
+	}
+
 	serverErr := make(chan error, 1)
 	go func() {
-		if conf.TLSOptions.Enable {
-			// We've already created the TLS config for the server, so we can pass empty strings
-			// for certFile and keyFile, which makes ListenAndServeTLS use the TLS config directly
-			// instead of trying to load certs from files.
-			serverErr <- server.ListenAndServeTLS("", "")
-		} else {
-			serverErr <- server.ListenAndServe()
-		}
+		serverErr <- listeningFunc()
 	}()
 
 	select {
@@ -146,19 +141,130 @@ func (l *Listener) Run(ctx context.Context) error {
 	}
 }
 
-// sourceFromAuthOrAbort extracts a *config.Source from the HTTP Basic Auth. If the credentials are wrong, (nil, false) is
-// returned and 401 was written back to the response writer.
-func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (*config.Source, bool) {
-	if authUser, authPass, authOk := r.BasicAuth(); authOk {
-		src := l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
-		if src != nil {
-			return src, true
+// initTcpServer configures the given HTTP(S) server for the configured TCP address and returns a function that
+// starts serving. The caller is responsible for actually calling that function and for graceful shutdown.
+func (l *Listener) initTcpServer(server *http.Server) (func() error, error) {
+	conf := daemon.Config().Listener
+	tlsConfig, err := conf.GetTlsConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	var https string
+	if conf.TLSOptions.Enable {
+		https = "s"
+	}
+	l.logger.Infof("Starting listener on http%s://%s", https, conf.Addr)
+
+	server.Addr = conf.Addr
+	server.TLSConfig = tlsConfig
+
+	if conf.TLSOptions.Enable {
+		// We've already created the TLS config for the server, so we can pass empty strings
+		// for certFile and keyFile, which makes ListenAndServeTLS use the TLS config directly
+		// instead of trying to load certs from files.
+		return func() error { return server.ListenAndServeTLS("", "") }, nil
+	}
+
+	return func() error { return server.ListenAndServe() }, nil
+}
+
+// initSocketServer configures the given HTTP server to listen on the configured Unix socket path and returns a
+// function that starts serving. If a socket file already exists at the path, it is removed before binding.
+// The caller is responsible for actually calling that function and for graceful shutdown.
+func (l *Listener) initSocketServer(server *http.Server) (fn func() error, retErr error) {
+	conf := daemon.Config().Listener
+	modeVal, err := strconv.ParseUint(conf.SocketMode, 8, 32)
+	if err != nil {
+		return nil, fmt.Errorf("invalid socket_mode %q: %w", conf.SocketMode, err)
+	}
+
+	if modeVal&0o666 == 0 {
+		return nil, fmt.Errorf("socket_mode %q grants no read/write access; the socket cannot accept connections", conf.SocketMode)
+	}
+	if modeVal&0o006 > 0 {
+		l.logger.Warnw("Unix socket is world-accessible; consider restricting socket_mode and using socket_group instead",
+			zap.String("socket_mode", conf.SocketMode))
+	}
+
+	mode := fs.FileMode(modeVal)
+	path := conf.Socket
+
+	info, err := os.Stat(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("cannot read socket path: %w", err)
+	}
+
+	if err == nil {
+		if info.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("the configured socket path already exists and is not a socket: %q", path)
+		}
+		if err := os.Remove(path); err != nil {
+			return nil, fmt.Errorf("cannot remove existing unix socket: %w", err)
 		}
 	}
 
-	w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications source"`)
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, fmt.Errorf("cannot listen on unix socket %q: %w", path, err)
+	}
+
+	defer func() {
+		if retErr != nil {
+			_ = listener.Close()
+		}
+	}()
+
+	if groupName := conf.SocketGroup; groupName != "" {
+		group, err := user.LookupGroup(groupName)
+		if err != nil {
+			return nil, fmt.Errorf("cannot find group %q: %w", groupName, err)
+		}
+
+		gid, err := strconv.Atoi(group.Gid)
+		if err != nil {
+			return nil, fmt.Errorf("cannot parse GID for group %q: %w", groupName, err)
+		}
+
+		if err := os.Chown(path, -1, gid); err != nil {
+			return nil, fmt.Errorf("cannot change ownership of unix socket %q: %w", path, err)
+		}
+	}
+
+	if err := os.Chmod(path, mode); err != nil {
+		return nil, fmt.Errorf("cannot set permissions on unix socket %q: %w", path, err)
+	}
+
+	l.logger.Infof("Starting listener on unix socket %s", path)
+
+	return func() error { return server.Serve(listener) }, nil
+}
+
+// sourceFromAuthOrAbort extracts a *config.Source from the HTTP Basic Auth. If the credentials are wrong, (nil, false) is
+// returned and 401 was written back to the response writer.
+func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (*config.Source, bool) {
+	var errorMsg string
+	if l.useSocket {
+		if authUser, _, authOk := r.BasicAuth(); authOk {
+			src := l.runtimeConfig.GetSourceFromUsername(authUser, l.logger)
+			if src != nil {
+				return src, true
+			}
+		}
+		errorMsg = "expected valid icinga-notifications source username"
+	} else {
+		if authUser, authPass, authOk := r.BasicAuth(); authOk {
+			src := l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
+			if src != nil {
+				return src, true
+			}
+		}
+		errorMsg = "expected valid icinga-notifications source basic auth credentials"
+		w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications source"`)
+	}
+
 	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = fmt.Fprintln(w, "expected valid icinga-notifications source basic auth credentials")
+	_, _ = fmt.Fprintln(w, errorMsg)
 	return nil, false
 }
 

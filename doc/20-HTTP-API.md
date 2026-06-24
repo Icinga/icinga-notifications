@@ -11,7 +11,16 @@ After creating a source in Icinga Notifications Web,
 the specified credentials can be used via HTTP Basic Authentication to submit a JSON-encoded
 [`Event`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/event/event.go).
 
-The authentication is performed via HTTP Basic Authentication using the source's username and password.
+Authentication is performed via HTTP Basic Authentication and differs by transport:
+
+- **TCP:** Both the source's username and password must match the configured credentials.
+- **Unix socket:** Only the source's username is checked. The password field is ignored, as the socket's file permissions provide the access control boundary.
+
+!!! warning
+
+    Any system user or process with access to the Unix socket can impersonate any registered source
+    by supplying its username; there is no additional credential check.
+    Restrict socket access carefully using `socket_mode` and `socket_group`.
 
 !!! info
 
@@ -88,11 +97,15 @@ curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomple
 EOF
 ```
 
+To submit over a Unix socket instead, pass `--unix-socket /run/icinga/icinga-notifications.sock` to curl.
+Only the username is checked, so the password can be omitted (e.g. `-u 'icingadb:'`).
+
 ### Get Incidents
 
 A source can query the list of open incidents belonging to its objects using the `/incidents` HTTP API endpoint.
 
-The authentication is performed via HTTP Basic Authentication using the source's username and password.
+Authentication follows the same transport-specific rules as for event submission: TCP requires both username and
+password, while a Unix socket only requires the username.
 
 ```
 $ curl -u 'example:insecureinsecure' 'http://localhost:5680/incidents'
@@ -121,6 +134,8 @@ $ curl -u 'example:insecureinsecure' 'http://localhost:5680/incidents'
 There are multiple endpoints for dumping specific configurations.
 All of them are prefixed by `/debug`.
 To use those, the `debug-password` must be set and supplied via HTTP Basic Authentication next to an arbitrary username.
+Unlike event submission, the debug endpoints always require the password regardless of the transport; connecting via
+Unix socket does not bypass this check.
 
 ### Dump Config
 
