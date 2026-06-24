@@ -4,8 +4,14 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"net"
 	"net/http"
+	"os"
+	"os/user"
+	"strconv"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -37,21 +43,29 @@ func (rw *responseWriter) WriteHeader(status int) {
 	rw.ResponseWriter.WriteHeader(status)
 }
 
+// peerUserLookupKey is the context key under which a [peerUserLookupFunc] is stored for Unix socket connections.
+type peerUserLookupKey struct{}
+
+// peerUserLookupFunc resolves the OS username of the peer process connected via a Unix domain socket.
+type peerUserLookupFunc func() (string, error)
+
 type Listener struct {
 	db            *database.DB
 	logger        *logging.Logger
 	runtimeConfig *config.RuntimeConfig
 
-	logs *logging.Logging
-	mux  http.ServeMux
+	logs      *logging.Logging
+	mux       http.ServeMux
+	useSocket bool
 }
 
-func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *logging.Logging) *Listener {
+func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *logging.Logging, useSocket bool) *Listener {
 	l := &Listener{
 		db:            db,
 		logger:        logs.GetChildLogger("listener"),
 		logs:          logs,
 		runtimeConfig: runtimeConfig,
+		useSocket:     useSocket,
 	}
 
 	debugMux := http.NewServeMux()
@@ -88,34 +102,18 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		zap.String("status", http.StatusText(crw.status)))
 }
 
-// Run the Listener's web server and block until the server has finished.
+// Run starts the HTTP listener and blocks until the server finishes.
 //
-// The web server either returns (early) when its ListenAndServe fails or when the given context is finished. After the
-// context is done, the web server shuts down gracefully with a hard limit of three seconds.
-//
-// An error is returned in every case except for a gracefully context-based shutdown without hitting the time limit.
+// An error is returned in all cases except for a graceful shutdown triggered by the context being done within a
+// hardcoded time limit.
 func (l *Listener) Run(ctx context.Context) error {
-	conf := daemon.Config().Listener
-	tlsConfig, err := conf.GetTlsConfig()
-	if err != nil {
-		return err
-	}
-
-	var https string
-	if conf.TLSOptions.Enable {
-		https = "s"
-	}
-	l.logger.Infof("Starting listener on http%s://%s", https, conf.Addr)
-
 	stdlogger, err := zap.NewStdLogAt(l.logger.Desugar(), zap.ErrorLevel)
 	if err != nil {
 		return err
 	}
 
 	server := &http.Server{
-		Addr:        conf.Addr,
 		Handler:     l,
-		TLSConfig:   tlsConfig,
 		ReadTimeout: 10 * time.Second,
 		IdleTimeout: 30 * time.Second,
 		// Redirect the standard library's HTTP server error log to our logger with error level because these
@@ -123,16 +121,19 @@ func (l *Listener) Run(ctx context.Context) error {
 		ErrorLog: stdlogger,
 	}
 
+	var listeningFunc func() error
+	if l.useSocket {
+		listeningFunc, err = l.initSocketServer(server)
+	} else {
+		listeningFunc, err = l.initTcpServer(server)
+	}
+	if err != nil {
+		return err
+	}
+
 	serverErr := make(chan error, 1)
 	go func() {
-		if conf.TLSOptions.Enable {
-			// We've already created the TLS config for the server, so we can pass empty strings
-			// for certFile and keyFile, which makes ListenAndServeTLS use the TLS config directly
-			// instead of trying to load certs from files.
-			serverErr <- server.ListenAndServeTLS("", "")
-		} else {
-			serverErr <- server.ListenAndServe()
-		}
+		serverErr <- listeningFunc()
 	}()
 
 	select {
@@ -146,20 +147,172 @@ func (l *Listener) Run(ctx context.Context) error {
 	}
 }
 
-// sourceFromAuthOrAbort extracts a *config.Source from the HTTP Basic Auth. If the credentials are wrong, (nil, false) is
-// returned and 401 was written back to the response writer.
-func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (*config.Source, bool) {
-	if authUser, authPass, authOk := r.BasicAuth(); authOk {
-		src := l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
-		if src != nil {
-			return src, true
+// initTcpServer configures the given HTTP(S) server for the configured TCP address and returns a function that
+// starts serving. The caller is responsible for actually calling that function and for graceful shutdown.
+func (l *Listener) initTcpServer(server *http.Server) (func() error, error) {
+	conf := daemon.Config().Listener
+	tlsConfig, err := conf.GetTlsConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	var https string
+	if conf.TLSOptions.Enable {
+		https = "s"
+	}
+	l.logger.Infof("Starting listener on http%s://%s", https, conf.Addr)
+
+	server.Addr = conf.Addr
+	server.TLSConfig = tlsConfig
+
+	if conf.TLSOptions.Enable {
+		// We've already created the TLS config for the server, so we can pass empty strings
+		// for certFile and keyFile, which makes ListenAndServeTLS use the TLS config directly
+		// instead of trying to load certs from files.
+		return func() error { return server.ListenAndServeTLS("", "") }, nil
+	}
+
+	return func() error { return server.ListenAndServe() }, nil
+}
+
+// initSocketServer configures the given HTTP server to listen on the configured Unix socket path and returns a
+// function that starts serving. If a socket file already exists at the path, it is removed before binding.
+// The caller is responsible for actually calling that function and for graceful shutdown.
+func (l *Listener) initSocketServer(server *http.Server) (fn func() error, retErr error) {
+	conf := daemon.Config().Listener
+	mode := *conf.SocketMode
+	if mode&0o006 > 0 {
+		l.logger.Warnw("Unix socket is world-accessible; consider restricting socket_mode and using socket_group instead",
+			zap.String("socket_mode", fmt.Sprintf("%04o", mode)),
+		)
+	}
+
+	path := conf.Socket
+	info, err := os.Stat(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("cannot read socket path: %w", err)
+	} else if err == nil {
+		if info.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("the configured socket path already exists and is not a socket: %q", path)
+		}
+		if err := os.Remove(path); err != nil {
+			return nil, fmt.Errorf("cannot remove existing unix socket: %w", err)
 		}
 	}
 
-	w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications source"`)
-	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = fmt.Fprintln(w, "expected valid icinga-notifications source basic auth credentials")
-	return nil, false
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		return nil, fmt.Errorf("cannot listen on unix socket %q: %w", path, err)
+	}
+
+	defer func() {
+		if retErr != nil {
+			_ = listener.Close()
+		}
+	}()
+
+	if groupName := conf.SocketGroup; groupName != "" {
+		group, err := user.LookupGroup(groupName)
+		if err != nil {
+			return nil, fmt.Errorf("cannot find group %q: %w", groupName, err)
+		}
+
+		gid, err := strconv.Atoi(group.Gid)
+		if err != nil {
+			return nil, fmt.Errorf("cannot parse GID for group %q: %w", groupName, err)
+		}
+
+		if gid != -1 {
+			if err := os.Chown(path, -1, gid); err != nil {
+				return nil, fmt.Errorf("cannot change ownership of unix socket %q: %w", path, err)
+			}
+		}
+	}
+
+	if err := os.Chmod(path, fs.FileMode(mode)); err != nil {
+		return nil, fmt.Errorf("cannot set permissions on unix socket %q: %w", path, err)
+	}
+
+	server.ConnContext = func(ctx context.Context, c net.Conn) context.Context {
+		unixConn, ok := c.(*net.UnixConn)
+		if !ok {
+			l.logger.Fatalw("expected *net.UnixConn", zap.String("connection_type", fmt.Sprintf("%T", c)))
+		}
+
+		rawConn, err := unixConn.SyscallConn()
+		if err != nil {
+			l.logger.Fatalw("Cannot extract RawConnection", zap.Error(err))
+		}
+
+		lookUpUser := func() (string, error) {
+			uid, err := socketPeerUid(rawConn)
+			if err != nil {
+				return "", fmt.Errorf("cannot obtain peer credentials: %w", err)
+			}
+
+			u, err := user.LookupId(strconv.FormatUint(uint64(uid), 10))
+			if err != nil {
+				return "", fmt.Errorf("cannot obtain user id: %w", err)
+			}
+
+			return u.Username, nil
+		}
+
+		return context.WithValue(ctx, peerUserLookupKey{}, peerUserLookupFunc(lookUpUser))
+	}
+
+	l.logger.Infof("Starting listener on unix socket %s", path)
+
+	return func() error { return server.Serve(listener) }, nil
+}
+
+// sourceFromAuthOrAbort extracts a *config.Source from the request. For Unix socket connections, the source is looked
+// up by the OS username of the connecting process via peer credentials. For TCP connections, HTTP Basic Auth is used.
+// If no matching source is found, nil is returned and 401 is written to the response.
+func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (src *config.Source) {
+	errFunc := func(errMsg string) *config.Source {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = fmt.Fprintln(w, errMsg)
+		return nil
+	}
+
+	if l.useSocket {
+		l.logger.Debugw("Source is authenticated via socket connection")
+		value := r.Context().Value(peerUserLookupKey{})
+		if value == nil {
+			return errFunc("no value found in context")
+		}
+
+		lookup, ok := value.(peerUserLookupFunc)
+		if !ok {
+			return errFunc("no lookup function present")
+		}
+
+		username, err := lookup()
+		if err != nil {
+			return errFunc(err.Error())
+		}
+
+		src = l.runtimeConfig.GetSourceByUsername(username)
+		if src == nil {
+			return errFunc(fmt.Sprintf("system user %q is not registered as a source username", username))
+		}
+	} else {
+		l.logger.Debugw("Source is authenticated via HTTP Basic Auth")
+		authUser, authPass, authOk := r.BasicAuth()
+		if !authOk {
+			w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications source"`)
+			return errFunc("missing or malformed basic auth credentials")
+		}
+
+		src = l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
+		if src == nil {
+			w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications source"`)
+			return errFunc("expected valid icinga-notifications source basic auth credentials")
+		}
+	}
+
+	return src
 }
 
 // abort the current connection by sending the status code and an error both to the log and back to the client.
@@ -185,8 +338,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	src, isAuthenticated := l.sourceFromAuthOrAbort(w, r)
-	if !isAuthenticated {
+	src := l.sourceFromAuthOrAbort(w, r)
+	if src == nil {
 		// Listener.sourceFromAuthOrAbort writes 401 response by itself; no abort() necessary.
 		return
 	}
@@ -263,8 +416,8 @@ func (l *Listener) GetIncidents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	src, isAuthenticated := l.sourceFromAuthOrAbort(w, r)
-	if !isAuthenticated {
+	src := l.sourceFromAuthOrAbort(w, r)
+	if src == nil {
 		// Listener.sourceFromAuthOrAbort writes 401 response by itself; no abort() necessary.
 		return
 	}

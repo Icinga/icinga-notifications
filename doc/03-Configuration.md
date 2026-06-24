@@ -43,19 +43,34 @@ It may also be `/usr/lib/icinga-notifications/channels`, depending on the operat
 ## HTTP API Configuration
 
 Configuration of the HTTP API listener for event submission and debugging endpoints.
+Icinga Notifications can run a TCP listener, a Unix socket listener, or both simultaneously.
+When neither `address` nor `socket` is configured, the TCP listener defaults to `localhost:5680`.
+TLS options apply only to the TCP listener.
+
+When a Unix socket is configured, Icinga Notifications identifies connecting processes by their OS user,
+and matches the OS username against the source's configured username. No password or HTTP Basic Auth is involved.
 
 For YAML configuration, the options are part of the `listener` section.
 For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_LISTENER_`.
 
-| Option              | Description                                                                                    |
-|---------------------|------------------------------------------------------------------------------------------------|
-| address             | Address to bind to, port included. (Example: `localhost:5680`)                                 |
-| debug_password      | Password expected via HTTP Basic Authentication for debug endpoints.                           |
-| debug_password_file | `debug_password` in a file.                                                                    |
-| tls                 | **Optional.** Whether to require TLS for the listener. Defaults to `false`.                    |
-| cert                | **Optional.** Path to TLS server certificate. Required if `tls` is enabled.                    |
-| key                 | **Optional.** Path to the TLS private key. Required if `tls` is enabled.                       |
-| ca                  | **Optional.** Path to TLS CA cert/bundle to verify client certs. Required if `tls` is enabled. |
+| Option              | Description                                                                                                |
+|---------------------|------------------------------------------------------------------------------------------------------------|
+| address             | **Optional.** TCP address to bind to. Defaults to `localhost:5680` when `socket` is not set.               |
+| socket              | **Optional.** Path to a Unix domain socket for local event submission.                                     |
+| socket_mode         | **Optional.** Permission bits for the Unix socket file, as an octal. Defaults to `0660`.                   |
+| socket_group        | **Optional.** OS group to assign to the Unix socket file. Defaults to Icinga Notifications' primary group. |
+| debug_password      | Password expected via HTTP Basic Authentication for debug endpoints.                                       |
+| debug_password_file | `debug_password` in a file.                                                                                |
+| tls                 | **Optional.** Whether to require TLS for the TCP listener. Defaults to `false`.                            |
+| cert                | **Optional.** Path to TLS server certificate. Required if `tls` is enabled.                                |
+| key                 | **Optional.** Path to the TLS private key. Required if `tls` is enabled.                                   |
+| ca                  | **Optional.** Path to TLS CA cert/bundle to verify client certs. Required if `tls` is enabled.             |
+
+!!! important
+
+    The socket permissions restricts who can access the Unix socket.
+    A process can only submit events for sources whose configured listener_username matches the process's OS username.
+    So each source requires its own OS user; set `0600` (owner-only) would limit the socket to a single source.
 
 ## Database Configuration
 

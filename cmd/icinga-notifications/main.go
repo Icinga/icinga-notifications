@@ -22,6 +22,7 @@ import (
 	"github.com/okzk/sdnotify"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -34,6 +35,7 @@ func main() {
 }
 
 func run() int {
+	unix.Umask(0077) // Ensure Unix sockets are created with 0600 by default, denying group/other access.
 	daemon.ParseFlagsAndConfig()
 	conf := daemon.Config()
 
@@ -91,16 +93,26 @@ func run() int {
 		}
 	})
 
-	eg.Go(func() error {
-		err := listener.NewListener(db, runtimeConfig, logs).Run(ctx)
-		if err == nil || errors.Is(err, context.Canceled) {
-			logger.Info("Listener has finished")
-			return nil
-		} else {
-			logger.Errorf("Listener has finished with an error: %+v", err)
-			return err
-		}
-	})
+	listenerConf := daemon.Config().Listener
+	makeListeners := func(useSocket bool) {
+		eg.Go(func() error {
+			err := listener.NewListener(db, runtimeConfig, logs, useSocket).Run(ctx)
+			if err == nil || errors.Is(err, context.Canceled) {
+				logger.Info("Listener has finished")
+				return nil
+			} else {
+				logger.Errorf("Listener has finished with an error: %+v", err)
+				return err
+			}
+		})
+	}
+
+	if listenerConf.Socket != "" {
+		makeListeners(true)
+	}
+	if listenerConf.Addr != "" {
+		makeListeners(false)
+	}
 
 	eg.Go(func() error {
 		logger := logs.GetChildLogger("event-queue")
