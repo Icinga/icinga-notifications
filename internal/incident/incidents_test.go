@@ -2,6 +2,9 @@ package incident
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
@@ -13,14 +16,16 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
-	"testing"
-	"time"
 )
 
-func TestLoadOpenIncidents(t *testing.T) {
-	ctx := context.Background()
-	db := testutils.GetTestDB(ctx, t)
+func TestIncidents(t *testing.T) {
+	db := testutils.GetTestDB(t.Context(), t)
+	logs := logging.NewLoggingWithFactory("testing", zapcore.DebugLevel, time.Second, func(level zap.AtomicLevel) zapcore.Core {
+		return zaptest.NewLogger(t, zaptest.Level(level.Level())).Core()
+	})
 
 	// Insert a dummy source for our test cases!
 	source := &config.Source{
@@ -31,7 +36,7 @@ func TestLoadOpenIncidents(t *testing.T) {
 	source.ChangedAt = types.UnixMilli(time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC))
 	source.Deleted = types.Bool{Bool: false, Valid: true}
 
-	err := db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) error {
+	err := db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
 		id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, source, "id"), source)
 		require.NoError(t, err, "populating source table should not fail")
 
@@ -40,59 +45,184 @@ func TestLoadOpenIncidents(t *testing.T) {
 	})
 	require.NoError(t, err, "db.ExecTx should not fail")
 
-	// Reduce the default placeholders per statement to a meaningful number, so that we can
-	// test some parallelism when loading the incidents.
-	db.Options.MaxPlaceholdersPerStatement = 100
-
-	// Due to the 10*maxPlaceholders constraint, only 10 goroutines are going to process simultaneously.
-	// Therefore, reduce the default maximum number of connections per table to 4 in order to fully simulate
-	// semaphore lock wait cycles for a given table.
-	db.Options.MaxConnectionsPerTable = 4
-
-	testData := make(map[string]*Incident, 10*db.Options.MaxPlaceholdersPerStatement)
-	for j := 1; j <= 10*db.Options.MaxPlaceholdersPerStatement; j++ {
-		i := makeIncident(ctx, db, t, source.ID, false)
-		testData[i.ObjectID.String()] = i
-	}
-
-	t.Run("WithNoRecoveredIncidents", func(t *testing.T) {
-		assertIncidents(ctx, db, t, testData)
+	t.Cleanup(func() {
+		// Cleanup all the database tables, so that one can just re-run the tests without having either to re-create
+		// the database or to manually clean it up. We can't use t.Context() here though, as it will be canceled before
+		// our cleanup function gets called, so we need to create a new context with a timeout for the cleanup.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cleanupDB(ctx, db, t)
 	})
 
-	t.Run("WithSomeRecoveredIncidents", func(t *testing.T) {
-		tx, err := db.BeginTxx(ctx, nil)
-		require.NoError(t, err, "starting a transaction should not fail")
+	runtimeConfig := config.NewRuntimeConfig(logs, db)
+	require.NoError(t, runtimeConfig.UpdateFromDatabase(t.Context()))
 
-		// Drop all cached incidents before re-loading them!
-		for _, i := range GetCurrentIncidents() {
-			RemoveCurrent(i.Object)
+	t.Run("LoadOpenIncidents", func(t *testing.T) {
+		// Reduce the default placeholders per statement to a meaningful number, so that we can
+		// test some parallelism when loading the incidents.
+		db.Options.MaxPlaceholdersPerStatement = 100
 
-			// Mark some of the existing incidents as recovered.
-			if i.Id%20 == 0 { // 1000 / 20 => 50 existing incidents will be marked as recovered!
-				i.RecoveredAt = types.UnixMilli(time.Now())
+		// Due to the 10*maxPlaceholders constraint, only 10 goroutines are going to process simultaneously.
+		// Therefore, reduce the default maximum number of connections per table to 4 in order to fully simulate
+		// semaphore lock wait cycles for a given table.
+		db.Options.MaxConnectionsPerTable = 4
 
-				require.NoError(t, i.Sync(ctx, tx), "failed to update/insert incident")
-
-				// Drop it from our test data as it's recovered
-				delete(testData, i.ObjectID.String())
-			}
-		}
-		require.NoError(t, tx.Commit(), "committing a transaction should not fail")
-
-		assert.Len(t, GetCurrentIncidents(), 0, "there should be no cached incidents")
-
-		for j := 1; j <= db.Options.MaxPlaceholdersPerStatement/2; j++ {
-			// We don't need to cache recovered incidents in memory.
-			_ = makeIncident(ctx, db, t, source.ID, true)
-
-			if j%2 == 0 {
-				// Add some extra new not recovered incidents to fully simulate a daemon reload.
-				i := makeIncident(ctx, db, t, source.ID, false)
-				testData[i.ObjectID.String()] = i
-			}
+		testData := make(map[string]*Incident, 10*db.Options.MaxPlaceholdersPerStatement)
+		for j := 1; j <= 10*db.Options.MaxPlaceholdersPerStatement; j++ {
+			i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityCrit)))
+			testData[i.ObjectID.String()] = i
 		}
 
-		assertIncidents(ctx, db, t, testData)
+		t.Run("WithNoRecoveredIncidents", func(t *testing.T) {
+			assertIncidents(t.Context(), db, logs.GetChildLogger("incident"), runtimeConfig, t, testData)
+		})
+
+		t.Run("WithSomeRecoveredIncidents", func(t *testing.T) {
+			for _, i := range GetCurrentIncidents() {
+				// Mark some of the existing incidents as recovered.
+				if i.Id%20 == 0 { // 1000 / 20 => 50 existing incidents will be marked as recovered!
+					require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+						withIncident(), withClose(), withTags(i.Object.Tags))))
+					require.NotZero(t, i.RecoveredAt)
+					require.False(t, HasCurrent(i.Object)) // Incident is gone (closed)?
+					delete(testData, i.ObjectID.String())
+				} else {
+					RemoveCurrent(i.Object) // Drop it from the cache to simulate a daemon reload.
+				}
+			}
+
+			assert.Len(t, GetCurrentIncidents(), 0, "there should be no cached incidents")
+
+			for j := 1; j <= db.Options.MaxPlaceholdersPerStatement/2; j++ {
+				require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+					withIncident(), withClose(), withSeverity(baseEv.SeverityAlert))))
+
+				if j%2 == 0 {
+					// Add some extra new not recovered incidents to fully simulate a daemon reload.
+					i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+						withIncident(), withSeverity(baseEv.SeverityWarning)))
+					testData[i.ObjectID.String()] = i
+				}
+			}
+
+			assertIncidents(t.Context(), db, logs.GetChildLogger("incident"), runtimeConfig, t, testData)
+
+			// Close all remaining incidents to clean up the database for the next test run.
+			for _, i := range GetCurrentIncidents() {
+				require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+					withIncident(), withClose(), withTags(i.Object.Tags))))
+			}
+			assert.Len(t, GetCurrentIncidents(), 0, "there should be no cached incidents")
+			testData = make(map[string]*Incident) // Reset test data for the next test run.
+		})
+	})
+
+	t.Run("Severity Change", func(t *testing.T) {
+		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityDebug)))
+		assert.NotZero(t, i.ID())
+		assert.Zero(t, i.RecoveredAt)
+		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
+
+		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+			withIncident(), withSeverity(baseEv.SeverityEmerg), withTags(i.Object.Tags))))
+		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
+
+		err := ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+			withMuted(false), withSeverity(baseEv.SeverityNotice), withTags(i.Object.Tags)))
+		require.ErrorIs(t, err, ErrSeverityChangeWithoutIncidentFlag)
+		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
+	})
+
+	t.Run("Incident Open", func(t *testing.T) {
+		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityDebug)))
+		assert.NotZero(t, i.ID())
+		assert.Zero(t, i.RecoveredAt)
+		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
+
+		// Attempting to open an incident without a severity should fail.
+		err := ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID, withIncident()))
+		require.ErrorIs(t, err, ErrOpenIncidentWithoutSeverity)
+
+		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+			withIncident(), withSeverity(baseEv.SeverityEmerg), withMsg("Incident opened!")))
+		assert.NotZero(t, i.ID())
+		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
+		assert.Equal(t, "Incident opened!", i.Message.String)
+
+		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+			withIncident(),
+			withSeverity(baseEv.SeverityEmerg),
+			withMsg("Incident updated!"),
+			withTags(i.Object.Tags))))
+		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
+		assert.Equal(t, "Incident updated!", i.Message.String)
+
+		// We shouldn't be able to update the incident message without the incident flag set.
+		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID, withMuted(false), withMsg("YOLO!"))))
+		assert.Equal(t, "Incident updated!", i.Message.String)
+	})
+
+	t.Run("Close Flag", func(t *testing.T) {
+		// Incident opened and closed immediately, so it won't be in the cache anymore.
+		require.Nil(t, makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+			withIncident(), withClose(), withSeverity(baseEv.SeverityDebug))))
+
+		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+			withIncident(), withSeverity(baseEv.SeverityInfo)))
+		assert.Zero(t, i.RecoveredAt)
+		assert.Equal(t, baseEv.SeverityInfo, i.Severity)
+
+		// Closing incident with a new severity will update the severity and mark it as recovered.
+		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+			withIncident(), withClose(), withSeverity(baseEv.SeverityEmerg), withTags(i.Object.Tags))))
+		assert.NotZero(t, i.RecoveredAt)
+		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
+
+		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityWarning)))
+		assert.Zero(t, i.RecoveredAt)
+		assert.Equal(t, baseEv.SeverityWarning, i.Severity)
+
+		// Closing incident without providing a severity will keep the existing severity and mark it as recovered.
+		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+			withIncident(), withClose(), withTags(i.Object.Tags))))
+		assert.NotZero(t, i.RecoveredAt)
+		assert.Equal(t, baseEv.SeverityWarning, i.Severity)
+	})
+
+	t.Run("Notify Flag", func(t *testing.T) {
+		t.Skipf("Skipping Notify Flag test, as it requires to verify whether notifications were sent")
+	})
+
+	t.Run("Muted Flag", func(t *testing.T) {
+		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+			withIncident(), withSeverity(baseEv.SeverityDebug), withMuted(true)))
+		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
+		assert.True(t, i.IsMuted())
+		assert.Equal(t, "You're gonna have a bad time!", i.MuteReason.String)
+
+		// Unmute it with the incident flag still set...
+		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+			withIncident(), withMuted(false), withTags(i.Object.Tags))))
+		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
+		assert.False(t, i.IsMuted())
+		assert.Equal(t, "", i.MuteReason.String)
+
+		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+			withIncident(), withSeverity(baseEv.SeverityDebug), withMuted(true)))
+		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
+		assert.True(t, i.IsMuted())
+		assert.Equal(t, "You're gonna have a bad time!", i.MuteReason.String)
+
+		// Unmute it without the incident flag set...
+		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+			withMuted(false), withTags(i.Object.Tags))))
+		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
+		assert.False(t, i.IsMuted())
+		assert.Equal(t, "", i.MuteReason.String)
+
+		// Muted flag without the incident flag has no effect on non-existing incidents.
+		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withMuted(true)))
+		require.Nil(t, i)
 	})
 }
 
@@ -100,20 +230,23 @@ func TestLoadOpenIncidents(t *testing.T) {
 //
 // The incident loading process is limited to a maximum duration of 10 seconds and will be
 // aborted and causes the entire test suite to fail immediately, if it takes longer.
-func assertIncidents(ctx context.Context, db *database.DB, t *testing.T, testData map[string]*Incident) {
-	logger := logging.NewLogger(zaptest.NewLogger(t).Sugar(), time.Hour)
-
+func assertIncidents(ctx context.Context, db *database.DB, l *logging.Logger, rc *config.RuntimeConfig, t *testing.T, testData map[string]*Incident) {
 	// Since we have been using object.FromEvent() to persist the test objects to the database,
 	// these will be automatically added to the objects cache as well. So clear the cache before
 	// reloading the incidents, otherwise it will panic in object.RestoreObjects().
 	object.ClearCache()
+
+	// Clear the incidents for the same reasons as above.
+	currentIncidentsMu.Lock()
+	currentIncidents = make(map[*object.Object]*Incident)
+	currentIncidentsMu.Unlock()
 
 	// The incident loading process may hang due to unknown bugs or semaphore lock waits.
 	// Therefore, give it maximum time of 10s to finish normally, otherwise give up and fail.
 	ctx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(10*time.Second))
 	defer cancelFunc()
 
-	err := LoadOpenIncidents(ctx, db, logger, &config.RuntimeConfig{})
+	err := LoadOpenIncidents(ctx, db, l, rc)
 	require.NoError(t, err, "failed to load not recovered incidents")
 
 	incidents := GetCurrentIncidents()
@@ -141,38 +274,76 @@ func assertIncidents(ctx context.Context, db *database.DB, t *testing.T, testDat
 	}
 }
 
-// makeIncident returns a fully initialised recovered/un-recovered incident.
+// cleanupDB removes all test data from the database tables used by the incident package.
 //
-// This will firstly create and synchronise a new object from a freshly generated dummy event with distinct
-// tags and name, and ensures that no error is returned, otherwise it will cause the entire test suite to fail.
-// Once the object has been successfully synchronised, an incident is created and synced with the database.
-func makeIncident(ctx context.Context, db *database.DB, t *testing.T, sourceID int64, recovered bool) *Incident {
-	ev := &event.Event{
-		Time:     time.Time{},
-		SourceId: sourceID,
-		Event: baseEv.Event{
-			Name: testutils.MakeRandomString(t),
-			Tags: map[string]string{ // Always generate unique object tags not to produce same object ID!
-				"host":    testutils.MakeRandomString(t),
-				"service": testutils.MakeRandomString(t),
-			},
-		},
-	}
-
-	i := NewIncident(db, object.Get(db, ev), &config.RuntimeConfig{}, nil)
-	i.StartedAt = types.UnixMilli(time.Now().Add(-2 * time.Hour).Truncate(time.Second))
-	i.Severity = baseEv.SeverityCrit
-	if recovered {
-		i.Severity = baseEv.SeverityOK
-		i.RecoveredAt = types.UnixMilli(time.Now())
-	}
-
-	require.NoError(t, db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) error {
-		if err := i.Object.SyncFromEvent(ctx, tx, ev); err != nil {
-			return err
+// If we introduce new tests in the future that require additional database tables, we need
+// to add them to the list of tables to clean up here.
+func cleanupDB(ctx context.Context, db *database.DB, t *testing.T) {
+	switch db.DriverName() {
+	case database.PostgreSQL:
+		// As opposed to MySQL, we can just use truncate to clean up all tables in one go.
+		_, err := db.ExecContext(ctx, `TRUNCATE TABLE source RESTART IDENTITY CASCADE`)
+		require.NoError(t, err)
+	case database.MySQL:
+		// InnoDB doesn't support truncating tables with foreign key constraints, so we need to delete
+		// each table one by one in the correct order, not to violate any foreign key constraints.
+		tables := []string{
+			"incident_history",
+			"incident",
+			"object_id_tag",
+			"object",
+			"source",
 		}
-		return i.Sync(ctx, tx)
-	}))
 
-	return i
+		for _, table := range tables {
+			_, err := db.ExecContext(ctx, "DELETE FROM "+table)
+			require.NoErrorf(t, err, "failed to clean up table %s", table)
+		}
+	default:
+		t.Fatalf("unsupported database driver: %s", db.DriverName())
+	}
+}
+
+// makeIncident creates a new incident by processing the given event and returns the resulting incident object.
+//
+// The incident is guaranteed to be fully initialized and ready for assertions but might be nil if it's immediately closed.
+func makeIncident(db *database.DB, logs *logging.Logging, runtimeConfig *config.RuntimeConfig, t *testing.T, ev *event.Event) *Incident {
+	require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, ev))
+	return GetCurrent(db, object.Get(db, ev), logs.GetChildLogger("incident"), runtimeConfig, false)
+}
+
+// makeEvent returns a fully initialized event based on the given parameters.
+func makeEvent(t *testing.T, sourceID int64, opts ...eventOption) *event.Event {
+	ev := &event.Event{
+		Time:     time.Now().Add(-2 * time.Hour).Truncate(time.Second),
+		SourceId: sourceID,
+		Event:    baseEv.Event{Name: testutils.MakeRandomString(t)},
+	}
+	for _, opt := range opts {
+		opt(ev)
+	}
+	if ev.Tags == nil {
+		ev.Tags = map[string]string{ // Always generate unique object tags not to produce same object ID!
+			"host":    testutils.MakeRandomString(t),
+			"service": testutils.MakeRandomString(t),
+		}
+	}
+
+	if ev.Muted.Valid {
+		ev.MutedReason = "You're gonna have a bad time!"
+	}
+	require.NoError(t, ev.Validate(), "failed to validate event")
+	return ev
+}
+
+// eventOption is a functional option type for modifying an event.
+type eventOption func(*event.Event)
+
+func withIncident() eventOption                   { return func(ev *event.Event) { ev.Incident = types.MakeBool(true) } }
+func withClose() eventOption                      { return func(ev *event.Event) { ev.Close = types.MakeBool(true) } }
+func withMuted(v bool) eventOption                { return func(ev *event.Event) { ev.Muted = types.MakeBool(v) } }
+func withTags(tags map[string]string) eventOption { return func(ev *event.Event) { ev.Tags = tags } }
+func withMsg(msg string) eventOption              { return func(ev *event.Event) { ev.Message = msg } }
+func withSeverity(sev baseEv.Severity) eventOption {
+	return func(ev *event.Event) { ev.Severity = sev }
 }
