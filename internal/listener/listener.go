@@ -243,28 +243,31 @@ func (l *Listener) initSocketServer(server *http.Server) (fn func() error, retEr
 // sourceFromAuthOrAbort extracts a *config.Source from the HTTP Basic Auth. If the credentials are wrong, (nil, false) is
 // returned and 401 was written back to the response writer.
 func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (*config.Source, bool) {
-	var errorMsg string
-	if l.useSocket {
-		if authUser, _, authOk := r.BasicAuth(); authOk {
+	if authUser, authPass, authOk := r.BasicAuth(); authOk {
+		if l.useSocket {
 			src := l.runtimeConfig.GetSourceFromUsername(authUser, l.logger)
-			if src != nil {
+			if src == nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = fmt.Fprintln(w, "expected valid icinga-notifications source basic auth username")
+				return nil, false
+			}
+
+			if !src.ListenerPasswordHash.Valid {
 				return src, true
 			}
 		}
-		errorMsg = "expected valid icinga-notifications source username"
-	} else {
-		if authUser, authPass, authOk := r.BasicAuth(); authOk {
-			src := l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
-			if src != nil {
-				return src, true
-			}
+
+		if src := l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger); src != nil {
+			return src, true
 		}
-		errorMsg = "expected valid icinga-notifications source basic auth credentials"
+	}
+
+	if !l.useSocket {
 		w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications source"`)
 	}
 
 	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = fmt.Fprintln(w, errorMsg)
+	_, _ = fmt.Fprintln(w, "expected valid icinga-notifications source basic auth credentials")
 	return nil, false
 }
 
