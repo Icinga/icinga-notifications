@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
+	"time"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/types"
@@ -13,8 +16,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
-	"sync"
-	"time"
 )
 
 // RuntimeConfig stores the runtime representation of the configuration present in the database.
@@ -190,6 +191,24 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 	}
 
 	return src
+}
+
+// GetSourceFromUsername looks up a Source by its listener username without verifying a password.
+//
+// This method is intended for connections over trusted transports such as Unix sockets, where the
+// transport itself provides the security guarantee that no password is required.
+func (r *RuntimeConfig) GetSourceFromUsername(user string, logger *logging.Logger) *Source {
+	r.RLock()
+	defer r.RUnlock()
+
+	for _, src := range r.Sources {
+		if src.ListenerUsername.Valid && src.ListenerUsername.String == user {
+			return src
+		}
+	}
+
+	logger.Debugw("Cannot find source for username", zap.String("user", user))
+	return nil
 }
 
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {

@@ -2,6 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/utils"
@@ -12,12 +17,12 @@ import (
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
 	"github.com/okzk/sdnotify"
-	"os/signal"
-	"syscall"
-	"time"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sys/unix"
 )
 
 func main() {
+	unix.Umask(0077) // Ensure Unix sockets are created with 0600 by default, denying group/other access.
 	daemon.ParseFlagsAndConfig()
 	conf := daemon.Config()
 
@@ -65,9 +70,29 @@ func main() {
 	// When Icinga Notifications is started by systemd, we've to notify systemd that we're ready.
 	_ = sdnotify.Ready()
 
-	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {
-		logger.Errorf("Listener has finished with an error: %+v", err)
+	g, gCtx := errgroup.WithContext(ctx)
+	listenerConf := daemon.Config().Listener
+	if listenerConf.Socket != "" {
+		g.Go(func() error {
+			if err := listener.NewListener(db, runtimeConfig, logs, true).Run(gCtx); err != nil {
+				return fmt.Errorf("socket listener: %w", err)
+			}
+			return nil
+		})
+	}
+
+	if listenerConf.Addr != "" {
+		g.Go(func() error {
+			if err := listener.NewListener(db, runtimeConfig, logs, false).Run(gCtx); err != nil {
+				return fmt.Errorf("tcp listener: %w", err)
+			}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		logger.Errorf("A listener has finished with an error: %+v", err)
 	} else {
-		logger.Info("Listener has finished")
+		logger.Info("All listeners have finished")
 	}
 }
