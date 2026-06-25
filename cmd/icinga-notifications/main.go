@@ -11,6 +11,8 @@ import (
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
+	"github.com/icinga/icinga-notifications/internal/source"
+	"github.com/icinga/icinga-notifications/schema"
 	"github.com/okzk/sdnotify"
 	"os/signal"
 	"syscall"
@@ -44,8 +46,16 @@ func main() {
 		logger.Fatalf("Cannot connect to the database: %+v", err)
 	}
 
+	if err := schema.Ensure(ctx, db, logs.GetChildLogger("database")); err != nil {
+		logger.Fatalf("Failed to initialize database schema: %+v", err)
+	}
+
 	if err := internal.CheckSchema(ctx, db); err != nil {
 		logger.Fatalf("%+v", err)
+	}
+
+	if err := source.SyncConfigured(ctx, db, conf.Source, logger); err != nil {
+		logger.Fatalf("Failed to synchronize configured source: %+v", err)
 	}
 
 	channel.UpsertPlugins(ctx, conf.ChannelsDir, logs.GetChildLogger("channel"), db)

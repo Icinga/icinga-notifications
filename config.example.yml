@@ -37,6 +37,18 @@ listener:
   # Required if TLS is enabled to be able to verify client certificate if the client provides one.
   #ca: /path/to/ca.crt
 
+# Optional source bootstrap configuration.
+# When set, the daemon creates or updates these source entries in the database on startup.
+#source:
+#  - type: icingadb
+#    name: Icinga DB
+#    username: source-icingadb
+#    password_file: /run/secrets/icinga_notifications_icingadb_source_password
+#  - type: icinga-kubernetes
+#    name: Icinga for Kubernetes
+#    username: source-icinga-kubernetes
+#    password_file: /run/secrets/icinga_notifications_icinga_kubernetes_source_password
+
 # Connection configuration for the database where Icinga Notifications stores configuration and historical data.
 # This is also the database used in Icinga Notifications Web to view and work with the data.
 database:

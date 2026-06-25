@@ -40,6 +40,51 @@ For a package installation, the default will point to the correct location and m
 This directory should be `/usr/libexec/icinga-notifications/channels` on systems that follow the Filesystem Hierarchy Standard.
 It may also be `/usr/lib/icinga-notifications/channels`, depending on the operating system conventions.
 
+## Source Bootstrap Configuration
+
+Source entries are part of the database-backed Icinga Notifications configuration.
+They are usually managed through Icinga Notifications Web.
+For automated or headless setups, the daemon can create or update source entries from its own configuration on startup.
+
+For YAML configuration, the options are part of the `source` list.
+For environment variables, each source entry is indexed below the `ICINGA_NOTIFICATIONS_SOURCE_` prefix.
+
+| Option        | Description                                                                 |
+|---------------|-----------------------------------------------------------------------------|
+| type          | **Required.** Source type, for example `icingadb`.                          |
+| name          | **Required.** Display name of the source.                                   |
+| username      | **Required.** Username expected via HTTP Basic Authentication from the source. |
+| password      | **Optional.** Password expected via HTTP Basic Authentication from the source. |
+| password_file | **Optional.** Source password file.                                         |
+
+`password` or `password_file` must be set for each configured source.
+The password is stored as a bcrypt hash in the database.
+Each configured source must use a unique `username`.
+
+```yaml
+# YAML Configuration File
+source:
+  - type: icingadb
+    name: Icinga DB
+    username: source-icingadb
+    password_file: /run/secrets/icinga_notifications_icingadb_source_password
+  - type: icinga-kubernetes
+    name: Icinga for Kubernetes
+    username: source-icinga-kubernetes
+    password_file: /run/secrets/icinga_notifications_icinga_kubernetes_source_password
+```
+
+```
+# Environment Variables
+ICINGA_NOTIFICATIONS_SOURCE_0_TYPE=icingadb
+ICINGA_NOTIFICATIONS_SOURCE_0_NAME="Icinga DB"
+ICINGA_NOTIFICATIONS_SOURCE_0_USERNAME=source-icingadb
+ICINGA_NOTIFICATIONS_SOURCE_0_PASSWORD_FILE=/run/secrets/icinga_notifications_icingadb_source_password
+ICINGA_NOTIFICATIONS_SOURCE_1_TYPE=icinga-kubernetes
+ICINGA_NOTIFICATIONS_SOURCE_1_NAME="Icinga for Kubernetes"
+ICINGA_NOTIFICATIONS_SOURCE_1_USERNAME=source-icinga-kubernetes
+ICINGA_NOTIFICATIONS_SOURCE_1_PASSWORD_FILE=/run/secrets/icinga_notifications_icinga_kubernetes_source_password
+```
 ## HTTP API Configuration
 
 Configuration of the HTTP API listener for event submission and debugging endpoints.

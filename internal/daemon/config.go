@@ -13,6 +13,7 @@ import (
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/utils"
 	"github.com/icinga/icinga-notifications/internal"
+	"github.com/icinga/icinga-notifications/internal/source"
 )
 
 const (
@@ -56,6 +57,7 @@ type ConfigFile struct {
 	ChannelsDir   string          `yaml:"channels_dir" env:"CHANNELS_DIR"`
 	Icingaweb2URL string          `yaml:"icingaweb2_url" env:"ICINGAWEB2_URL"`
 	Listener      Listener        `yaml:"listener" envPrefix:"LISTENER_"`
+	Source        []source.Config `yaml:"source" envPrefix:"SOURCE_"`
 	Database      database.Config `yaml:"database" envPrefix:"DATABASE_"`
 	Logging       logging.Config  `yaml:"logging" envPrefix:"LOGGING_"`
 
@@ -77,6 +79,9 @@ func (c *ConfigFile) SetDefaults() {
 // Validates the entire daemon configuration on daemon startup.
 func (c *ConfigFile) Validate() error {
 	if err := c.Listener.Validate(); err != nil {
+		return err
+	}
+	if err := source.Validate(c.Source); err != nil {
 		return err
 	}
 	if err := c.Database.Validate(); err != nil {
@@ -110,6 +115,7 @@ func (c *ConfigFile) Validate() error {
 var (
 	_ defaults.Setter  = (*ConfigFile)(nil)
 	_ config.Validator = (*ConfigFile)(nil)
+	_ config.Validator = (*source.Config)(nil)
 )
 
 // Flags defines the CLI flags supported by Icinga Notifications.
