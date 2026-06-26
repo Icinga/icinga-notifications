@@ -83,5 +83,6 @@ database:
     #channel:
     #database:
     #incident:
+    #event-queue:
     #listener:
     #runtime-updates:

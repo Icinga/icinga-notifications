@@ -150,6 +150,7 @@ ICINGA_NOTIFICATIONS_LOGGING_OPTIONS=database:error,listener:debug
 | channel         | Notification channels, their configuration and output.                    |
 | database        | Database connection status and queries.                                   |
 | incident        | Incident management and changes.                                          |
+| event-queue     | Event queue handles events enqueued in the database.                      |
 | listener        | HTTP listener for event submission and debugging.                         |
 | runtime-updates | Configuration changes through Icinga Notifications Web from the database. |
 
