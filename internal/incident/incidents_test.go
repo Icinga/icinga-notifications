@@ -22,6 +22,8 @@ import (
 )
 
 func TestIncidents(t *testing.T) {
+	t.Parallel()
+
 	db := testutils.GetTestDB(t.Context(), t)
 	logs := logging.NewLoggingWithFactory("testing", zapcore.DebugLevel, time.Second, func(level zap.AtomicLevel) zapcore.Core {
 		return zaptest.NewLogger(t, zaptest.Level(level.Level())).Core()
@@ -118,6 +120,8 @@ func TestIncidents(t *testing.T) {
 	})
 
 	t.Run("Severity Change", func(t *testing.T) {
+		t.Parallel()
+
 		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityDebug)))
 		assert.NotZero(t, i.ID())
 		assert.Zero(t, i.RecoveredAt)
@@ -134,6 +138,8 @@ func TestIncidents(t *testing.T) {
 	})
 
 	t.Run("Incident Open", func(t *testing.T) {
+		t.Parallel()
+
 		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityDebug)))
 		assert.NotZero(t, i.ID())
 		assert.Zero(t, i.RecoveredAt)
@@ -163,6 +169,8 @@ func TestIncidents(t *testing.T) {
 	})
 
 	t.Run("Close Flag", func(t *testing.T) {
+		t.Parallel()
+
 		// Incident opened and closed immediately, so it won't be in the cache anymore.
 		require.Nil(t, makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
 			withIncident(), withClose(), withSeverity(baseEv.SeverityDebug))))
@@ -194,6 +202,8 @@ func TestIncidents(t *testing.T) {
 	})
 
 	t.Run("Muted Flag", func(t *testing.T) {
+		t.Parallel()
+
 		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
 			withIncident(), withSeverity(baseEv.SeverityDebug), withMuted(true)))
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
