@@ -15,7 +15,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
-	"github.com/icinga/icinga-notifications/internal/object"
 	"go.uber.org/zap"
 	"net/http"
 	"time"
@@ -200,13 +199,6 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	ev.CompleteURL(daemon.Config().IcingaWeb2UrlParsed)
 	ev.Time = time.Now()
 	ev.SourceId = src.ID
-	if ev.Type == baseEv.TypeUnknown {
-		ev.Type = baseEv.TypeState
-	} else if !ev.Mute.Valid && ev.Type == baseEv.TypeMute {
-		ev.SetMute(true, ev.MuteReason)
-	} else if !ev.Mute.Valid && ev.Type == baseEv.TypeUnmute {
-		ev.SetMute(false, ev.MuteReason)
-	}
 
 	if err := ev.Validate(); err != nil {
 		l.abort(w, http.StatusBadRequest, src, "%v", err)
@@ -215,16 +207,20 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	l.logger.Debugw("Processing event", zap.String("source", src.Name), zap.Object("event", &ev))
 
-	filterColumns, hasRulesWithoutFilter := l.runtimeConfig.GetRulesFilterColumnsForSource(src)
-	missingRelations := ev.ExtractMissingRelations(filterColumns...)
-	if len(missingRelations) > 0 && ShouldRejectRequestOnIncompleteRelations(r, &ev, hasRulesWithoutFilter) {
-		l.sendMissingAttrsError(w, src, missingRelations)
-		return
+	// Submitting an event without the "incident" field won't cause any new event rules to be evaluated or
+	// escalations to be triggered, but only updates the state of an existing incident without a severity change.
+	if ev.OpenOrEscalate() {
+		filterColumns, hasRulesWithoutFilter := l.runtimeConfig.GetRulesFilterColumnsForSource(src)
+		missingRelations := ev.ExtractMissingRelations(filterColumns...)
+		if len(missingRelations) > 0 && ShouldRejectRequestOnIncompleteRelations(r, hasRulesWithoutFilter) {
+			l.sendMissingAttrsError(w, src, missingRelations)
+			return
+		}
 	}
 
 	err := incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
-	if errors.Is(err, event.ErrSuperfluousStateChange) || errors.Is(err, event.ErrSuperfluousMuteUnmuteEvent) {
-		l.abort(w, http.StatusNotAcceptable, src, "%v", err)
+	if errors.Is(err, incident.ErrSeverityChangeWithoutIncidentFlag) || errors.Is(err, incident.ErrOpenIncidentWithoutSeverity) {
+		l.abort(w, http.StatusBadRequest, src, "%v", err)
 		return
 	} else if err != nil {
 		l.logger.Errorw("Failed to successfully process event", zap.String("source", src.Name), zap.Error(err))
@@ -430,15 +426,17 @@ func (l *Listener) sendMissingAttrsError(w http.ResponseWriter, src *config.Sour
 // ShouldRejectRequestOnIncompleteRelations determines whether a request with incomplete relations should be rejected.
 //
 // This function always returns true if the client explicitly requested to reject such events by setting the
-// [notifications.XIcingaRejectIfRelationsIncomplete] HTTP header. Otherwise, it only returns true when the
-// src doesn't have any rules without an object filter and the event doesn't cause a new incident to be opened
-// and there's no active one yet for the event's source object.
-func ShouldRejectRequestOnIncompleteRelations(r *http.Request, ev *event.Event, hasRulesWithoutFilter bool) bool {
+// [notifications.XIcingaRejectIfRelationsIncomplete] HTTP header. Otherwise, if there are rules without a filter,
+// it returns false as such rules match unconditionally and thus don't necessarily require the missing relations.
+//
+// Note that this function assumes that it's guarded by a [baseEv.Event.OpenOrEscalate] check, since only
+// events that open or escalate an incident are subject to relation completeness checks in the first place.
+func ShouldRejectRequestOnIncompleteRelations(r *http.Request, hasRulesWithoutFilter bool) bool {
 	if r.Header.Get(notifications.XIcingaRejectIfRelationsIncomplete) == "true" {
 		return true
 	}
 	if hasRulesWithoutFilter {
 		return false
 	}
-	return !incident.CanOpenNewIncident(ev) && !incident.HasCurrent(object.GetFromCache(object.ID(ev.SourceId, ev.Tags)))
+	return true
 }

@@ -3,6 +3,9 @@ package incident
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/icinga/icinga-go-library/com"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
@@ -15,8 +18,6 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
-	"sync"
-	"time"
 )
 
 var (
@@ -131,8 +132,8 @@ func LoadOpenIncidents(ctx context.Context, db *database.DB, logger *logging.Log
 						i.RetriggerEscalations(&event.Event{
 							Time: time.Now(),
 							Event: baseEv.Event{
-								Type:    baseEv.TypeIncidentAge,
-								Message: fmt.Sprintf("Incident reached age %v (daemon was restarted)", time.Since(i.StartedAt.Time())),
+								Incident: types.MakeBool(true),
+								Message:  fmt.Sprintf("Incident reached age %v (daemon was restarted)", time.Since(i.StartedAt.Time())),
 							},
 						})
 					}
@@ -195,12 +196,17 @@ func GetCurrentIncidentsForSource(sourceID int64) []*Incident {
 	return result
 }
 
+// ErrOpenIncidentWithoutSeverity is returned when an event tries to open a new incident without a severity.
+var ErrOpenIncidentWithoutSeverity = errors.New("cannot open or escalate an incident without a severity")
+
 // ProcessEvent from an event.Event.
 //
 // This function first gets this Event's object.Object and its incident.Incident. Then, after performing some safety
 // checks, it calls the Incident.ProcessEvent method.
 //
-// The returned error might be wrapped around event.ErrSuperfluousStateChange.
+// It might return [ErrOpenIncidentWithoutSeverity] if the event is trying to open an incident without a severity or
+// [ErrSeverityChangeWithoutIncidentFlag] if the event is trying to change the severity of an incident without the
+// incident flag set. In both cases, the listener should map these errors to a 400 Bad Request response to the source.
 func ProcessEvent(
 	ctx context.Context,
 	db *database.DB,
@@ -208,29 +214,26 @@ func ProcessEvent(
 	runtimeConfig *config.RuntimeConfig,
 	ev *event.Event,
 ) error {
+	o := object.Get(db, ev)
+	if ev.OpenOrEscalate() && ev.Severity == baseEv.SeverityNone && !HasCurrent(o) {
+		return ErrOpenIncidentWithoutSeverity
+	}
+
 	currentIncident := GetCurrent(
 		db,
-		object.Get(db, ev),
+		o,
 		logs.GetChildLogger("incident"),
 		runtimeConfig,
-		CanOpenNewIncident(ev))
+		ev.OpenOrEscalate())
 
 	if currentIncident == nil {
-		if ev.Severity == baseEv.SeverityOK {
-			return fmt.Errorf("%w: ok state event from source %d", event.ErrSuperfluousStateChange, ev.SourceId)
-		}
-		if CanOpenNewIncident(ev) {
-			panic(fmt.Sprintf("cannot process event %v with a non-OK state %v without a known incident", ev, ev.Severity))
+		if ev.OpenOrEscalate() {
+			panic(fmt.Sprintf("BUG: incident should have been created for event %v, but it was not", ev))
 		}
 		return nil
 	}
 
 	return currentIncident.ProcessEvent(ctx, ev)
-}
-
-// CanOpenNewIncident returns true if the given event can open a new incident if there is no active one yet.
-func CanOpenNewIncident(ev *event.Event) bool {
-	return ev.Severity != baseEv.SeverityNone && ev.Severity != baseEv.SeverityOK
 }
 
 // HasCurrent returns true if there is an active incident for the given object.

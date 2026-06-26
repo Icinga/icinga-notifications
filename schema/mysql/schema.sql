@@ -353,6 +353,7 @@ CREATE TABLE incident (
     severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg'),
     -- mute_reason indicates whether this incident is currently muted, and its non-null value is mapped to true.
     mute_reason mediumtext,
+    message longtext, -- contains the latest plugin output of the respective object.
 
     CONSTRAINT pk_incident PRIMARY KEY (id),
     CONSTRAINT ck_incident_severity_notnull CHECK (severity IS NOT NULL),

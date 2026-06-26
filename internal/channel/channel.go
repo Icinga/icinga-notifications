@@ -188,10 +188,8 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 			Severity: i.IncidentSeverity(),
 		},
 		Event: &plugin.Event{
-			Time:     ev.Time,
-			Type:     ev.Type,
-			Username: ev.Username,
-			Message:  ev.Message,
+			Time:    ev.Time,
+			Message: ev.Message,
 		},
 	}
 
