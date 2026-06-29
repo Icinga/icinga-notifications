@@ -6,12 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"net"
 	"net/http"
 	"os"
-	"os/user"
-	"strconv"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -174,36 +171,14 @@ func (l *Listener) initTcpServer(server *http.Server) (func() error, error) {
 // The caller is responsible for actually calling that function and for graceful shutdown.
 func (l *Listener) initSocketServer(server *http.Server) (fn func() error, retErr error) {
 	conf := daemon.Config().Listener
-	modeVal, err := strconv.ParseUint(conf.SocketMode, 8, 32)
-	if err != nil {
-		return nil, fmt.Errorf("invalid socket_mode %q: %w", conf.SocketMode, err)
-	}
-
-	if modeVal&0o666 == 0 {
-		return nil, fmt.Errorf("socket_mode %q grants no read/write access; the socket cannot accept connections", conf.SocketMode)
-	}
-	if modeVal&0o006 > 0 {
+	mode := conf.SocketMode.FileMode
+	if mode&0o006 > 0 {
 		l.logger.Warnw("Unix socket is world-accessible; consider restricting socket_mode and using socket_group instead",
-			zap.String("socket_mode", conf.SocketMode))
+			zap.String("socket_mode", fmt.Sprintf("%04o", mode)),
+		)
 	}
 
-	mode := fs.FileMode(modeVal)
 	path := conf.Socket
-
-	info, err := os.Stat(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("cannot read socket path: %w", err)
-	}
-
-	if err == nil {
-		if info.Mode()&os.ModeSocket == 0 {
-			return nil, fmt.Errorf("the configured socket path already exists and is not a socket: %q", path)
-		}
-		if err := os.Remove(path); err != nil {
-			return nil, fmt.Errorf("cannot remove existing unix socket: %w", err)
-		}
-	}
-
 	listener, err := net.Listen("unix", path)
 	if err != nil {
 		return nil, fmt.Errorf("cannot listen on unix socket %q: %w", path, err)
@@ -215,17 +190,11 @@ func (l *Listener) initSocketServer(server *http.Server) (fn func() error, retEr
 		}
 	}()
 
-	if groupName := conf.SocketGroup; groupName != "" {
-		group, err := user.LookupGroup(groupName)
-		if err != nil {
-			return nil, fmt.Errorf("cannot find group %q: %w", groupName, err)
-		}
-
-		gid, err := strconv.Atoi(group.Gid)
-		if err != nil {
-			return nil, fmt.Errorf("cannot parse GID for group %q: %w", groupName, err)
-		}
-
+	gid, err := conf.GetSocketGid()
+	if err != nil {
+		return nil, err
+	}
+	if gid != -1 {
 		if err := os.Chown(path, -1, gid); err != nil {
 			return nil, fmt.Errorf("cannot change ownership of unix socket %q: %w", path, err)
 		}

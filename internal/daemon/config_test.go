@@ -23,7 +23,7 @@ func TestListenerValidate(t *testing.T) {
 		},
 		{
 			name:     "only socket set leaves addr empty",
-			listener: Listener{Socket: "/tmp/test.sock", SocketMode: "0660"},
+			listener: Listener{Socket: "/tmp/test.sock", SocketMode: Mode{0660, true}},
 			wantAddr: "",
 		},
 		{
@@ -33,27 +33,17 @@ func TestListenerValidate(t *testing.T) {
 		},
 		{
 			name:     "both addr and socket set preserves both",
-			listener: Listener{Addr: ":5681", Socket: "/tmp/test.sock", SocketMode: "0660"},
+			listener: Listener{Addr: ":5681", Socket: "/tmp/test.sock", SocketMode: Mode{0660, true}},
 			wantAddr: ":5681",
 		},
 		{
 			name:     "socket with permissive mode is valid",
-			listener: Listener{Socket: "/tmp/test.sock", SocketMode: "0777"},
+			listener: Listener{Socket: "/tmp/test.sock", SocketMode: Mode{0777, true}},
 			wantAddr: "",
 		},
 		{
-			name:     "socket with non-octal digit in mode",
-			listener: Listener{Socket: "/tmp/test.sock", SocketMode: "0890"},
-			wantErr:  true,
-		},
-		{
-			name:     "socket with non-numeric mode string",
-			listener: Listener{Socket: "/tmp/test.sock", SocketMode: "invalid"},
-			wantErr:  true,
-		},
-		{
-			name:     "socket with empty mode string",
-			listener: Listener{Socket: "/tmp/test.sock", SocketMode: ""},
+			name:     "socket mode exceeds valid unix permission bits",
+			listener: Listener{Socket: "/tmp/test.sock", SocketMode: Mode{06660, true}},
 			wantErr:  true,
 		},
 	}
