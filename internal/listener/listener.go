@@ -95,10 +95,9 @@ func (l *Listener) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 // Run starts the HTTP listener and blocks until the server finishes.
 //
-// An error is returned in all cases except for a graceful shutdown triggered by the context being done within the
-// hard time limit.
+// An error is returned in all cases except for a graceful shutdown triggered by the context being done within a
+// hardcoded time limit.
 func (l *Listener) Run(ctx context.Context) error {
-	var listeningFunc func() error
 	stdlogger, err := zap.NewStdLogAt(l.logger.Desugar(), zap.ErrorLevel)
 	if err != nil {
 		return err
@@ -113,6 +112,7 @@ func (l *Listener) Run(ctx context.Context) error {
 		ErrorLog: stdlogger,
 	}
 
+	var listeningFunc func() error
 	if l.useSocket {
 		listeningFunc, err = l.initSocketServer(server)
 	} else {
@@ -214,7 +214,7 @@ func (l *Listener) initSocketServer(server *http.Server) (fn func() error, retEr
 func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (*config.Source, bool) {
 	if authUser, authPass, authOk := r.BasicAuth(); authOk {
 		if l.useSocket {
-			src := l.runtimeConfig.GetSourceFromUsername(authUser, l.logger)
+			src := l.runtimeConfig.GetSourceFromUsername(authUser)
 			if src == nil {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = fmt.Fprintln(w, "expected valid icinga-notifications source basic auth username")

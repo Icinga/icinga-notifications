@@ -197,7 +197,7 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 //
 // This method is intended for connections over trusted transports such as Unix sockets, where the
 // transport itself provides the security guarantee that no password is required.
-func (r *RuntimeConfig) GetSourceFromUsername(user string, logger *logging.Logger) *Source {
+func (r *RuntimeConfig) GetSourceFromUsername(user string) *Source {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -207,7 +207,6 @@ func (r *RuntimeConfig) GetSourceFromUsername(user string, logger *logging.Logge
 		}
 	}
 
-	logger.Debugw("Cannot find source for username", zap.String("user", user))
 	return nil
 }
 

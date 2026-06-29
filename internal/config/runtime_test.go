@@ -2,12 +2,9 @@ package config
 
 import (
 	"testing"
-	"time"
 
-	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap/zaptest"
 )
 
 func TestGetSourceFromUsername(t *testing.T) {
@@ -55,9 +52,7 @@ func TestGetSourceFromUsername(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			logger := logging.NewLogger(zaptest.NewLogger(t).Sugar(), time.Hour)
-			got := rc.GetSourceFromUsername(tc.username, logger)
-			assert.Same(t, tc.want, got)
+			assert.Same(t, tc.want, rc.GetSourceFromUsername(tc.username))
 		})
 	}
 }
