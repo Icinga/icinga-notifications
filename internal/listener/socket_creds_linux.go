@@ -3,13 +3,19 @@
 package listener
 
 import (
+	"fmt"
 	"net"
 
 	"golang.org/x/sys/unix"
 )
 
 func socketPeerCreds(c net.Conn) (*unix.Ucred, error) {
-	rawConn, err := c.(*net.UnixConn).SyscallConn()
+	unixConn, ok := c.(*net.UnixConn)
+	if !ok {
+		return nil, fmt.Errorf("expected *net.UnixConn, got %T", c)
+	}
+
+	rawConn, err := unixConn.SyscallConn()
 	if err != nil {
 		return nil, err
 	}
