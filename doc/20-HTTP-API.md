@@ -11,16 +11,19 @@ After creating a source in Icinga Notifications Web,
 the specified credentials can be used via HTTP Basic Authentication to submit a JSON-encoded
 [`Event`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/event/event.go).
 
-Authentication is performed via HTTP Basic Authentication and differs by transport:
+Authentication differs by transport:
 
-- **TCP:** Both the source's username and password must match the configured credentials.
-- **Unix socket:** Only the source's username is checked. The password field is ignored, as the socket's file permissions provide the access control boundary.
+- **TCP:** HTTP Basic Authentication is used; both the source's username and password must match
+  the configured credentials.
+- **Unix socket:** The daemon identifies the caller via OS peer credentials (`SO_PEERCRED`). It
+  reads the connecting process's UID from the kernel, resolves it to an OS username, and matches
+  it against the source's configured username. No HTTP Basic Auth or password is involved.
 
 !!! warning
 
-    Any system user or process with access to the Unix socket can impersonate any registered source
-    by supplying its username; there is no additional credential check.
-    Restrict socket access carefully using `socket_mode` and `socket_group`.
+    A process connecting via the Unix socket can only submit events for sources whose configured
+    username matches the process's OS username. Restrict socket access using `socket_mode` and
+    `socket_group` to limit which OS users can connect.
 
 !!! info
 
@@ -98,14 +101,14 @@ EOF
 ```
 
 To submit over a Unix socket instead, pass `--unix-socket /run/icinga/icinga-notifications.sock` to curl.
-Only the username is checked, so the password can be omitted (e.g. `-u 'icingadb:'`).
+No credentials are needed; the daemon identifies the caller by their OS user automatically.
 
 ### Get Incidents
 
 A source can query the list of open incidents belonging to its objects using the `/incidents` HTTP API endpoint.
 
-Authentication follows the same transport-specific rules as for event submission: TCP requires both username and
-password, while a Unix socket only requires the username.
+Authentication follows the same transport-specific rules as for event submission: TCP requires HTTP
+Basic Auth with username and password, while a Unix socket identifies the caller by their OS user.
 
 ```
 $ curl -u 'example:insecureinsecure' 'http://localhost:5680/incidents'

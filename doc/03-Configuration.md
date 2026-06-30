@@ -47,11 +47,12 @@ The daemon can run a TCP listener, a Unix socket listener, or both simultaneousl
 When neither `address` nor `socket` is configured, the TCP listener defaults to `localhost:5680`.
 TLS options apply only to the TCP listener.
 
-When a Unix socket is configured, sources submit events by providing their username via HTTP Basic
-Authentication; no password is required, as the socket's file permissions serve as the access
-control boundary. The `socket_mode` option controls those permissions (default `0600`, owner-only).
-To grant a specific OS group access, set `socket_mode` to `0660` and name the group in `socket_group`;
-if no group is set, the socket is owned by the daemon's primary group.
+When a Unix socket is configured, the daemon identifies connecting processes by their OS user:
+it reads the peer's UID from the kernel via `SO_PEERCRED`, resolves it to a username, and matches
+it against the source's configured username. No password or HTTP Basic Auth is involved; the OS
+enforces the identity. The `socket_mode` option controls socket file permissions (default `0600`,
+owner-only). To grant a specific OS group access, set `socket_mode` to `0660` and name the group
+in `socket_group`; if no group is set, the socket is owned by the daemon's primary group.
 
 For YAML configuration, the options are part of the `listener` section.
 For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_LISTENER_`.
@@ -71,9 +72,10 @@ For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_LI
 
 !!! warning
 
-    Granting access to the Unix socket grants event-submission rights for all registered sources.
-    Any process that can connect only needs to provide a valid source username; no password is checked.
-    Keep `socket_mode` at `0600` unless group access is explicitly required, and restrict `socket_group` accordingly.
+    Access to the Unix socket is granted to the OS user whose username matches a configured source.
+    A process can only submit events for sources whose configured username matches the process's OS
+    username. Keep `socket_mode` at `0600` unless group access is explicitly required, and restrict
+    `socket_group` accordingly.
 
 ## Database Configuration
 

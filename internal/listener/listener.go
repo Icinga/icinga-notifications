@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/user"
+	"strconv"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -22,6 +24,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"go.uber.org/zap"
+	"golang.org/x/sys/unix"
 )
 
 // responseWriter is a wrapper around [http.ResponseWriter] that captures the status code written to the response.
@@ -39,6 +42,9 @@ func (rw *responseWriter) WriteHeader(status int) {
 	rw.status = status
 	rw.ResponseWriter.WriteHeader(status)
 }
+
+// listenerUnixDomainSocketCreds is the context key to retrieve the Unix Domain Socket credentials.
+type listenerUnixDomainSocketCreds struct{}
 
 type Listener struct {
 	db            *database.DB
@@ -204,39 +210,49 @@ func (l *Listener) initSocketServer(server *http.Server) (fn func() error, retEr
 		return nil, fmt.Errorf("cannot set permissions on unix socket %q: %w", path, err)
 	}
 
+	server.ConnContext = func(ctx context.Context, c net.Conn) context.Context {
+		creds, err := socketPeerCreds(c)
+		if err != nil {
+			l.logger.Warnw("cannot obtain peer credentials", "error", err)
+			return ctx
+		}
+
+		return context.WithValue(ctx, listenerUnixDomainSocketCreds{}, creds)
+	}
+
 	l.logger.Infof("Starting listener on unix socket %s", path)
 
 	return func() error { return server.Serve(listener) }, nil
 }
 
-// sourceFromAuthOrAbort extracts a *config.Source from the HTTP Basic Auth. If the credentials are wrong, (nil, false) is
-// returned and 401 was written back to the response writer.
+// sourceFromAuthOrAbort extracts a *config.Source from the request. For Unix socket connections, the source is looked
+// up by the OS username of the connecting process via peer credentials. For TCP connections, HTTP Basic Auth is used.
+// If no matching source is found, (nil, false) is returned and 401 is written to the response.
 func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (*config.Source, bool) {
-	if authUser, authPass, authOk := r.BasicAuth(); authOk {
-		if l.useSocket {
-			src := l.runtimeConfig.GetSourceFromUsername(authUser)
-			if src == nil {
-				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = fmt.Fprintln(w, "expected valid icinga-notifications source basic auth username")
-				return nil, false
+	var errMsg string
+	if l.useSocket {
+		if value := r.Context().Value(listenerUnixDomainSocketCreds{}); value != nil {
+			if creds, ok := value.(*unix.Ucred); ok && creds != nil {
+				if u, err := user.LookupId(strconv.Itoa(int(creds.Uid))); err == nil {
+					if src := l.runtimeConfig.GetSourceFromUsername(u.Username); src != nil {
+						return src, true
+					}
+				}
 			}
-
-			if !src.ListenerPasswordHash.Valid {
+		}
+		errMsg = "expected valid unix-user whose username is equal to an existing source username"
+	} else {
+		if authUser, authPass, authOk := r.BasicAuth(); authOk {
+			if src := l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger); src != nil {
 				return src, true
 			}
 		}
-
-		if src := l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger); src != nil {
-			return src, true
-		}
-	}
-
-	if !l.useSocket {
+		errMsg = "expected valid icinga-notifications source basic auth credentials"
 		w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications source"`)
 	}
 
 	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = fmt.Fprintln(w, "expected valid icinga-notifications source basic auth credentials")
+	_, _ = fmt.Fprintln(w, errMsg)
 	return nil, false
 }
 
