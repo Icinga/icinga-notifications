@@ -16,12 +16,13 @@ import (
 )
 
 // Upsert implements the contracts.Upserter interface.
-func (i *Incident) Upsert() interface{} {
+func (i *Incident) Upsert() any {
 	return &struct {
 		Severity    baseEv.Severity `db:"severity"`
 		RecoveredAt types.UnixMilli `db:"recovered_at"`
 		MuteReason  types.String    `db:"mute_reason"`
-	}{Severity: i.Severity, RecoveredAt: i.RecoveredAt, MuteReason: i.MuteReason}
+		Message     types.String    `db:"message"`
+	}{}
 }
 
 // Sync initiates an *incident.IncidentRow from the current incident state and syncs it with the database.
