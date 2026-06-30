@@ -27,22 +27,22 @@ func TestGetSourceFromUsername(t *testing.T) {
 		want     *Source
 	}{
 		{
-			name:     "known username returns correct source",
+			name:     "KnownUsername1",
 			username: "icingadb",
 			want:     srcA,
 		},
 		{
-			name:     "second known username returns correct source",
+			name:     "KnownUsername2",
 			username: "icinga2",
 			want:     srcB,
 		},
 		{
-			name:     "unknown username returns nil",
+			name:     "UnknownUsername",
 			username: "unknown",
 			want:     nil,
 		},
 		{
-			name:     "source without username configured is not matched by empty string",
+			name:     "EmptyUsername",
 			username: "",
 			want:     nil,
 		},

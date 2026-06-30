@@ -136,10 +136,10 @@ func TestSourceFromAuthOrAbort(t *testing.T) {
 		})
 	})
 
-	t.Run("tcp", func(t *testing.T) {
+	t.Run("Tcp", func(t *testing.T) {
 		t.Parallel()
 
-		t.Run("correct credentials succeed", func(t *testing.T) {
+		t.Run("CorrectCredentials", func(t *testing.T) {
 			t.Parallel()
 
 			l, src := makeTestListener(t, false)
@@ -152,7 +152,7 @@ func TestSourceFromAuthOrAbort(t *testing.T) {
 			assert.Same(t, src, gotSrc)
 		})
 
-		t.Run("wrong password returns 401 with WWW-Authenticate", func(t *testing.T) {
+		t.Run("WrongPassword", func(t *testing.T) {
 			t.Parallel()
 
 			l, _ := makeTestListener(t, false)
@@ -167,7 +167,7 @@ func TestSourceFromAuthOrAbort(t *testing.T) {
 			assert.NotEmpty(t, rw.Header().Get("WWW-Authenticate"))
 		})
 
-		t.Run("unknown username returns 401 with WWW-Authenticate", func(t *testing.T) {
+		t.Run("UnknownUsername", func(t *testing.T) {
 			t.Parallel()
 
 			l, _ := makeTestListener(t, false)
@@ -182,7 +182,7 @@ func TestSourceFromAuthOrAbort(t *testing.T) {
 			assert.NotEmpty(t, rw.Header().Get("WWW-Authenticate"))
 		})
 
-		t.Run("missing auth header returns 401 with WWW-Authenticate", func(t *testing.T) {
+		t.Run("MissingAuthHeader", func(t *testing.T) {
 			t.Parallel()
 
 			l, _ := makeTestListener(t, false)
