@@ -149,6 +149,21 @@ func (l *Listener) Run(ctx context.Context) error {
 // sourceFromAuthOrAbort extracts a *config.Source from the HTTP Basic Auth. If the credentials are wrong, (nil, false) is
 // returned and 401 was written back to the response writer.
 func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (*config.Source, bool) {
+	if r.TLS != nil {
+		fmt.Println("enabled TLS")
+		if len(r.TLS.VerifiedChains) > 0 {
+			fmt.Println("TLS with Client Certificate")
+
+			clientCert := r.TLS.VerifiedChains[0][0]
+			if clientCert != nil {
+				fmt.Printf("client cert common name: %v\n", clientCert.Subject.CommonName)
+				src := l.runtimeConfig.GetSourceFromClientCertificate(clientCert.Subject.CommonName)
+				if src != nil {
+					return src, true
+				}
+			}
+		}
+	}
 	if authUser, authPass, authOk := r.BasicAuth(); authOk {
 		src := l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
 		if src != nil {
