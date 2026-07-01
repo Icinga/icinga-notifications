@@ -192,6 +192,19 @@ func (r *RuntimeConfig) GetSourceFromCredentials(user, pass string, logger *logg
 	return src
 }
 
+// GetSourceFromClientCertificate verifies a given common name against known Sources.
+func (r *RuntimeConfig) GetSourceFromClientCertificate(cnName string) *Source {
+	r.RLock()
+	defer r.RUnlock()
+	for _, src := range r.Sources {
+		if src.ClientCertificateCN.Valid && src.ClientCertificateCN.String == cnName {
+			return src
+		}
+	}
+
+	return nil
+}
+
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
 	tx, err := r.db.BeginTxx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,

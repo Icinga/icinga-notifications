@@ -18,6 +18,7 @@ type Source struct {
 	Type string `db:"type"`
 	Name string `db:"name"`
 
+	ClientCertificateCN   types.String `db:"client_certificate_cn"`
 	ListenerUsername      types.String `db:"listener_username"`
 	ListenerPasswordHash  types.String `db:"listener_password_hash"`
 	listenerPassword      []byte       `db:"-"`
