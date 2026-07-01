@@ -43,19 +43,39 @@ It may also be `/usr/lib/icinga-notifications/channels`, depending on the operat
 ## HTTP API Configuration
 
 Configuration of the HTTP API listener for event submission and debugging endpoints.
+The daemon can run a TCP listener, a Unix socket listener, or both simultaneously.
+When neither `address` nor `socket` is configured, the TCP listener defaults to `localhost:5680`.
+TLS options apply only to the TCP listener.
+
+When a Unix socket is configured, the daemon identifies connecting processes by their OS user:
+it reads the peer's UID from the kernel via `SO_PEERCRED`, resolves it to a username, and matches
+it against the source's configured username. No password or HTTP Basic Auth is involved; the OS
+enforces the identity. The `socket_mode` option controls socket file permissions (default `0600`,
+owner-only). To grant a specific OS group access, set `socket_mode` to `0660` and name the group
+in `socket_group`; if no group is set, the socket is owned by the daemon's primary group.
 
 For YAML configuration, the options are part of the `listener` section.
 For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_LISTENER_`.
 
 | Option              | Description                                                                                    |
 |---------------------|------------------------------------------------------------------------------------------------|
-| address             | Address to bind to, port included. (Example: `localhost:5680`)                                 |
+| address             | **Optional.** TCP address to bind to. Defaults to `localhost:5680` when `socket` is not set.  |
+| socket              | **Optional.** Path to a Unix domain socket for local event submission.                         |
+| socket_mode         | **Optional.** Permission bits for the Unix socket file, as an octal string. Defaults to `0600`.|
+| socket_group        | **Optional.** OS group to assign to the Unix socket file.                                      |
 | debug_password      | Password expected via HTTP Basic Authentication for debug endpoints.                           |
 | debug_password_file | `debug_password` in a file.                                                                    |
-| tls                 | **Optional.** Whether to require TLS for the listener. Defaults to `false`.                    |
+| tls                 | **Optional.** Whether to require TLS for the TCP listener. Defaults to `false`.                |
 | cert                | **Optional.** Path to TLS server certificate. Required if `tls` is enabled.                    |
 | key                 | **Optional.** Path to the TLS private key. Required if `tls` is enabled.                       |
 | ca                  | **Optional.** Path to TLS CA cert/bundle to verify client certs. Required if `tls` is enabled. |
+
+!!! warning
+
+    Access to the Unix socket is granted to the OS user whose username matches a configured source.
+    A process can only submit events for sources whose configured username matches the process's OS
+    username. Keep `socket_mode` at `0600` unless group access is explicitly required, and restrict
+    `socket_group` accordingly.
 
 ## Database Configuration
 

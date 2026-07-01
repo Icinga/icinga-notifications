@@ -4,8 +4,11 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
+	"os/user"
+	"strconv"
 
 	"github.com/creasty/defaults"
 	"github.com/icinga/icinga-go-library/config"
@@ -20,9 +23,26 @@ const (
 	ExitFailure = 1
 )
 
+type Mode fs.FileMode
+
+func (m *Mode) UnmarshalText(text []byte) error {
+	parsedString, err := strconv.ParseUint(string(text), 8, 32)
+
+	if err != nil {
+		return fmt.Errorf("invalid socket_mode %q: expected an octal value like 0660: %w", text, err)
+	}
+	*m = Mode(parsedString)
+
+	return nil
+}
+
 // Listener defines the configuration for the Icinga Notifications API listener.
 type Listener struct {
-	Addr              string           `yaml:"address" env:"ADDRESS" default:"localhost:5680"`
+	Addr              string `yaml:"address" env:"ADDRESS"`
+	Socket            string `yaml:"socket" env:"SOCKET"`
+	SocketMode        *Mode  `yaml:"socket_mode" env:"SOCKET_MODE" default:"0600"`
+	SocketGroup       string `yaml:"socket_group" env:"SOCKET_GROUP"`
+	socketGid         string
 	DebugPassword     string           `yaml:"debug_password" env:"DEBUG_PASSWORD"`
 	DebugPasswordFile string           `yaml:"debug_password_file" env:"DEBUG_PASSWORD_FILE"`
 	TLSOptions        config.TLSCommon `yaml:",inline"`
@@ -31,6 +51,37 @@ type Listener struct {
 func (l *Listener) Validate() error {
 	if err := config.LoadPasswordFile(&l.DebugPassword, l.DebugPasswordFile); err != nil {
 		return err
+	}
+
+	if l.Socket != "" {
+		path := l.Socket
+		info, err := os.Stat(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("cannot read socket path: %w", err)
+		} else if err == nil {
+			if info.Mode()&os.ModeSocket == 0 {
+				return fmt.Errorf("the configured socket path already exists and is not a socket: %q", path)
+			}
+			if err := os.Remove(path); err != nil {
+				return fmt.Errorf("cannot remove existing unix socket: %w", err)
+			}
+		}
+
+		if mode := *l.SocketMode; mode > 0o777 {
+			return fmt.Errorf("the socket_mode \"%04o\" is too large (max 777)", mode)
+		} else if mode&0o666 == 0 {
+			return fmt.Errorf(
+				"socket_mode \"%04o\" grants no read/write access; the socket cannot accept connections",
+				mode,
+			)
+		}
+
+		if _, err := l.GetSocketGid(); err != nil {
+			return err
+		}
+	} else if l.Addr == "" {
+		// Only set the default Address for TCP server if no socket path is provided
+		l.Addr = "localhost:5680"
 	}
 
 	if l.TLSOptions.Enable {
@@ -50,6 +101,33 @@ func (l *Listener) Validate() error {
 func (l *Listener) GetTlsConfig() (*tls.Config, error) {
 	tlsOpts := &config.ServerTLS{TLSCommon: l.TLSOptions, ClientAuth: config.TlsClientAuthType(tls.VerifyClientCertIfGiven)}
 	return tlsOpts.MakeConfig()
+}
+
+// GetSocketGid returns the GID of the configured SocketGroup, or -1 if no group is set.
+func (l *Listener) GetSocketGid() (gid int, err error) {
+	if l.socketGid == "" {
+		if groupName := l.SocketGroup; groupName != "" {
+			group, err := user.LookupGroup(groupName)
+			if err != nil {
+				return -1, fmt.Errorf("cannot find group %q: %w", groupName, err)
+			}
+
+			if gid, err = strconv.Atoi(group.Gid); err != nil {
+				return -1, fmt.Errorf("cannot parse GID for group %q: %w", groupName, err)
+			}
+
+			l.socketGid = group.Gid
+		} else {
+			return -1, nil
+		}
+	} else {
+		gid, err = strconv.Atoi(l.socketGid)
+		if err != nil {
+			return -1, fmt.Errorf("cannot parse GID %q: %w", l.socketGid, err)
+		}
+	}
+
+	return gid, nil
 }
 
 type ConfigFile struct {
