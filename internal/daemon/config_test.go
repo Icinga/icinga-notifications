@@ -15,7 +15,7 @@ func TestListenerValidate(t *testing.T) {
 		listener        Listener
 		wantAddr        string
 		wantSocket      string
-		wantSocketMode  Mode
+		wantSocketMode  *Mode
 		wantSocketGroup string
 		wantErr         bool
 	}{
@@ -24,15 +24,14 @@ func TestListenerValidate(t *testing.T) {
 			listener:        Listener{},
 			wantAddr:        "localhost:5680",
 			wantSocket:      "",
-			wantSocketMode:  Mode{},
 			wantSocketGroup: "",
 		},
 		{
 			name:            "SocketOnly",
-			listener:        Listener{Socket: "/tmp/test.sock", SocketMode: Mode{0660, true}},
+			listener:        Listener{Socket: "/tmp/test.sock", SocketMode: new(Mode(0660))},
 			wantAddr:        "",
 			wantSocket:      "/tmp/test.sock",
-			wantSocketMode:  Mode{0660, true},
+			wantSocketMode:  new(Mode(0660)),
 			wantSocketGroup: "",
 		},
 		{
@@ -40,38 +39,37 @@ func TestListenerValidate(t *testing.T) {
 			listener:        Listener{Addr: "localhost:5681"},
 			wantAddr:        "localhost:5681",
 			wantSocket:      "",
-			wantSocketMode:  Mode{},
 			wantSocketGroup: "",
 		},
 		{
 			name:            "AddrAndSocket",
-			listener:        Listener{Addr: "localhost:5681", Socket: "/tmp/test.sock", SocketMode: Mode{0660, true}},
+			listener:        Listener{Addr: "localhost:5681", Socket: "/tmp/test.sock", SocketMode: new(Mode(0660))},
 			wantAddr:        "localhost:5681",
 			wantSocket:      "/tmp/test.sock",
-			wantSocketMode:  Mode{0660, true},
+			wantSocketMode:  new(Mode(0660)),
 			wantSocketGroup: "",
 		},
 		{
 			name:            "PermissiveSocketMode",
-			listener:        Listener{Socket: "/tmp/test.sock", SocketMode: Mode{0777, true}},
+			listener:        Listener{Socket: "/tmp/test.sock", SocketMode: new(Mode(0777))},
 			wantAddr:        "",
 			wantSocket:      "/tmp/test.sock",
-			wantSocketMode:  Mode{0777, true},
+			wantSocketMode:  new(Mode(0777)),
 			wantSocketGroup: "",
 		},
 		{
 			name:     "SocketModeExceedsValidBits",
-			listener: Listener{Socket: "/tmp/test.sock", SocketMode: Mode{06660, true}},
+			listener: Listener{Socket: "/tmp/test.sock", SocketMode: new(Mode(06660))},
 			wantErr:  true,
 		},
 		{
 			name:     "SocketModeNoReadOrWritePermission",
-			listener: Listener{Socket: "/tmp/test.sock", SocketMode: Mode{0100, true}},
+			listener: Listener{Socket: "/tmp/test.sock", SocketMode: new(Mode(0100))},
 			wantErr:  true,
 		},
 		{
 			name:     "SocketGroupNotExists",
-			listener: Listener{Socket: "/tmp/test.sock", SocketMode: Mode{0600, true}, SocketGroup: "unknownGroup"},
+			listener: Listener{Socket: "/tmp/test.sock", SocketMode: new(Mode(0600)), SocketGroup: "unknownGroup"},
 			wantErr:  true,
 		},
 	}

@@ -3,6 +3,7 @@
 package listener
 
 import (
+	"strconv"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -11,7 +12,7 @@ import (
 func socketPeerCreds(rawConn syscall.RawConn) (string, error) {
 	var creds *unix.Ucred
 	var credsErr error
-	err = rawConn.Control(func(fd uintptr) {
+	err := rawConn.Control(func(fd uintptr) {
 		creds, credsErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
 	})
 	if err != nil {

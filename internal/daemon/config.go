@@ -67,9 +67,9 @@ func (l *Listener) Validate() error {
 			}
 		}
 
-		if mode := *l.SocketMode; mode > 0o777 {
+		if mode := l.SocketMode; mode != nil && *mode > 0o777 {
 			return fmt.Errorf("the socket_mode \"%04o\" is too large (max 777)", mode)
-		} else if mode&0o666 == 0 {
+		} else if mode != nil && *mode&0o666 == 0 {
 			return fmt.Errorf(
 				"socket_mode \"%04o\" grants no read/write access; the socket cannot accept connections",
 				mode,
