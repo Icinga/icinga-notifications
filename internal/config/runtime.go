@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
+	"time"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/types"
@@ -13,8 +16,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
-	"sync"
-	"time"
 )
 
 // RuntimeConfig stores the runtime representation of the configuration present in the database.

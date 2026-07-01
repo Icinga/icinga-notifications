@@ -3,12 +3,13 @@ package config
 import (
 	"crypto/subtle"
 	"fmt"
+	"slices"
+	"sync"
+
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/bcrypt"
-	"slices"
-	"sync"
 )
 
 // Source entry within the ConfigSet to describe a source.
