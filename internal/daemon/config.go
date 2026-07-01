@@ -23,12 +23,7 @@ const (
 	ExitFailure = 1
 )
 
-type Mode struct {
-	fs.FileMode
-	// set prevents the defaults library from overwriting an explicit "0000" with the default value.
-	// Without it, Mode{FileMode: 0} is indistinguishable from an unset field, since both are the zero value.
-	set bool
-}
+type Mode fs.FileMode
 
 func (m *Mode) UnmarshalText(text []byte) error {
 	parsedString, err := strconv.ParseUint(string(text), 8, 32)
@@ -36,8 +31,7 @@ func (m *Mode) UnmarshalText(text []byte) error {
 	if err != nil {
 		return fmt.Errorf("invalid socket_mode %q: expected an octal value like 0660: %w", text, err)
 	}
-	m.FileMode = fs.FileMode(parsedString)
-	m.set = true
+	*m = Mode(parsedString)
 
 	return nil
 }
@@ -46,7 +40,7 @@ func (m *Mode) UnmarshalText(text []byte) error {
 type Listener struct {
 	Addr              string `yaml:"address" env:"ADDRESS"`
 	Socket            string `yaml:"socket" env:"SOCKET"`
-	SocketMode        Mode   `yaml:"socket_mode" env:"SOCKET_MODE" default:"0600"`
+	SocketMode        *Mode  `yaml:"socket_mode" env:"SOCKET_MODE" default:"0600"`
 	SocketGroup       string `yaml:"socket_group" env:"SOCKET_GROUP"`
 	socketGid         string
 	DebugPassword     string           `yaml:"debug_password" env:"DEBUG_PASSWORD"`
@@ -73,7 +67,7 @@ func (l *Listener) Validate() error {
 			}
 		}
 
-		if mode := l.SocketMode.FileMode; mode > 0o777 {
+		if mode := *l.SocketMode; mode > 0o777 {
 			return fmt.Errorf("the socket_mode \"%04o\" is too large (max 777)", mode)
 		} else if mode&0o666 == 0 {
 			return fmt.Errorf(

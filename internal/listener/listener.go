@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
 	"os/user"
-	"strconv"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -24,7 +24,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"go.uber.org/zap"
-	"golang.org/x/sys/unix"
 )
 
 // responseWriter is a wrapper around [http.ResponseWriter] that captures the status code written to the response.
@@ -43,8 +42,8 @@ func (rw *responseWriter) WriteHeader(status int) {
 	rw.ResponseWriter.WriteHeader(status)
 }
 
-// listenerUnixDomainSocketCreds is the context key to retrieve the Unix Domain Socket credentials.
-type listenerUnixDomainSocketCreds struct{}
+// listenerUnixDomainSocketCreds is the context key to retrieve the Uid of the Unix Domain Socket user.
+type listenerUnixDomainSocketUid struct{}
 
 type Listener struct {
 	db            *database.DB
@@ -177,7 +176,7 @@ func (l *Listener) initTcpServer(server *http.Server) (func() error, error) {
 // The caller is responsible for actually calling that function and for graceful shutdown.
 func (l *Listener) initSocketServer(server *http.Server) (fn func() error, retErr error) {
 	conf := daemon.Config().Listener
-	mode := conf.SocketMode.FileMode
+	mode := *conf.SocketMode
 	if mode&0o006 > 0 {
 		l.logger.Warnw("Unix socket is world-accessible; consider restricting socket_mode and using socket_group instead",
 			zap.String("socket_mode", fmt.Sprintf("%04o", mode)),
@@ -206,18 +205,30 @@ func (l *Listener) initSocketServer(server *http.Server) (fn func() error, retEr
 		}
 	}
 
-	if err := os.Chmod(path, mode); err != nil {
+	if err := os.Chmod(path, fs.FileMode(mode)); err != nil {
 		return nil, fmt.Errorf("cannot set permissions on unix socket %q: %w", path, err)
 	}
 
 	server.ConnContext = func(ctx context.Context, c net.Conn) context.Context {
-		creds, err := socketPeerCreds(c)
-		if err != nil {
-			l.logger.Warnw("cannot obtain peer credentials", "error", err)
+		unixConn, ok := c.(*net.UnixConn)
+		if !ok {
+			l.logger.Warnw("expected *net.UnixConn", zap.String("connection_type", fmt.Sprintf("%T", c)), zap.Error(err))
 			return ctx
 		}
 
-		return context.WithValue(ctx, listenerUnixDomainSocketCreds{}, creds)
+		rawConn, err := unixConn.SyscallConn()
+		if err != nil {
+			l.logger.Warnw("Cannot extract RawConnection", zap.Error(err))
+			return ctx
+		}
+
+		uid, err := socketPeerCreds(rawConn)
+		if err != nil {
+			l.logger.Warnw("Cannot obtain peer credentials", zap.Error(err))
+			return ctx
+		}
+
+		return context.WithValue(ctx, listenerUnixDomainSocketUid{}, uid)
 	}
 
 	l.logger.Infof("Starting listener on unix socket %s", path)
@@ -231,9 +242,9 @@ func (l *Listener) initSocketServer(server *http.Server) (fn func() error, retEr
 func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (*config.Source, bool) {
 	var errMsg string
 	if l.useSocket {
-		if value := r.Context().Value(listenerUnixDomainSocketCreds{}); value != nil {
-			if creds, ok := value.(*unix.Ucred); ok && creds != nil {
-				if u, err := user.LookupId(strconv.Itoa(int(creds.Uid))); err == nil {
+		if value := r.Context().Value(listenerUnixDomainSocketUid{}); value != nil {
+			if uid, ok := value.(string); ok && uid != "" {
+				if u, err := user.LookupId(uid); err == nil {
 					if src := l.runtimeConfig.GetSourceFromUsername(u.Username); src != nil {
 						return src, true
 					}

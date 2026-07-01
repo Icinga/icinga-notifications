@@ -3,36 +3,27 @@
 package listener
 
 import (
-	"fmt"
-	"net"
+	"strconv"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
 
-func socketPeerCreds(c net.Conn) (*unix.Ucred, error) {
-	unixConn, ok := c.(*net.UnixConn)
-	if !ok {
-		return nil, fmt.Errorf("expected *net.UnixConn, got %T", c)
-	}
-
-	rawConn, err := unixConn.SyscallConn()
-	if err != nil {
-		return nil, err
-	}
+func socketPeerCreds(rawConn syscall.RawConn) (string, error) {
 
 	var xucreds *unix.Xucred
 	var xucredsErr error
-	err = rawConn.Control(func(fd uintptr) {
+	err := rawConn.Control(func(fd uintptr) {
 		xucreds, xucredsErr = unix.GetsockoptXucred(int(fd), unix.SOL_SOCKET, unix.LOCAL_PEERCRED)
 	})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if xucredsErr != nil {
-		return nil, xucredsErr
+		return "", xucredsErr
 	}
 
-	return &unix.Ucred{
-		Uid: xucreds.Uid,
-	}, nil
+	uid := strconv.FormatUint(uint64(xucreds.Uid), 10)
+
+	return uid, nil
 }
