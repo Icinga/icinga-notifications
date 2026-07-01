@@ -2,6 +2,7 @@ package incident
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sync"
 	"time"
@@ -199,6 +200,37 @@ func GetCurrentIncidentsForSource(sourceID int64) []*Incident {
 // ErrOpenIncidentWithoutSeverity is returned when an event tries to open a new incident without a severity.
 var ErrOpenIncidentWithoutSeverity = errors.New("cannot open or escalate an incident without a severity")
 
+// loadOpenIncidentForObject checks the database for an open Incident and adds it to currentIncidents.
+//
+// In HA setups, another node may have created an Incident we don't know about after loadOpenIncidents.
+func loadOpenIncidentForObject(
+	ctx context.Context,
+	db *database.DB,
+	logger *logging.Logger,
+	runtimeConfig *config.RuntimeConfig,
+	obj *object.Object,
+) error {
+	i := NewIncident(db, obj, runtimeConfig, logger.With(zap.String("object", obj.DisplayName())))
+
+	stmt := db.Rebind(db.BuildSelectStmt(i, i) + ` WHERE "recovered_at" IS NULL AND "object_id" = ?`)
+	err := db.GetContext(ctx, i, stmt, obj.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return errors.Wrap(err, "cannot load open incident for object")
+	}
+
+	i.logger = i.logger.With(zap.String("incident", i.String()))
+
+	currentIncidentsMu.Lock()
+	defer currentIncidentsMu.Unlock()
+	if currentIncidents[obj] == nil {
+		currentIncidents[obj] = i
+	}
+
+	return nil
+}
+
 // ProcessEvent from an event.Event.
 //
 // This function first gets this Event's object.Object and its incident.Incident. Then, after performing some safety
@@ -215,6 +247,14 @@ func ProcessEvent(
 	ev *event.Event,
 ) error {
 	o := object.Get(db, ev)
+
+	if !HasCurrent(o) {
+		err := loadOpenIncidentForObject(ctx, db, logs.GetChildLogger("incident"), runtimeConfig, o)
+		if err != nil {
+			return err
+		}
+	}
+
 	if ev.OpenOrEscalate() && ev.Severity == baseEv.SeverityNone && !HasCurrent(o) {
 		return ErrOpenIncidentWithoutSeverity
 	}
@@ -233,7 +273,12 @@ func ProcessEvent(
 		return nil
 	}
 
-	return currentIncident.ProcessEvent(ctx, ev)
+	if err := currentIncident.ProcessEvent(ctx, ev); errors.Is(err, ErrIncidentRecovered) {
+		// If in an HA setup another node just have closed the incident, retry after the cache entry was removed.
+		return ProcessEvent(ctx, db, logs, runtimeConfig, ev)
+	} else {
+		return err
+	}
 }
 
 // HasCurrent returns true if there is an active incident for the given object.
