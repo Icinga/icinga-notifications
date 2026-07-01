@@ -103,6 +103,57 @@ For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_DA
 | max_rows_per_transaction       | **Optional.** Maximum number of rows Icinga Notifications is allowed to `SELECT`,`DELETE`,`UPDATE` or `INSERT` in a single transaction. Defaults to `8192`. |
 | wsrep_sync_wait                | **Optional.** Enforce [Galera cluster](#galera-cluster) nodes to perform strict cluster-wide causality checks. Defaults to `7`.                             |
 
+## Retention Configuration
+
+You can configure the data retention and cleanup behavior of Icinga Notifications to automatically remove old data
+from the database after a certain period. This helps to manage the size of the database and ensure that it does not
+grow indefinitely.
+
+For YAML configuration, the options are part of the `retention` dictionary.
+For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_RETENTION_`.
+
+| Option     | Description                                                                                                                                                                                                        |
+|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| period     | **Optional.** Retention period defined as [duration string](#duration-string). Defaults to `0s` (disabled). Data older than this period will be automatically deleted from the database.                           |
+| interval   | **Optional.** Interval for periodic retention checks defined as [duration string](#duration-string). Defaults to `1h`.                                                                                             |
+| batch_size | **Optional.** Maximum number of rows to delete in a single transaction during retention cleanup. Defaults to `5000`.                                                                                               |
+| options    | **Optional.** Map of component name to retention period in order to set a different retention period for each component instead of the default one. See [retention components](#retention-components) for details. |
+
+!!! info
+
+    By default, Icinga Notifications does not delete any data from the database, since the default retention period is
+    `0s`, which means that all data is retained indefinitely. You can set the `period` option to a non-zero value to
+    enable automatic data cleanup after the specified period has passed.
+
+If you don't want to enable automatic data cleanup for all components, you can let the `period` option be `0s` and set
+non-zero retention periods for individual components in the `options` as [described below](#retention-components).
+This goes also for the other way around, if you want to enable automatic data cleanup for all components, you can set
+the `period` option to a non-zero value and set `0s` retention periods for a specific component to disable automatic
+data cleanup for that component.
+
+### Retention Components
+
+In addition to the default retention period, you can set a different retention period for each component of
+Icinga Notifications. This allows you to keep certain types of data for a longer or shorter period than others,
+depending on their importance or relevance.
+
+For YAML configuration, the options are part of the `retention.options` dictionary.
+For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_RETENTION_OPTIONS_` and expects
+a [duration string](#duration-string) as value.
+
+Currently, the following components are available:
+
+| Component | Description                                                           |
+|-----------|-----------------------------------------------------------------------|
+| incident  | Incidents and all related data, such as their history, contacts, etc. |
+
+!!! info
+
+    Incidents that are still open are not eligible for retention cleanup, even if they are open for months or years.
+    The retention policy only applies to closed incidents, and the retention period is computed from the time they were
+    closed, not from the time they were opened. If you want to clean up some incidents that are still open too, you need
+    to close them first, and then wait for the retention period to pass.
+
 ## Logging Configuration
 
 Configuration of the logging component used by Icinga Notifications.
@@ -151,6 +202,7 @@ ICINGA_NOTIFICATIONS_LOGGING_OPTIONS=database:error,listener:debug
 | database        | Database connection status and queries.                                   |
 | incident        | Incident management and changes.                                          |
 | listener        | HTTP listener for event submission and debugging.                         |
+| retention       | Data retention and cleanup.                                               |
 | runtime-updates | Configuration changes through Icinga Notifications Web from the database. |
 
 ## Appendix

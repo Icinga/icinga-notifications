@@ -60,6 +60,35 @@ database:
   password: CHANGEME
 #  password_file: /run/secerets/icinga_notifications_database_password
 
+# The retention policy used by Icinga Notifications to determine how long no longer relevant historical data
+# is kept in the database before it is eligible for cleanup. Currently, this retention policy only applies to
+# closed incidents and related tables, but in the future it may be extended to other components as well.
+retention:
+  # Retention period for historical data defined as duration string. This is the duration after which historical data
+  # is considered old and eligible for cleanup. By default, Icinga Notifications does not automatically clean up any
+  # data, i.e. the retention period is set to 0s. Setting this to a non-zero value enables the retention policy and
+  # allows Icinga Notifications to automatically clean up historical data that is older than the specified duration.
+  #
+  # Valid units are "ms", "s", "m", "h". Defaults to "0s", which means no automatic cleanup.
+#  period: 0s
+
+  # Interval for periodic cleanup of historical data defined as duration string. This is the interval at which
+  # Icinga Notifications will run the cleanup process to prune old historical data as defined by the retention period.
+  # Valid units are "ms", "s", "m", "h". Defaults to "1h".
+#  interval: 1h
+
+  # Batch size for deleting historical data. This is the maximum number of records that will be deleted in a single
+  # batch during the cleanup process. This is used to avoid long-running transactions and high load on the database
+  # when deleting large amounts of historical data. Defaults to 5000.
+#  batch_size: 5000
+
+  # Map of component-retention period pairs to define a different retention period than the default value for each
+  # component. The retention period for each component defines how long historical data related to that component
+  # is kept before it is eligible for cleanup. If a component is not listed here, the default retention period defined
+  # above is used.
+#  options:
+#    incident: 480h
+
 # Icinga Notifications logs its activities at various severity levels and any errors that occur either
 # on the console or in systemd's journal. The latter is used automatically when running under systemd.
 # In any case, the default log level is 'info'.
@@ -84,4 +113,5 @@ database:
     #database:
     #incident:
     #listener:
+    #retention:
     #runtime-updates:

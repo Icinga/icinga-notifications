@@ -360,6 +360,8 @@ CREATE TABLE incident (
     CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
+CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
+
 CREATE TABLE incident_contact (
     incident_id bigint NOT NULL,
     contact_id bigint,
