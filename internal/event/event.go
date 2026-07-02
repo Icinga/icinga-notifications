@@ -23,7 +23,7 @@ import (
 // into its JSON representation.
 type Event struct {
 	Time     time.Time `json:"-"`
-	SourceId int64     `json:"-"`
+	SourceId int64     `json:"source_id"`
 
 	baseEv.Event `json:",inline"`
 

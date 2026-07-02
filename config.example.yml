@@ -112,6 +112,7 @@ retention:
     #channel:
     #database:
     #incident:
+    #event-queue:
     #listener:
     #retention:
     #runtime-updates:

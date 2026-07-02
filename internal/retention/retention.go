@@ -2,6 +2,7 @@ package retention
 
 import (
 	"context"
+	"time"
 
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
@@ -36,8 +37,15 @@ func (r *Retention) Run(ctx context.Context) error {
 	var errs chan error
 	for _, pruner := range dbPruners {
 		period := conf.Period
+		interval := conf.Interval
+
 		if pruner.Table == "incident" && conf.Options.Incident != nil {
 			period = *conf.Options.Incident
+		}
+
+		if pruner.OverridePeriodAndInterval != 0 {
+			period = pruner.OverridePeriodAndInterval
+			interval = pruner.OverridePeriodAndInterval
 		}
 
 		if period == 0 {
@@ -51,10 +59,10 @@ func (r *Retention) Run(ctx context.Context) error {
 
 		r.logger.Debugw("Starting retention",
 			zap.String("table", pruner.Table),
-			zap.Duration("interval", conf.Interval),
+			zap.Duration("interval", interval),
 			zap.Duration("period", period))
 
-		periodic.Start(ctx, conf.Interval, func(tick periodic.Tick) {
+		periodic.Start(ctx, interval, func(tick periodic.Tick) {
 			olderThan := tick.Time.Add(-period)
 
 			r.logger.Debugf("Pruning data from table %s older than %s", pruner.Table, olderThan)
@@ -102,5 +110,30 @@ var dbPruners = []TimeBoundPruner{
 			{Table: "incident_history", FK: "incident_id"},
 			{Table: "incident_rule_escalation_state", FK: "incident_id"},
 		},
+	},
+	// Extra pruners for the event_queue.
+	{
+		// Events being processed too long - implies crashed daemon.
+		Table:                     "event_queue",
+		PK:                        "id",
+		TimeColumn:                "time",
+		ExtraCondition:            "state = 1",
+		OverridePeriodAndInterval: 15 * time.Minute,
+	},
+	{
+		// Successfully processed events.
+		Table:                     "event_queue",
+		PK:                        "id",
+		TimeColumn:                "time",
+		ExtraCondition:            "state = 2",
+		OverridePeriodAndInterval: 5 * time.Minute,
+	},
+	{
+		// Events in the error state.
+		Table:                     "event_queue",
+		PK:                        "id",
+		TimeColumn:                "time",
+		ExtraCondition:            "state = 64",
+		OverridePeriodAndInterval: 24 * time.Hour,
 	},
 }

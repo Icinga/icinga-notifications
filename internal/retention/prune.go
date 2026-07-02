@@ -3,6 +3,7 @@ package retention
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/icinga/icinga-go-library/backoff"
 	"github.com/icinga/icinga-go-library/com"
@@ -23,7 +24,11 @@ type TimeBoundPruner struct {
 	PK         string
 	TimeColumn string
 
-	Referrers []ReferencingRowPruner
+	Referrers      []ReferencingRowPruner
+	ExtraCondition string
+
+	// OverridePeriodAndInterval, when non-zero, overrides the global retention period and interval to this value.
+	OverridePeriodAndInterval time.Duration
 }
 
 // Exec prunes rows from the specified table that are older than the given time threshold.
@@ -78,9 +83,20 @@ func (tbp *TimeBoundPruner) Exec(ctx context.Context, db *database.DB, olderThan
 	}
 }
 
+// whereClause returns the additional WHERE with an AND from WhereCondition, if set, or an empty string otherwise.
+func (tbp *TimeBoundPruner) whereClause() string {
+	if tbp.ExtraCondition != "" {
+		return "AND " + tbp.ExtraCondition
+	}
+
+	return ""
+}
+
 // assembleSelect constructs a select stmt to retrieve primary keys of this pruner based on the time column and limit.
 func (tbp *TimeBoundPruner) assembleSelect(limit uint64) string {
-	return fmt.Sprintf(`SELECT %s FROM %s WHERE %[3]s IS NOT NULL AND %[3]s < ? LIMIT %d`, tbp.PK, tbp.Table, tbp.TimeColumn, limit)
+	return fmt.Sprintf(
+		`SELECT %[1]s FROM %[2]s WHERE %[3]s IS NOT NULL AND %[3]s < ? %[4]s LIMIT %[5]d`,
+		tbp.PK, tbp.Table, tbp.TimeColumn, tbp.whereClause(), limit)
 }
 
 // assembleDelete constructs a delete stmt for this pruner based on the database driver and whether we are
@@ -93,12 +109,14 @@ func (tbp *TimeBoundPruner) assembleDelete(driverName string, limit uint64, byPK
 
 	switch driverName {
 	case database.MySQL:
-		return fmt.Sprintf(`DELETE FROM %s WHERE %[2]s IS NOT NULL AND %[2]s < ? LIMIT %d`, tbp.Table, tbp.TimeColumn, limit)
+		return fmt.Sprintf(
+			`DELETE FROM %[1]s WHERE %[2]s IS NOT NULL AND %[2]s < ? %[3]s LIMIT %[4]d`,
+			tbp.Table, tbp.TimeColumn, tbp.whereClause(), limit)
 	case database.PostgreSQL:
 		return fmt.Sprintf(`
-WITH rows AS (SELECT %[1]s FROM %[2]s WHERE %[3]s IS NOT NULL AND %[3]s < ? LIMIT %[4]d)
-DELETE FROM %[2]s WHERE %[1]s IN (SELECT * FROM rows)`,
-			tbp.PK, tbp.Table, tbp.TimeColumn, limit)
+			WITH rows AS (SELECT %[1]s FROM %[2]s WHERE %[3]s IS NOT NULL AND %[3]s < ? %[4]s LIMIT %[5]d)
+			DELETE FROM %[2]s WHERE %[1]s IN (SELECT * FROM rows)`,
+			tbp.PK, tbp.Table, tbp.TimeColumn, tbp.whereClause(), limit)
 	default:
 		panic(fmt.Sprintf("invalid database type %s", driverName))
 	}
