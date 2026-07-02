@@ -18,12 +18,14 @@ import (
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/notifications"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/object"
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )
 
@@ -76,7 +78,7 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 
 	l.mux.Handle("/debug/", http.StripPrefix("/debug", l.requireDebugAuth(debugMux)))
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
-	l.mux.HandleFunc("/incidents", l.GetIncidents)
+	l.mux.HandleFunc("/incidents", l.IncidentsHandler)
 	return l
 }
 
@@ -410,9 +412,14 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintln(w)
 }
 
-func (l *Listener) GetIncidents(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		l.abort(w, http.StatusMethodNotAllowed, nil, "POST required")
+// IncidentsHandler handles GET and POST requests to the /incidents endpoint.
+//
+// It performs authentication using HTTP Basic Auth and delegates the actual handling to [Listener.getIncidents]
+// for GET requests and [Listener.modifyIncident] for POST requests. If the request method is neither GET nor POST,
+// it responds with a 405 Method Not Allowed status.
+func (l *Listener) IncidentsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		l.abort(w, http.StatusMethodNotAllowed, nil, "GET or POST required")
 		return
 	}
 
@@ -422,21 +429,117 @@ func (l *Listener) GetIncidents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Temporary struct type to use for incident serialization. The Incident type itself isn't directly passed to the
-	// JSON because that returns all fields for the DumpIncidents() debug endpoint.
-	type SerializableIncident struct {
-		Incident   string            `json:"incident"`
-		ObjectTags map[string]string `json:"object_tags"`
-		Severity   baseEv.Severity   `json:"severity"`
+	qs := r.URL.Query().Get("filter")
+	if qs == "" {
+		l.abort(w, http.StatusBadRequest, nil, "missing required filter query parameter")
+		return
 	}
 
+	filter, err := ParseQueryFilter(qs)
+	if err != nil {
+		l.logger.Warnw("Error parsing filter", zap.String("qs", qs), zap.Error(err))
+		l.abort(w, http.StatusBadRequest, src, "failed to parse provided query string: %v", err)
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		l.getIncidents(w, src, filter)
+	} else {
+		l.modifyIncidents(w, r, src, filter)
+	}
+}
+
+// modifyIncidents handles POST requests to the /incidents endpoint.
+//
+// It retrieves the current incidents for the authenticated source, applies any filters provided in the query params,
+// and modifies the filtered incidents based on the JSON body of the request. The JSON body can contain a "message"
+// field to update the incident message and a "close" field to close the incident. If there is an error parsing the
+// filters or evaluating them against the incidents, it responds with an appropriate HTTP status code and error message.
+func (l *Listener) modifyIncidents(w http.ResponseWriter, r *http.Request, src *config.Source, filter any) {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+
+	var attrs source.ModifiableIncidentAttrs
+	if err := dec.Decode(&attrs); err != nil {
+		l.abort(w, http.StatusBadRequest, src, "cannot parse JSON body: %v", err)
+		return
+	}
+
+	if err := attrs.Validate(); err != nil {
+		l.abort(w, http.StatusBadRequest, src, "invalid request body: %v", err)
+		return
+	}
+
+	var results []any
+	status := http.StatusOK
+	for _, i := range incident.GetCurrentIncidentsForSource(src.ID) {
+		if match, err := EvaluateQueryFilter(filter, i.Object.Tags); err != nil {
+			l.abort(w, http.StatusBadRequest, src, "invalid query string filter: %v", err)
+			return
+		} else if match {
+			err := l.db.ExecTx(r.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
+				i.Lock()
+				defer i.Unlock()
+
+				// Note, currently if we fail to commit the tx, the incident will be left in a modified state in
+				// memory, but not in the database. This is a known limitation, but it is acceptable for the time
+				// being until https://github.com/Icinga/icinga-notifications/pull/463 gets merged.
+				if attrs.Message.Valid {
+					i.Message = attrs.Message
+				}
+
+				if attrs.Close.Valid {
+					return i.Close(ctx, tx, true)
+				}
+				return i.Sync(ctx, tx)
+			})
+			if err != nil {
+				l.logger.Errorw("Failed to modify incident", zap.String("source", src.Name), zap.Error(err))
+				status = http.StatusInternalServerError
+				results = append(results, map[string]any{
+					"object_tags": i.Object.Tags,
+					"code":        status,
+					"status":      "failed to modify incident, see server logs for details",
+				})
+			} else {
+				results = append(results, map[string]any{
+					"object_tags": i.Object.Tags,
+					"code":        http.StatusOK,
+					"status":      "incident modified successfully",
+				})
+			}
+		}
+	}
+
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(results); err != nil {
+		l.logger.Errorw("Failed to serialize modify incidents response", zap.String("source", src.Name), zap.Error(err))
+	}
+}
+
+// getIncidents handles GET requests to the /incidents endpoint.
+//
+// It retrieves the current incidents for the authenticated source, applies any filters provided in the query
+// parameters, and returns the filtered incidents as a JSON response. If there is an error parsing the filters
+// or evaluating them against the incidents, it responds with an appropriate HTTP status code and error message.
+//
+// The filters are evaluated against the object tags of each incident, and only incidents that match the filters
+// are included in the response.
+func (l *Listener) getIncidents(w http.ResponseWriter, src *config.Source, filter any) {
 	incidents := incident.GetCurrentIncidentsForSource(src.ID)
-	result := make([]*SerializableIncident, 0, len(incidents))
+	result := make([]*source.Incident, 0, len(incidents))
 	for _, inc := range incidents {
-		if inc.Object.SourceID == src.ID {
+		if match, err := EvaluateQueryFilter(filter, inc.Object.Tags); err != nil {
+			l.abort(w, http.StatusBadRequest, src, "%+v", err)
+			return
+		} else if match {
 			inc.Lock()
-			result = append(result, &SerializableIncident{
-				Incident:   inc.String(),
+			result = append(result, &source.Incident{
+				IsMuted:    inc.IsMuted(),
 				ObjectTags: inc.Object.Tags,
 				Severity:   inc.Severity,
 			})
@@ -447,8 +550,7 @@ func (l *Listener) GetIncidents(w http.ResponseWriter, r *http.Request) {
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	err := enc.Encode(result)
-	if err != nil {
+	if err := enc.Encode(result); err != nil {
 		l.logger.Errorw("Failed to serialize incidents for source", zap.Object("source", src), zap.Error(err))
 		return
 	}
