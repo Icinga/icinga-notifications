@@ -151,18 +151,20 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 
 		i.logger = i.logger.With(zap.String("incident", i.String()))
 	} else {
+		if err := i.restoreState(ctx, tx); err != nil {
+			return err
+		}
+
+		if !i.RecoveredAt.Time().IsZero() {
+			RemoveCurrent(i.Object)
+			return ErrIncidentRecovered
+		}
+
 		if sevChanged, err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
 			return err
 		} else {
 			// In case the severity didn't change, we need to check whether we can trigger notifications nonetheless.
 			triggerNotifications = sevChanged || ev.NotifyRecipients() || (ev.Muted.Valid && ev.IsMuted() != i.IsMuted())
-		}
-
-		// For all existing incidents, we have to reload the recipients from the database to ensure that we have the
-		// most up-to-date recipient list, since the recipients or recipients roles might have changed since users
-		// are allowed to subscribe or manage incidents from within Icinga Notifications Web.
-		if err := i.restoreRecipients(ctx); err != nil {
-			return err
 		}
 	}
 
@@ -241,6 +243,19 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 	i.runtimeConfig.RLock()
 	defer i.runtimeConfig.RUnlock()
 
+	ctx := context.Background()
+	tx, err := i.db.BeginTxx(ctx, nil)
+	if err != nil {
+		i.logger.Errorw("Cannot start a db transaction for escalation reevaluation", zap.Error(err))
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := i.restoreState(ctx, tx); err != nil {
+		i.logger.Errorw("Cannot restore incident state for escalation reevaluation", zap.Error(err))
+		return
+	}
+
 	if !i.RecoveredAt.Time().IsZero() {
 		// Incident is recovered in the meantime.
 		return
@@ -262,31 +277,33 @@ func (i *Incident) RetriggerEscalations(ev *event.Event) {
 		return
 	}
 
-	var notifications []*NotificationEntry
-	ctx := context.Background()
-	err = i.db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) error {
-		if err = i.triggerEscalations(ctx, tx, escalations); err != nil {
-			return err
-		}
+	if err := i.triggerEscalations(ctx, tx, escalations); err != nil {
+		i.logger.Errorw("Reevaluating time-based escalations failed", zap.Error(err))
+		return
+	}
 
-		channels := make(rule.ContactChannels)
-		for _, escalation := range escalations {
-			channels.LoadFromEscalationRecipients(escalation, ev.Time, i.isRecipientNotifiable)
-		}
+	channels := make(rule.ContactChannels)
+	for _, escalation := range escalations {
+		channels.LoadFromEscalationRecipients(escalation, ev.Time, i.isRecipientNotifiable)
+	}
 
-		notifications, err = i.generateNotifications(ctx, tx, ev, channels)
-		return err
-	})
+	notifications, err := i.generateNotifications(ctx, tx, ev, channels)
 	if err != nil {
 		i.logger.Errorw("Reevaluating time-based escalations failed", zap.Error(err))
-	} else {
-		if err = i.notifyContacts(ctx, ev, notifications); err != nil {
-			i.logger.Errorw("Failed to notify reevaluated escalation recipients", zap.Error(err))
-			return
-		}
-
-		i.logger.Info("Successfully reevaluated time-based escalations")
+		return
 	}
+
+	if err := tx.Commit(); err != nil {
+		i.logger.Errorw("Cannot commit transaction for escalation reevaluation", zap.Error(err))
+		return
+	}
+
+	if err := i.notifyContacts(ctx, ev, notifications); err != nil {
+		i.logger.Errorw("Failed to notify reevaluated escalation recipients", zap.Error(err))
+		return
+	}
+
+	i.logger.Info("Successfully reevaluated time-based escalations")
 }
 
 // Close closes the current incident if not already recovered.
@@ -324,6 +341,11 @@ func (i *Incident) Close(ctx context.Context, tx *sqlx.Tx, persist bool) error {
 // ErrSeverityChangeWithoutIncidentFlag is returned when an event tries to change the severity of an incident
 // but does not set the 'incident' flag.
 var ErrSeverityChangeWithoutIncidentFlag = errors.New("cannot change severity of an incident with an event that doesn't set the 'incident' flag")
+
+// ErrIncidentRecovered is returned when an incident was found to be already recovered by another node in HA mode.
+//
+// When Incident.Listener returns this error, the related object was removed from the current incidents.
+var ErrIncidentRecovered = errors.New("incident was recovered by another node")
 
 // processSeverityChangedEvent processes the given event as a severity changed event, if the severity has actually changed.
 //
@@ -701,12 +723,46 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	return contactChs
 }
 
-// restoreRecipients reloads the current incident recipients from the database.
-// Returns error on database failure.
-func (i *Incident) restoreRecipients(ctx context.Context) error {
-	contact := &ContactRow{}
+// restoreState reloads all incident state from the database within the given transaction.
+//
+// This method must be called for existing Incidents before processing an event, as another node in an HA setup may
+// have altered the state in the meantime. The incident row is locked via SELECT FOR UPDATE so that concurrent calls
+// on other nodes for the same incident are serialized until the caller commits.
+func (i *Incident) restoreState(ctx context.Context, tx *sqlx.Tx) error {
+	stmt := i.db.Rebind(i.db.BuildSelectStmt(i, i) + ` WHERE "id" = ? FOR UPDATE`)
+	if err := tx.GetContext(ctx, i, stmt, i.Id); err != nil {
+		i.logger.Errorw("Failed to restore incident row from the database", zap.Error(err))
+		return err
+	}
+
+	var states []*EscalationState
+	err := tx.SelectContext(
+		ctx,
+		&states,
+		i.db.Rebind(i.db.BuildSelectStmt(new(EscalationState), new(EscalationState))+` WHERE "incident_id" = ?`),
+		i.Id)
+	if err != nil {
+		i.logger.Errorw("Failed to restore incident escalation states from the database", zap.Error(err))
+		return err
+	}
+
+	escalationStates := make(map[escalationID]*EscalationState)
+	rules := make(map[ruleID]struct{})
+	for _, state := range states {
+		escalationStates[state.RuleEscalationID] = state
+		if escalation := i.runtimeConfig.GetRuleEscalation(state.RuleEscalationID); escalation != nil {
+			rules[escalation.RuleID] = struct{}{}
+		}
+	}
+	i.EscalationState = escalationStates
+	i.Rules = rules
+
 	var contacts []*ContactRow
-	err := i.db.SelectContext(ctx, &contacts, i.db.Rebind(i.db.BuildSelectStmt(contact, contact)+` WHERE "incident_id" = ?`), i.Id)
+	err = tx.SelectContext(
+		ctx,
+		&contacts,
+		i.db.Rebind(i.db.BuildSelectStmt(new(ContactRow), new(ContactRow))+` WHERE "incident_id" = ?`),
+		i.Id)
 	if err != nil {
 		i.logger.Errorw("Failed to restore incident recipients from the database", zap.Error(err))
 		return err
@@ -716,7 +772,6 @@ func (i *Incident) restoreRecipients(ctx context.Context) error {
 	for _, contact := range contacts {
 		recipients[contact.Key] = &RecipientState{Role: contact.Role}
 	}
-
 	i.Recipients = recipients
 
 	return nil

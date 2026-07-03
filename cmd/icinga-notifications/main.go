@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -14,13 +15,25 @@ import (
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
+	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
 	"github.com/icinga/icinga-notifications/internal/retention"
 	"github.com/okzk/sdnotify"
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
+)
+
+const (
+	ExitSuccess = 0
+	ExitFailure = 1
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	daemon.ParseFlagsAndConfig()
 	conf := daemon.Config()
 
@@ -65,19 +78,69 @@ func main() {
 		logger.Fatalf("Cannot load incidents from database: %+v", err)
 	}
 
-	ret := retention.New(db, logs.GetChildLogger("retention"))
-	go func() {
-		if err := ret.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			logger.Fatalf("Retention has finished with an error: %+v", err)
+	eg, ctx := errgroup.WithContext(ctx)
+
+	eg.Go(func() error {
+		err := retention.New(db, logs.GetChildLogger("retention")).Run(ctx)
+		if err == nil || errors.Is(err, context.Canceled) {
+			logger.Info("Retention has finished")
+			return nil
+		} else {
+			logger.Errorf("Retention has finished with an error: %+v", err)
+			return err
 		}
-	}()
+	})
+
+	eg.Go(func() error {
+		err := listener.NewListener(db, runtimeConfig, logs).Run(ctx)
+		if err == nil || errors.Is(err, context.Canceled) {
+			logger.Info("Listener has finished")
+			return nil
+		} else {
+			logger.Errorf("Listener has finished with an error: %+v", err)
+			return err
+		}
+	})
+
+	eg.Go(func() error {
+		logger := logs.GetChildLogger("event-queue")
+		err := event.ProcessQueue(
+			ctx,
+			db,
+			logger,
+			func(ctx context.Context, ev *event.Event) error {
+				err := incident.ProcessEvent(ctx, db, logs, runtimeConfig, ev)
+				if errors.Is(err, incident.ErrSeverityChangeWithoutIncidentFlag) ||
+					errors.Is(err, incident.ErrOpenIncidentWithoutSeverity) {
+					logger.Debugw("Skipping event processing",
+						zap.String("event_name", ev.Name),
+						zap.Error(err))
+					return nil
+				} else if err != nil {
+					logger.Errorw("Failed to successfully process event",
+						zap.String("event_name", ev.Name),
+						zap.Error(err))
+					return err
+				}
+
+				logger.Infow("Successfully processed event", zap.String("event_name", ev.Name))
+				return nil
+			})
+		if err == nil || errors.Is(err, context.Canceled) {
+			logger.Info("Event queue processor has finished")
+			return nil
+		} else {
+			logger.Errorf("Event queue processor has finished with an error: %+v", err)
+			return err
+		}
+	})
 
 	// When Icinga Notifications is started by systemd, we've to notify systemd that we're ready.
 	_ = sdnotify.Ready()
 
-	if err := listener.NewListener(db, runtimeConfig, logs).Run(ctx); err != nil {
-		logger.Errorf("Listener has finished with an error: %+v", err)
-	} else {
-		logger.Info("Listener has finished")
+	if err := eg.Wait(); err != nil {
+		return ExitFailure
 	}
+
+	return ExitSuccess
 }

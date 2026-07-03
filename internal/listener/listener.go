@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"net/http"
+	"time"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/notifications"
@@ -15,9 +17,8 @@ import (
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
+	"github.com/icinga/icinga-notifications/internal/object"
 	"go.uber.org/zap"
-	"net/http"
-	"time"
 )
 
 // responseWriter is a wrapper around [http.ResponseWriter] that captures the status code written to the response.
@@ -190,22 +191,25 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ev event.Event
-	if err := json.NewDecoder(r.Body).Decode(&ev); err != nil {
+	var innerEv baseEv.Event
+	if err := json.NewDecoder(r.Body).Decode(&innerEv); err != nil {
 		l.abort(w, http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
 		return
 	}
 
+	ev := event.Event{
+		Time:     time.Now(),
+		SourceId: src.ID,
+		Event:    innerEv,
+	}
 	ev.CompleteURL(daemon.Config().IcingaWeb2UrlParsed)
-	ev.Time = time.Now()
-	ev.SourceId = src.ID
 
 	if err := ev.Validate(); err != nil {
 		l.abort(w, http.StatusBadRequest, src, "%v", err)
 		return
 	}
 
-	l.logger.Debugw("Processing event", zap.String("source", src.Name), zap.Object("event", &ev))
+	l.logger.Debugw("Received event", zap.String("source", src.Name), zap.Object("event", &ev))
 
 	// Submitting an event without the "incident" field won't cause any new event rules to be evaluated or
 	// escalations to be triggered, but only updates the state of an existing incident without a severity change.
@@ -218,20 +222,38 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	err := incident.ProcessEvent(context.Background(), l.db, l.logs, l.runtimeConfig, &ev)
-	if errors.Is(err, incident.ErrSeverityChangeWithoutIncidentFlag) || errors.Is(err, incident.ErrOpenIncidentWithoutSeverity) {
-		l.abort(w, http.StatusBadRequest, src, "%v", err)
-		return
-	} else if err != nil {
-		l.logger.Errorw("Failed to successfully process event", zap.String("source", src.Name), zap.Error(err))
-		l.abort(w, http.StatusInternalServerError, src, "event could not be processed successfully, see server logs for details")
+	// Enqueue the event restricted to the HTTP request context, and restrict it further to well-guessed ten seconds.
+	//
+	// Doing so reduces the chance that event queueing works, while the HTTP client disappears. Unfortunately, this
+	// cannot be done in reverse - like with a callback, writing the HTTP response within the transaction -, as at this
+	// moment it is unknown if the transaction will succeed. This approach binds the transaction to the request context
+	// and has a minimum interval between COMMIT and writing back a response.
+	//
+	// Of course, the client might disappear without disconnecting. Unless we have some super aggressive TCP heartbeat,
+	// this will fall through. But, for the moment, I am totally fine with this.
+	//
+	// Nevertheless, event.Event submissions should be unique, especially due to the Event.ID field. Thus, if a client
+	// resubmits an identical event, its event.Queue.ID should be identical as well, resulting in a no-op.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	err := event.Enqueue(ctx, l.db, &ev, object.ID(ev.SourceId, ev.Tags))
+	if err != nil {
+		l.logger.Errorw("Failed to enqueue event into event queue",
+			zap.String("source", src.Name),
+			zap.String("event_name", ev.Name),
+			zap.Error(err))
+
+		l.abort(w, http.StatusInternalServerError, src, "internal error: see server logs for details")
 		return
 	}
 
-	l.logger.Infow("Successfully processed event", zap.String("source", src.Name))
+	l.logger.Debugw("Successfully enqueued event for future processing",
+		zap.String("source", src.Name),
+		zap.String("event_name", ev.Name))
 
 	w.WriteHeader(http.StatusAccepted)
-	_, _ = fmt.Fprintln(w, "event processed successfully")
+	_, _ = fmt.Fprintln(w, "event accepted for processing")
 	_, _ = fmt.Fprintln(w)
 }
 
