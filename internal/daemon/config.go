@@ -4,8 +4,11 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
+	"os/user"
+	"strconv"
 	"time"
 
 	"github.com/creasty/defaults"
@@ -21,9 +24,27 @@ const (
 	ExitFailure = 1
 )
 
+// Mode is a Unix file permission mode parsed from an octal string in YAML or environment configuration.
+type Mode fs.FileMode
+
+// UnmarshalText implements [encoding.TextUnmarshaler] for Mode, parsing an octal string (e.g. "0660") into a file mode.
+func (m *Mode) UnmarshalText(text []byte) error {
+	parsedString, err := strconv.ParseUint(string(text), 8, 32)
+
+	if err != nil {
+		return fmt.Errorf("invalid socket_mode %q: expected an octal value like 0660: %w", text, err)
+	}
+	*m = Mode(parsedString)
+
+	return nil
+}
+
 // Listener defines the configuration for the Icinga Notifications API listener.
 type Listener struct {
-	Addr              string           `yaml:"address" env:"ADDRESS" default:"localhost:5680"`
+	Addr              string           `yaml:"address" env:"ADDRESS"`
+	Socket            string           `yaml:"socket" env:"SOCKET"`
+	SocketMode        *Mode            `yaml:"socket_mode" env:"SOCKET_MODE" default:"0660"`
+	SocketGroup       string           `yaml:"socket_group" env:"SOCKET_GROUP"`
 	DebugPassword     string           `yaml:"debug_password" env:"DEBUG_PASSWORD"`
 	DebugPasswordFile string           `yaml:"debug_password_file" env:"DEBUG_PASSWORD_FILE"`
 	TLSOptions        config.TLSCommon `yaml:",inline"`
@@ -32,6 +53,31 @@ type Listener struct {
 func (l *Listener) Validate() error {
 	if err := config.LoadPasswordFile(&l.DebugPassword, l.DebugPasswordFile); err != nil {
 		return err
+	}
+
+	if l.Socket != "" {
+		if mode := l.SocketMode; mode != nil && *mode > 0o777 {
+			return fmt.Errorf("the socket_mode \"%04o\" is too large (max 777)", mode)
+		} else if mode != nil && *mode&0o666 == 0 {
+			return fmt.Errorf(
+				"socket_mode \"%04o\" grants no read/write access; the socket cannot accept connections",
+				mode,
+			)
+		}
+
+		if groupName := l.SocketGroup; groupName != "" {
+			group, err := user.LookupGroup(groupName)
+			if err != nil {
+				return fmt.Errorf("cannot find group %q: %w", groupName, err)
+			}
+
+			if _, err = strconv.Atoi(group.Gid); err != nil {
+				return fmt.Errorf("cannot parse GID for group %q: %w", groupName, err)
+			}
+		}
+	} else if l.Addr == "" {
+		// Only set the default Address for TCP server if no socket path is provided
+		l.Addr = "localhost:5680"
 	}
 
 	if l.TLSOptions.Enable {
