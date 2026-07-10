@@ -146,6 +146,11 @@ This goes also for the other way around, if you want to enable automatic data cl
 the `period` option to a non-zero value and set `0s` retention periods for a specific component to disable automatic
 data cleanup for that component.
 
+Also note that Icinga Notifications may still keep cleaning up data of some components that can't be influenced by the
+retention configuration, such as the `object` table and its related tables, which are cleaned up automatically when
+there are no more references to them from the `incident` table. This is necessary to avoid unnecessarily bloating
+the database with orphaned data that is no longer relevant to any incident.
+
 ### Retention Components
 
 In addition to the default retention period, you can set a different retention period for each component of
