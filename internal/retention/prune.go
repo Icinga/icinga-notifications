@@ -127,6 +127,55 @@ func (tbp *TimeBoundPruner) assembleDelete(driverName string, limit uint64) stri
 	}
 }
 
+// ResetPruner is a specific TimeBoundPruner for updating affected rows instead of deleting them.
+//
+// The UpdateExpression is used in the UPDATE query after "UPDATE __TABLE__ SET " and must be one or many assignments.
+//
+// As the ResetPruner does not delete, it is not allowed to refer other tables. If ResetPruner.Referrers is not empty,
+// the Exec method will panic.
+type ResetPruner struct {
+	TimeBoundPruner
+	UpdateExpression string
+}
+
+// Exec prunes rows from the specified table that are older than the given time threshold.
+//
+// The ResetPruner understands pruning as a UPDATE query, which should alter the row to not be matched again.
+func (rp *ResetPruner) Exec(ctx context.Context, db *database.DB, l *logging.Logger, olderThan types.UnixMilli, limit uint64) (uint64, error) {
+	if len(rp.Referrers) != 0 {
+		panic("ResetPruner is not allowed to refer other tables")
+	}
+
+	var updated uint64
+	err := retry.WithBackoff(
+		ctx,
+		func(ctx context.Context) (err error) {
+			updated, err = exec(ctx, db, db, rp.assembleUpdate(db.DriverName(), limit), limit, olderThan)
+			return
+		},
+		retry.Retryable,
+		backoff.DefaultBackoff,
+		getPrunerRetrySettings(l),
+	)
+	return updated, err
+}
+
+func (rp *ResetPruner) assembleUpdate(driverName string, limit uint64) string {
+	switch driverName {
+	case database.MySQL:
+		return fmt.Sprintf(
+			`UPDATE %[1]s SET %[2]s WHERE %[3]s IS NOT NULL AND %[3]s < ? %[4]s LIMIT %[5]d`,
+			rp.Table, rp.UpdateExpression, rp.TimeColumn, rp.whereClause(), limit)
+	case database.PostgreSQL:
+		return fmt.Sprintf(`
+			WITH rows AS (SELECT %[1]s FROM %[2]s WHERE %[3]s IS NOT NULL AND %[3]s < ? %[4]s FOR UPDATE LIMIT %[5]d)
+			UPDATE %[2]s SET %[6]s WHERE %[1]s IN (SELECT * FROM rows)`,
+			rp.PKorFK, rp.Table, rp.TimeColumn, rp.whereClause(), limit, rp.UpdateExpression)
+	default:
+		panic(fmt.Sprintf("invalid database type %s", driverName))
+	}
+}
+
 // OrphanRowPruner defines the configuration for pruning rows from a table that are not referenced by any other table.
 //
 // This struct is used to identify and delete orphaned rows based on the primary key of the main table and the
@@ -383,3 +432,9 @@ func getPrunerRetrySettings(l *logging.Logger) retry.Settings {
 		},
 	}
 }
+
+var (
+	_ Pruner = (*TimeBoundPruner)(nil)
+	_ Pruner = (*OrphanRowPruner)(nil)
+	_ Pruner = (*ResetPruner)(nil)
+)
