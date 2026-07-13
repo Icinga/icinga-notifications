@@ -8,7 +8,7 @@ CREATE TABLE notification_history (
     channel_id bigint,
     schedule_id bigint,
     message text,
-    reason enum('severity_changed', 'escalation_triggered', 'opened', 'closed') NOT NULL,
+    reason enum('severity_changed', 'escalation_triggered', 'opened', 'closed', 'muted', 'unmuted') NOT NULL,
     sent_at bigint,
     notification_state notification_state_type,
 

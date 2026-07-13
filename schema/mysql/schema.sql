@@ -453,7 +453,7 @@ CREATE TABLE notification_history (
     schedule_id bigint,
     message mediumtext,
     -- NOT NULL is enforced via CHECK not to default to 'severity_changed'
-    reason enum('severity_changed', 'escalation_triggered', 'opened', 'closed'),
+    reason enum('severity_changed', 'escalation_triggered', 'opened', 'closed', 'muted', 'unmuted'),
     sent_at bigint,
     notification_state enum('suppressed', 'pending', 'sent', 'failed'),
 
