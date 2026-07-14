@@ -18,10 +18,11 @@ import (
 // Upsert implements the contracts.Upserter interface.
 func (i *Incident) Upsert() any {
 	return &struct {
-		Severity    baseEv.Severity `db:"severity"`
-		RecoveredAt types.UnixMilli `db:"recovered_at"`
-		MuteReason  types.String    `db:"mute_reason"`
-		Message     types.String    `db:"message"`
+		Severity              baseEv.Severity `db:"severity"`
+		RecoveredAt           types.UnixMilli `db:"recovered_at"`
+		MuteReason            types.String    `db:"mute_reason"`
+		Message               types.String    `db:"message"`
+		NextEscalationCheckAt types.UnixMilli `db:"next_escalation_check_at"`
 	}{}
 }
 

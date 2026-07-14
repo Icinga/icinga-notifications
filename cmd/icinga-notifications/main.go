@@ -10,6 +10,7 @@ import (
 
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/periodic"
 	"github.com/icinga/icinga-go-library/utils"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/channel"
@@ -75,11 +76,6 @@ func run() int {
 
 	go runtimeConfig.PeriodicUpdates(ctx, 1*time.Second)
 
-	err = incident.LoadOpenIncidents(ctx, db, logs.GetChildLogger("incident"), runtimeConfig)
-	if err != nil {
-		logger.Fatalf("Cannot load incidents from database: %+v", err)
-	}
-
 	eg, ctx := errgroup.WithContext(ctx)
 
 	eg.Go(func() error {
@@ -91,6 +87,23 @@ func run() int {
 			logger.Errorf("Retention has finished with an error: %+v", err)
 			return err
 		}
+	})
+
+	eg.Go(func() error {
+		logger := logs.GetChildLogger("incident")
+
+		stop := periodic.Start(ctx, 30*time.Second, func(periodic.Tick) {
+			err := incident.ReevaluateEscalations(ctx, db, logger, runtimeConfig)
+			if errors.Is(err, context.Canceled) {
+				logger.Info("Reevaluating incident escalations has finished")
+			} else if err != nil {
+				logger.Errorf("Cannot reevaluate incident escalations: %+v", err)
+			}
+		}, periodic.Immediate())
+
+		<-ctx.Done()
+		stop.Stop()
+		return nil
 	})
 
 	listenerConf := daemon.Config().Listener

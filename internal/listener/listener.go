@@ -3,6 +3,7 @@ package listener
 import (
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/icinga/icinga-go-library/notifications"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/notifications/source"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -442,10 +444,31 @@ func (l *Listener) IncidentsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	incidents, err := incident.GetActiveIncidentsForSource(
+		r.Context(),
+		l.db,
+		l.logs.GetChildLogger("incident"),
+		l.runtimeConfig,
+		src.ID)
+	if err != nil {
+		l.abort(w, http.StatusInternalServerError, src, "cannot fetch current incidents for source: %v", err)
+		return
+	}
+
+	objectIds := make([]types.Binary, 0, len(incidents))
+	for _, inc := range incidents {
+		objectIds = append(objectIds, inc.ObjectID)
+	}
+	objects, err := object.GetAll(r.Context(), l.db, objectIds)
+	if err != nil {
+		l.abort(w, http.StatusInternalServerError, src, "server cannot fetch incident objects: %v", err)
+		return
+	}
+
 	if r.Method == http.MethodGet {
-		l.getIncidents(w, src, filter)
+		l.getIncidents(w, src, filter, incidents, objects)
 	} else {
-		l.modifyIncidents(w, r, src, filter)
+		l.modifyIncidents(w, r, src, filter, incidents, objects)
 	}
 }
 
@@ -455,7 +478,14 @@ func (l *Listener) IncidentsHandler(w http.ResponseWriter, r *http.Request) {
 // and modifies the filtered incidents based on the JSON body of the request. The JSON body can contain a "message"
 // field to update the incident message and a "close" field to close the incident. If there is an error parsing the
 // filters or evaluating them against the incidents, it responds with an appropriate HTTP status code and error message.
-func (l *Listener) modifyIncidents(w http.ResponseWriter, r *http.Request, src *config.Source, filter any) {
+func (l *Listener) modifyIncidents(
+	w http.ResponseWriter,
+	r *http.Request,
+	src *config.Source,
+	filter any,
+	incidents []*incident.Incident,
+	objects map[string]*object.Object,
+) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 
@@ -472,38 +502,50 @@ func (l *Listener) modifyIncidents(w http.ResponseWriter, r *http.Request, src *
 
 	var results []any
 	status := http.StatusOK
-	for _, i := range incident.GetCurrentIncidentsForSource(src.ID) {
-		if match, err := EvaluateQueryFilter(filter, i.Object.Tags); err != nil {
+	for _, i := range incidents {
+		obj, ok := objects[i.ObjectID.String()]
+		if !ok {
+			l.abort(w, http.StatusInternalServerError, src, "server cannot find incident objects: %d", i.Id)
+			return
+		}
+
+		if match, err := EvaluateQueryFilter(filter, obj.Tags); err != nil {
 			l.abort(w, http.StatusBadRequest, src, "invalid query string filter: %v", err)
 			return
 		} else if match {
-			err := l.db.ExecTx(r.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
-				i.Lock()
-				defer i.Unlock()
+			err := l.db.ExecTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelReadCommitted},
+				func(ctx context.Context, tx *sqlx.Tx) error {
+					if err := i.RestoreState(ctx, tx); err != nil {
+						return err
+					}
 
-				// Note, currently if we fail to commit the tx, the incident will be left in a modified state in
-				// memory, but not in the database. This is a known limitation, but it is acceptable for the time
-				// being until https://github.com/Icinga/icinga-notifications/pull/463 gets merged.
-				if attrs.Message.Valid {
-					i.Message = attrs.Message
-				}
+					if attrs.Message.Valid {
+						i.Message = attrs.Message
+					}
 
-				if attrs.Close.Valid {
-					return i.Close(ctx, tx, true)
-				}
-				return i.Sync(ctx, tx)
-			})
-			if err != nil {
+					if attrs.Close.Valid {
+						return i.Close(ctx, tx, true)
+					}
+					return i.Sync(ctx, tx)
+				})
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+				results = append(results, map[string]any{
+					"object_tags": obj.Tags,
+					"code":        http.StatusOK,
+					"status":      "incident is no longer active, nothing modified",
+				})
+			case err != nil:
 				l.logger.Errorw("Failed to modify incident", zap.String("source", src.Name), zap.Error(err))
 				status = http.StatusInternalServerError
 				results = append(results, map[string]any{
-					"object_tags": i.Object.Tags,
+					"object_tags": obj.Tags,
 					"code":        status,
 					"status":      "failed to modify incident, see server logs for details",
 				})
-			} else {
+			default:
 				results = append(results, map[string]any{
-					"object_tags": i.Object.Tags,
+					"object_tags": obj.Tags,
 					"code":        http.StatusOK,
 					"status":      "incident modified successfully",
 				})
@@ -529,21 +571,30 @@ func (l *Listener) modifyIncidents(w http.ResponseWriter, r *http.Request, src *
 //
 // The filters are evaluated against the object tags of each incident, and only incidents that match the filters
 // are included in the response.
-func (l *Listener) getIncidents(w http.ResponseWriter, src *config.Source, filter any) {
-	incidents := incident.GetCurrentIncidentsForSource(src.ID)
+func (l *Listener) getIncidents(
+	w http.ResponseWriter,
+	src *config.Source,
+	filter any,
+	incidents []*incident.Incident,
+	objects map[string]*object.Object,
+) {
 	result := make([]*source.Incident, 0, len(incidents))
-	for _, inc := range incidents {
-		if match, err := EvaluateQueryFilter(filter, inc.Object.Tags); err != nil {
+	for _, i := range incidents {
+		obj, ok := objects[i.ObjectID.String()]
+		if !ok {
+			l.abort(w, http.StatusInternalServerError, src, "server cannot find incident objects: %d", i.Id)
+			return
+		}
+
+		if match, err := EvaluateQueryFilter(filter, obj.Tags); err != nil {
 			l.abort(w, http.StatusBadRequest, src, "%+v", err)
 			return
 		} else if match {
-			inc.Lock()
 			result = append(result, &source.Incident{
-				IsMuted:    inc.IsMuted(),
-				ObjectTags: inc.Object.Tags,
-				Severity:   inc.Severity,
+				IsMuted:    i.IsMuted(),
+				ObjectTags: obj.Tags,
+				Severity:   i.Severity,
 			})
-			inc.Unlock()
 		}
 	}
 	w.Header().Add("Content-Type", "application/json")
@@ -594,6 +645,9 @@ func (l *Listener) DumpConfig(w http.ResponseWriter, r *http.Request) {
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
+
+	l.runtimeConfig.RLock()
+	defer l.runtimeConfig.RUnlock()
 	_ = enc.Encode(&l.runtimeConfig.ConfigSet)
 }
 
@@ -606,15 +660,17 @@ func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Add("Content-Type", "application/json")
 
-	incidents := incident.GetCurrentIncidents()
-	encodedIncidents := make(map[int64]json.RawMessage)
+	incidents, err := incident.GetActiveIncidents(r.Context(), l.db, l.logs.GetChildLogger("incident"), l.runtimeConfig)
+	if err != nil {
+		l.logger.Errorw("Failed to fetch current active incidents", zap.Error(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprintf(w, "Server cannot fetch current incidents: %v", err)
+		return
+	}
 
-	// Extra function to ensure that unlocking happens in all cases, including panic.
-	encode := func(incident *incident.Incident) json.RawMessage {
-		incident.Lock()
-		defer incident.Unlock()
-
-		encoded, err := json.Marshal(incident)
+	encodedIncidents := make(map[int64]json.RawMessage, len(incidents))
+	for id, inc := range incidents {
+		encoded, err := json.Marshal(inc)
 		if err != nil {
 			encoded, err = json.Marshal(err.Error())
 			if err != nil {
@@ -623,11 +679,7 @@ func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		return encoded
-	}
-
-	for id, incident := range incidents {
-		encodedIncidents[id] = encode(incident)
+		encodedIncidents[id] = encoded
 	}
 
 	enc := json.NewEncoder(w)

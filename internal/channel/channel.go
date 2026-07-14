@@ -8,6 +8,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -160,7 +161,7 @@ func (c *Channel) Restart(logger *zap.SugaredLogger) {
 }
 
 // Notify prepares and sends the notification request, returns a non-error on fails, nil on success
-func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *event.Event, icingaweb2Url *url.URL) error {
+func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, o *object.Object, ev *event.Event, icingaweb2Url *url.URL) error {
 	p := c.getPlugin()
 	if p == nil {
 		return errors.New("plugin could not be started")
@@ -173,14 +174,13 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, ev *e
 
 	incidentUrl := icingaweb2Url.JoinPath("/notifications/incident")
 	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID())
-	object := i.IncidentObject()
 
 	req := &plugin.NotificationRequest{
 		Contact: contactStruct,
 		Object: &plugin.Object{
-			Name: object.DisplayName(),
+			Name: o.DisplayName(),
 			Url:  ev.URL,
-			Tags: object.Tags,
+			Tags: o.Tags,
 		},
 		Incident: &plugin.Incident{
 			Id:       i.ID(),

@@ -354,6 +354,7 @@ CREATE TABLE incident (
     -- mute_reason indicates whether this incident is currently muted, and its non-null value is mapped to true.
     mute_reason mediumtext,
     message longtext, -- contains the latest plugin output of the respective object.
+    next_escalation_check_at bigint,
 
     CONSTRAINT pk_incident PRIMARY KEY (id),
     CONSTRAINT ck_incident_severity_notnull CHECK (severity IS NOT NULL),
@@ -361,6 +362,9 @@ CREATE TABLE incident (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
+CREATE INDEX idx_incident_object_id_recovered_at ON incident(object_id, recovered_at);
+CREATE INDEX idx_incident_next_escalation_check_at ON incident(next_escalation_check_at);
+CREATE INDEX idx_incident_recovered_at_next_escalation_check_at ON incident(recovered_at, next_escalation_check_at);
 
 CREATE TABLE incident_contact (
     id bigint NOT NULL AUTO_INCREMENT, -- not used for anything, but is required to satisfy some Galera cluster constraints not allowing to replicate a table without a PK.
