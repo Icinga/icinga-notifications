@@ -465,9 +465,10 @@ COMMENT ON INDEX idx_incident_history_time_type IS 'Incident History ordered by 
 
 CREATE TABLE event_queue (
     id bytea NOT NULL, -- SHA256 of JSON representation.
+    last_update bigint NOT NULL,
 
     json text NOT NULL,
-    time bigint NOT NULL,
+    event_time bigint NOT NULL,
     object_id bytea NOT NULL, -- No foreign key, object might not exist at this point.
 
     user_agent varchar(255) NOT NULL, -- From submitting client; allows migrations after upgrades.
@@ -476,8 +477,8 @@ CREATE TABLE event_queue (
     CONSTRAINT pk_event_queue PRIMARY KEY (id)
 );
 
-CREATE INDEX idx_event_queue_time ON event_queue (time);
-CREATE INDEX idx_event_queue_time_state ON event_queue (time, state);
+CREATE INDEX idx_event_queue_last_update ON event_queue (last_update);
+CREATE INDEX idx_event_queue_last_update_state ON event_queue (last_update, state);
 CREATE INDEX idx_event_queue_state_object_id ON event_queue (state, object_id);
 
 CREATE TABLE browser_session (

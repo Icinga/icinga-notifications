@@ -2,6 +2,7 @@ package retention
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -9,6 +10,7 @@ import (
 	"github.com/icinga/icinga-go-library/periodic"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/daemon"
+	"github.com/icinga/icinga-notifications/internal/event"
 	"go.uber.org/zap"
 )
 
@@ -65,13 +67,14 @@ func (r *Retention) Run(ctx context.Context) error {
 		periodic.Start(ctx, interval, func(tick periodic.Tick) {
 			olderThan := tick.Time.Add(-period)
 
-			if _, ok := pruner.(*TimeBoundPruner); ok {
+			switch pruner.(type) {
+			case *TimeBoundPruner, *ResetPruner:
 				r.logger.Debugf("Pruning data from %s table older than %s", pruner.TableName(), olderThan)
-			} else {
+			default:
 				r.logger.Debugf("Pruning orphaned data from %s table", pruner.TableName())
 			}
 
-			deleted, err := pruner.Exec(ctx, r.db, r.logger, types.UnixMilli(olderThan), conf.BatchSize)
+			affected, err := pruner.Exec(ctx, r.db, r.logger, types.UnixMilli(olderThan), conf.BatchSize)
 			if err != nil {
 				select {
 				case errs <- err:
@@ -80,10 +83,14 @@ func (r *Retention) Run(ctx context.Context) error {
 			}
 
 			level := zap.DebugLevel
-			if deleted > 0 {
+			if affected > 0 {
 				level = zap.InfoLevel
 			}
-			r.logger.Logf(level, "Removed %d items from %s table", deleted, pruner.TableName())
+			if _, ok := pruner.(*ResetPruner); ok {
+				r.logger.Logf(level, "Reset %d items from %s table", affected, pruner.TableName())
+			} else {
+				r.logger.Logf(level, "Removed %d items from %s table", affected, pruner.TableName())
+			}
 		}, periodic.Immediate())
 	}
 
@@ -130,15 +137,18 @@ var dbPruners = []Pruner{
 		},
 	},
 	// Extra pruners for the event_queue.
-	&TimeBoundPruner{
-		// Events being processed too long - implies crashed daemon.
-		prunerCommon: prunerCommon{
-			Table:  "event_queue",
-			PKorFK: "id",
+	&ResetPruner{
+		TimeBoundPruner: TimeBoundPruner{
+			// Events being processed too long - implies crashed daemon.
+			prunerCommon: prunerCommon{
+				Table:  "event_queue",
+				PKorFK: "id",
+			},
+			TimeColumn:                "last_update",
+			ExtraCondition:            fmt.Sprintf("state = %d", event.QueueStateProcessing),
+			OverridePeriodAndInterval: 5 * time.Minute,
 		},
-		TimeColumn:                "time",
-		ExtraCondition:            "state = 1",
-		OverridePeriodAndInterval: 15 * time.Minute,
+		UpdateExpression: fmt.Sprintf("state = %d", event.QueueStatePending),
 	},
 	&TimeBoundPruner{
 		// Successfully processed events.
@@ -146,8 +156,8 @@ var dbPruners = []Pruner{
 			Table:  "event_queue",
 			PKorFK: "id",
 		},
-		TimeColumn:                "time",
-		ExtraCondition:            "state = 2",
+		TimeColumn:                "last_update",
+		ExtraCondition:            fmt.Sprintf("state = %d", event.QueueStateDone),
 		OverridePeriodAndInterval: 5 * time.Minute,
 	},
 	&TimeBoundPruner{
@@ -156,8 +166,8 @@ var dbPruners = []Pruner{
 			Table:  "event_queue",
 			PKorFK: "id",
 		},
-		TimeColumn:                "time",
-		ExtraCondition:            "state = 64",
+		TimeColumn:                "last_update",
+		ExtraCondition:            fmt.Sprintf("state = %d", event.QueueStateError),
 		OverridePeriodAndInterval: 24 * time.Hour,
 	},
 }
