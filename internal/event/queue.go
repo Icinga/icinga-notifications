@@ -45,9 +45,16 @@ type Queue struct {
 	// ID is the SHA256 hash based on the event.Event JSON representation.
 	ID types.Binary `db:"id"`
 
-	// Json serialization and Time from the event.Event. Time is required for database ordering.
-	Json string          `db:"json"`
-	Time types.UnixMilli `db:"time"`
+	// LastUpdate tracks the last modification, used for both processing and retention.
+	LastUpdate types.UnixMilli `db:"last_update"`
+
+	// Json serialization and EventTime from the event.Event.
+	//
+	// EventTime must not be part of the JSON serialization as its value is the timestamp when Listener.ProcessEvent
+	// received the event. If it would be part of the JSON, it would seed the ID, effectively removing the deduplication
+	// logic via QueueStateDone.
+	Json      string          `db:"json"`
+	EventTime types.UnixMilli `db:"event_time"`
 
 	// ObjectId is the Object ID of the event, used to exclude related queue entries on the database level.
 	ObjectId types.Binary `db:"object_id"`
@@ -76,7 +83,7 @@ func (q *Queue) toEvent() (*Event, error) {
 		return nil, fmt.Errorf("cannot JSON decode event queue entry: %w", err)
 	}
 
-	ev.Time = q.Time.Time()
+	ev.Time = q.EventTime.Time()
 
 	return &ev, nil
 }
@@ -95,12 +102,13 @@ func Enqueue(ctx context.Context, db *database.DB, ev *Event, objectID types.Bin
 	}
 
 	q := &Queue{
-		ID:        idHash.Sum(nil),
-		Json:      jsonBuff.String(),
-		Time:      types.UnixMilli(ev.Time),
-		ObjectId:  objectID,
-		UserAgent: "icinga-notifications/" + internal.Version.Version,
-		State:     QueueStatePending,
+		ID:         idHash.Sum(nil),
+		LastUpdate: types.UnixMilli(time.Now()),
+		Json:       jsonBuff.String(),
+		EventTime:  types.UnixMilli(ev.Time),
+		ObjectId:   objectID,
+		UserAgent:  "icinga-notifications/" + internal.Version.Version,
+		State:      QueueStatePending,
 	}
 	stmt, _ := db.BuildInsertIgnoreStmt(q)
 
@@ -145,9 +153,9 @@ func ProcessQueue(
 		WHERE
 			q1.state = ` + fmt.Sprintf("%d", QueueStatePending) + ` AND
 			q2.object_id IS NULL
-		ORDER BY q1.time
+		ORDER BY q1.last_update
 		LIMIT 1`)
-	updStmt := `UPDATE event_queue SET state = :state WHERE id = :id`
+	updStmt := `UPDATE event_queue SET last_update = :last_update, state = :state WHERE id = :id`
 
 	for ctx.Err() == nil {
 		var q Queue
@@ -164,6 +172,7 @@ func ProcessQueue(
 							return database.CantPerformQuery(err, selStmt)
 						}
 
+						q.LastUpdate = types.UnixMilli(time.Now())
 						q.State = QueueStateProcessing
 						_, err = tx.NamedExecContext(ctx, updStmt, q)
 						if err != nil {
@@ -212,6 +221,7 @@ func ProcessQueue(
 					ctx,
 					&sql.TxOptions{Isolation: sql.LevelSerializable},
 					func(ctx context.Context, tx *sqlx.Tx) error {
+						q.LastUpdate = types.UnixMilli(time.Now())
 						_, err = tx.NamedExecContext(ctx, updStmt, q)
 						if err != nil {
 							return database.CantPerformQuery(err, updStmt)
