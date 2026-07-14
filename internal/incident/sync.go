@@ -102,7 +102,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 			cr.Role = state.Role
 		}
 
-		stmt, _ := i.db.BuildUpsertStmt(cr)
+		stmt, _ := i.db.BuildUpsertStmt(cr, "id")
 		_, err := tx.NamedExecContext(ctx, stmt, cr)
 		if err != nil {
 			i.logger.Errorw(

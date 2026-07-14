@@ -363,6 +363,7 @@ CREATE TABLE incident (
 CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
 
 CREATE TABLE incident_contact (
+    id bigint NOT NULL AUTO_INCREMENT, -- not used for anything, but is required to satisfy some Galera cluster constraints not allowing to replicate a table without a PK.
     incident_id bigint NOT NULL,
     contact_id bigint,
     contactgroup_id bigint,
@@ -370,6 +371,7 @@ CREATE TABLE incident_contact (
     role enum('recipient', 'subscriber', 'manager'), -- NOT NULL is enforced via CHECK not to default to 'recipient'
     changed_at bigint NOT NULL, -- used only by Notifications Web to show when the recipients role was last changed.
 
+    CONSTRAINT pk_incident_contact PRIMARY KEY (id),
     CONSTRAINT uk_incident_contact_incident_id_contact_id UNIQUE (incident_id, contact_id),
     CONSTRAINT uk_incident_contact_incident_id_contactgroup_id UNIQUE (incident_id, contactgroup_id),
     CONSTRAINT uk_incident_contact_incident_id_schedule_id UNIQUE (incident_id, schedule_id),

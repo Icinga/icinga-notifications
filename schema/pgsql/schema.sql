@@ -392,12 +392,15 @@ CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
 CREATE TYPE incident_contact_role AS ENUM ('recipient', 'subscriber', 'manager');
 
 CREATE TABLE incident_contact (
+    id bigserial, -- not used for anything, but is required to satisfy some Galera cluster constraints not allowing to replicate a table without a PK.
     incident_id bigint NOT NULL,
     contact_id bigint,
     contactgroup_id bigint,
     schedule_id bigint,
     role incident_contact_role NOT NULL,
     changed_at bigint NOT NULL, -- used only by Notifications Web to show when the recipients role was last changed.
+
+    CONSTRAINT pk_incident_contact PRIMARY KEY (id),
 
     -- Keep in sync with internal/incident/db_types.go!
     CONSTRAINT uk_incident_contact_incident_id_contact_id UNIQUE (incident_id, contact_id),
