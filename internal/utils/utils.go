@@ -13,7 +13,14 @@ import (
 
 // ExecAndApply applies the provided restoreFunc callback for each successfully retrieved row of the specified type.
 // Returns error on any database failure or fails to acquire the table semaphore.
-func ExecAndApply[Row any](ctx context.Context, db *database.DB, stmt string, args []interface{}, restoreFunc func(*Row)) error {
+func ExecAndApply[Row any](
+	ctx context.Context,
+	db *database.DB,
+	executor database.TxOrDB,
+	stmt string,
+	args []any,
+	restoreFunc func(*Row),
+) error {
 	table := database.TableName(new(Row))
 	sem := db.GetSemaphoreForTable(table)
 	if err := sem.Acquire(ctx, 1); err != nil {
@@ -22,7 +29,7 @@ func ExecAndApply[Row any](ctx context.Context, db *database.DB, stmt string, ar
 	defer sem.Release(1)
 
 	//nolint:sqlclosecheck // False positive, does not detect deferred close: https://github.com/ryanrolds/sqlclosecheck/issues/43
-	rows, err := db.QueryxContext(ctx, db.Rebind(stmt), args...)
+	rows, err := executor.QueryxContext(ctx, db.Rebind(stmt), args...)
 	if err != nil {
 		return err
 	}
@@ -46,7 +53,14 @@ func ExecAndApply[Row any](ctx context.Context, db *database.DB, stmt string, ar
 // ForEachRow applies the provided restoreFunc callback for each successfully retrieved row of the specified type.
 // It will bulk SELECT the data from the database scoped to the specified ids and scans into the provided Row type.
 // Returns error on any database failure or fails to acquire the table semaphore.
-func ForEachRow[Row, Id any](ctx context.Context, db *database.DB, idColumn string, ids []Id, restoreFunc func(*Row)) error {
+func ForEachRow[Row, Id any](
+	ctx context.Context,
+	db *database.DB,
+	executor database.TxOrDB,
+	idColumn string,
+	ids []Id,
+	restoreFunc func(*Row),
+) error {
 	subject := new(Row)
 	query := fmt.Sprintf("%s WHERE %q IN (?)", db.BuildSelectStmt(subject, subject), idColumn)
 	stmt, args, err := sqlx.In(query, ids)
@@ -54,7 +68,7 @@ func ForEachRow[Row, Id any](ctx context.Context, db *database.DB, idColumn stri
 		return errors.Wrapf(err, "cannot build placeholders for %q", query)
 	}
 
-	return ExecAndApply(ctx, db, stmt, args, restoreFunc)
+	return ExecAndApply(ctx, db, executor, stmt, args, restoreFunc)
 }
 
 // PrefixWithJSONPathRootSelector ensures that the provided JSONPath expression starts with the root

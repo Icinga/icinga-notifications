@@ -382,12 +382,16 @@ CREATE TABLE incident (
     -- mute_reason indicates whether this incident is currently muted, and its non-null value is mapped to true.
     mute_reason text,
     message text, -- contains the latest plugin output of the respective object.
+    next_escalation_check_at bigint,
 
     CONSTRAINT pk_incident PRIMARY KEY (id),
     CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id)
 );
 
 CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
+CREATE INDEX idx_incident_object_id_recovered_at ON incident(object_id, recovered_at);
+CREATE INDEX idx_incident_next_escalation_check_at ON incident(next_escalation_check_at);
+CREATE INDEX idx_incident_recovered_at_next_escalation_check_at ON incident(recovered_at, next_escalation_check_at);
 
 CREATE TYPE incident_contact_role AS ENUM ('recipient', 'subscriber', 'manager');
 
