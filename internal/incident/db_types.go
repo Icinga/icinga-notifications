@@ -12,6 +12,7 @@ import (
 
 // ContactRow represents a single incident contact database entry.
 type ContactRow struct {
+	ID            int64 `db:"id"`
 	IncidentID    int64 `db:"incident_id"`
 	recipient.Key `db:",inline"`
 	Role          ContactRole     `db:"role"`
