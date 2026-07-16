@@ -86,30 +86,25 @@ func GetAll(ctx context.Context, db *database.DB, ids []types.Binary) (map[strin
 	return objects, nil
 }
 
-// SyncFromEvent syncs the current object with the given event.
+// SyncFromEvent syncs the object in the database with the given event.
 //
-// It updates all relevant fields and tags of the object and saves it to the database within the given transaction.
-// The current object is updated with the new values only if the database update is successful, otherwise it remains
-// unchanged.
+// It inserts or updates the object and its tags in the database based on the provided event.
+// The function uses the specified tx to ensure that both the object and its tags are updated atomically.
 //
-// Returns error on any database failure.
-func (o *Object) SyncFromEvent(ctx context.Context, db *database.DB, tx *sqlx.Tx, ev *event.Event) error {
-	newObject := Object{ID: o.ID, SourceID: o.SourceID, Name: ev.Name}
-	newObject.URL = types.MakeString(ev.URL, types.TransformEmptyStringToNull)
-
+// Returns error on any database failure, otherwise returns the updated object.
+func SyncFromEvent(ctx context.Context, db *database.DB, tx *sqlx.Tx, ev *event.Event) (*Object, error) {
+	o := New(ev)
 	stmt, _ := db.BuildUpsertStmt(o)
-	if _, err := tx.NamedExecContext(ctx, stmt, &newObject); err != nil {
-		return fmt.Errorf("failed to insert object: %w", err)
+	if _, err := tx.NamedExecContext(ctx, stmt, o); err != nil {
+		return nil, fmt.Errorf("failed to insert object: %w", err)
 	}
 
 	stmt, _ = db.BuildUpsertStmt(new(IdTagRow))
-	if _, err := tx.NamedExecContext(ctx, stmt, mapToIdTagRows(newObject.ID, ev.Tags)); err != nil {
-		return fmt.Errorf("failed to upsert object id tags: %w", err)
+	if _, err := tx.NamedExecContext(ctx, stmt, mapToIdTagRows(o.ID, ev.Tags)); err != nil {
+		return nil, fmt.Errorf("failed to upsert object id tags: %w", err)
 	}
 
-	o.Name = newObject.Name
-	o.URL = newObject.URL
-	return nil
+	return o, nil
 }
 
 func (o *Object) DisplayName() string {

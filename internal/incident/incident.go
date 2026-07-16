@@ -149,8 +149,8 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		return fmt.Errorf("cannot restore incident state: %w", err)
 	}
 
-	obj := object.New(ev)
-	if err := obj.SyncFromEvent(ctx, i.db, tx, ev); err != nil {
+	obj, err := object.SyncFromEvent(ctx, i.db, tx, ev)
+	if err != nil {
 		i.logger.Errorw("Cannot sync event object", zap.Error(err))
 		return fmt.Errorf("cannot sync event object: %w", err)
 	}
