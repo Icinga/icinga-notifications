@@ -2,8 +2,12 @@ package listener
 
 import (
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 )
+
+// ErrFilterEval is returned when an error occurs during the evaluation of a filter.
+var ErrFilterEval = stderrors.New("filter evaluation error")
 
 // ParseQueryFilter parses the given JSON query string filter and returns a filter.Filter object that
 // can be used to evaluate events against the filter criteria.
@@ -33,7 +37,7 @@ func EvaluateQueryFilter(filter any, filterable map[string]string) (bool, error)
 	case []any:
 		for _, v := range fv {
 			if _, ok := v.(map[string]any); !ok {
-				return false, fmt.Errorf("invalid JSON filter type: %T", v)
+				return false, fmt.Errorf("invalid JSON filter type: %T: %w", v, ErrFilterEval)
 			}
 			if matched, err := EvaluateQueryFilter(v, filterable); err != nil {
 				return false, err
@@ -51,7 +55,7 @@ func EvaluateQueryFilter(filter any, filterable map[string]string) (bool, error)
 			switch v.(type) {
 			case string, nil: // valid types
 			default:
-				return false, fmt.Errorf("invalid JSON filter type: %T", v)
+				return false, fmt.Errorf("invalid JSON filter type: %T: %w", v, ErrFilterEval)
 			}
 
 			seenPositiveCond = seenPositiveCond || v != nil
@@ -72,11 +76,13 @@ func EvaluateQueryFilter(filter any, filterable map[string]string) (bool, error)
 		if !seenPositiveCond {
 			// Do not allow users to guess the existence of keys in the filterable map by using "NOT EXISTS"
 			// conditions without any positive conditions. This is a security measure to prevent information leakage.
-			return false, fmt.Errorf("invalid filter: 'NOT EXISTS' condition must be combined with at least one positive condition")
+			return false, fmt.Errorf(
+				"invalid filter: 'NOT EXISTS' condition must be combined with at least one positive condition: %w",
+				ErrFilterEval)
 		}
 		return matched != nil && *matched, nil
 
 	default:
-		return false, fmt.Errorf("invalid JSON filter type: %T", fv)
+		return false, fmt.Errorf("invalid JSON filter type: %T: %w", fv, ErrFilterEval)
 	}
 }

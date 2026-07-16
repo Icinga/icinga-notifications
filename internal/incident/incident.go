@@ -55,19 +55,6 @@ type Incident struct {
 	runtimeConfig *config.RuntimeConfig
 }
 
-func NewIncident(
-	db *database.DB, obj *object.Object, runtimeConfig *config.RuntimeConfig, logger *zap.SugaredLogger,
-) *Incident {
-	i := &Incident{}
-	i.initializeFields(db, runtimeConfig, logger)
-
-	if obj != nil {
-		i.ObjectID = obj.ID
-	}
-
-	return i
-}
-
 // initializeFields populates the runtime fields for an Incident.
 func (i *Incident) initializeFields(db *database.DB, runtimeConfig *config.RuntimeConfig, logger *zap.SugaredLogger) {
 	i.db = db
@@ -144,7 +131,8 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := i.RestoreState(ctx, tx); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	i.ObjectID = object.ID(ev.SourceId, ev.Tags)
+	if err := i.RestoreState(ctx, tx, true); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		i.logger.Errorw("Failed to restore incident row from the database", zap.Error(err))
 		return fmt.Errorf("cannot restore incident state: %w", err)
 	}
@@ -154,6 +142,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		i.logger.Errorw("Cannot sync event object", zap.Error(err))
 		return fmt.Errorf("cannot sync event object: %w", err)
 	}
+	i.logger = i.logger.With(zap.String("object", obj.DisplayName()))
 
 	triggerNotifications := true
 	isNew := i.IsNew()
@@ -174,6 +163,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 
 		i.logger = i.logger.With(zap.String("incident", i.String()))
 	} else {
+		i.logger = i.logger.With(zap.String("incident", i.String()))
 		if sevChanged, err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
 			return err
 		} else {
@@ -240,7 +230,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 
 	if ev.CloseIncident() {
-		if err := i.Close(ctx, tx, false); err != nil {
+		if err := i.Close(ctx, tx); err != nil {
 			return err
 		}
 	}
@@ -259,14 +249,14 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 }
 
 // RetriggerEscalations tries to re-evaluate the escalations and notify contacts.
-func (i *Incident) RetriggerEscalations(ctx context.Context, ev *event.Event) error {
+func (i *Incident) RetriggerEscalations(ctx context.Context, o *object.Object, ev *event.Event) error {
 	tx, err := i.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return fmt.Errorf("cannot start transaction for escalation reevaluation: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := i.RestoreState(ctx, tx); err != nil {
+	if err := i.RestoreState(ctx, tx, true); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// Incident is recovered in the meantime.
 			return nil
@@ -329,11 +319,6 @@ func (i *Incident) RetriggerEscalations(ctx context.Context, ev *event.Event) er
 		return nil
 	}
 
-	o, err := i.Object(ctx)
-	if err != nil {
-		return err
-	}
-
 	if err := i.notifyContacts(ctx, o, ev, notifications); err != nil {
 		return fmt.Errorf("failed to notify reevaluated escalation recipients: %w", err)
 	}
@@ -343,9 +328,9 @@ func (i *Incident) RetriggerEscalations(ctx context.Context, ev *event.Event) er
 
 // Close closes the current incident if not already recovered.
 //
-// If the incident is already recovered, this is a no-op. Returns an error if fails
-// to persist the recovery time or insert the generated history to the database.
-func (i *Incident) Close(ctx context.Context, tx *sqlx.Tx, persist bool) error {
+// If the incident is already recovered, this is a no-op. Returns an error if fails to insert the generated
+// history to the database. You must call [Sync] after this method to persist the incident's recovered state.
+func (i *Incident) Close(ctx context.Context, tx *sqlx.Tx) error {
 	if i.RecoveredAt.Time().IsZero() {
 		i.RecoveredAt = types.UnixMilli(time.Now())
 		i.NextEscalationCheckAt = types.UnixMilli{}
@@ -360,10 +345,6 @@ func (i *Incident) Close(ctx context.Context, tx *sqlx.Tx, persist bool) error {
 		if err := hr.Sync(ctx, i.db, tx); err != nil {
 			i.logger.Errorw("Cannot insert incident closed history to the database", zap.Error(err))
 			return err
-		}
-
-		if persist {
-			return i.Sync(ctx, tx)
 		}
 	}
 	return nil
@@ -754,17 +735,23 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 // have altered the state in the meantime. The incident row is locked via SELECT FOR UPDATE so that concurrent calls
 // on other nodes for the same incident are serialized until the caller commits.
 //
+// If restoreAll is true, the incident's matched rules, escalation states, and recipients are also restored from
+// the database, otherwise only the incident row itself is restored.
+//
 // A caller must not hold a read lock on the Incident.runtimeConfig when calling this method, as it will be
 // acquired internally to restore the incident's escalation states.
 //
 // If the Incident has recovered in the meantime, a sql.ErrNoRows error will be returned.
-func (i *Incident) RestoreState(ctx context.Context, tx *sqlx.Tx) error {
+func (i *Incident) RestoreState(ctx context.Context, tx *sqlx.Tx, restoreAll bool) error {
 	stmt := i.db.Rebind(i.db.BuildSelectStmt(i, i) + ` WHERE "recovered_at" IS NULL AND "object_id" = ? FOR UPDATE`)
 	if err := tx.GetContext(ctx, i, stmt, i.ObjectID); err != nil {
 		return err
 	}
 
-	return i.restoreRelatedState(ctx, tx)
+	if restoreAll {
+		return i.restoreRelatedState(ctx, tx)
+	}
+	return nil
 }
 
 // restoreRelatedState restores the incident's matched rules, escalation states, and recipients from the database.

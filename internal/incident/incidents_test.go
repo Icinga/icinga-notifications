@@ -79,25 +79,29 @@ func TestIncidents(t *testing.T) {
 		}
 
 		t.Run("WithNoRecoveredIncidents", func(t *testing.T) {
-			assertIncidents(t.Context(), db, logs.GetChildLogger("incident"), runtimeConfig, t, testData)
+			assertIncidents(t.Context(), db, logs, runtimeConfig, t, testData)
 		})
 
 		t.Run("WithSomeRecoveredIncidents", func(t *testing.T) {
-			is, err := GetActiveIncidents(t.Context(), db, logs.GetChildLogger("incident"), runtimeConfig)
-			assert.NoError(t, err)
-			for _, i := range is {
+			pairCh, errCh := Yield(t.Context(), db, logs, runtimeConfig)
+			for pair := range pairCh {
 				// Mark some of the existing incidents as recovered.
-				if i.Id%20 == 0 { // 1000 / 20 => 50 existing incidents will be marked as recovered!
+				if pair.Incident.Id%20 == 0 { // 1000 / 20 => 50 existing incidents will be marked as recovered!
 					require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
-						withIncident(), withClose(), withTags(mustIncidentObject(t, i).Tags))))
-					require.NotZero(t, reloadIncident(t, db, i).RecoveredAt)
-					delete(testData, i.ObjectID.String())
+						withIncident(), withClose(), withTags(pair.Object.Tags))))
+					require.NotZero(t, reloadIncident(t, db, pair.Incident).RecoveredAt)
+					delete(testData, pair.Object.ID.String())
 				}
 			}
+			assert.NoError(t, <-errCh)
 
-			is, err = GetActiveIncidents(t.Context(), db, logs.GetChildLogger("incident"), runtimeConfig)
-			assert.NoError(t, err)
-			assert.Len(t, is, len(testData), "only the recovered incidents should be gone")
+			var incidentsLen int
+			pairCh, errCh = Yield(t.Context(), db, logs, runtimeConfig)
+			for range pairCh {
+				incidentsLen++
+			}
+			assert.NoError(t, <-errCh)
+			assert.Equal(t, len(testData), incidentsLen, "only the recovered incidents should be gone")
 
 			for j := 1; j <= db.Options.MaxPlaceholdersPerStatement/2; j++ {
 				require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
@@ -111,18 +115,23 @@ func TestIncidents(t *testing.T) {
 				}
 			}
 
-			assertIncidents(t.Context(), db, logs.GetChildLogger("incident"), runtimeConfig, t, testData)
+			assertIncidents(t.Context(), db, logs, runtimeConfig, t, testData)
 
 			// Close all remaining incidents to clean up the database for the next test run.
-			is, err = GetActiveIncidents(t.Context(), db, logs.GetChildLogger("incident"), runtimeConfig)
-			assert.NoError(t, err)
-			for _, i := range is {
+			pairCh, errCh = Yield(t.Context(), db, logs, runtimeConfig)
+			for pair := range pairCh {
 				require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
-					withIncident(), withClose(), withTags(mustIncidentObject(t, i).Tags))))
+					withIncident(), withClose(), withTags(pair.Object.Tags))))
 			}
-			is, err = GetActiveIncidents(t.Context(), db, logs.GetChildLogger("incident"), runtimeConfig)
-			assert.NoError(t, err)
-			assert.Len(t, is, 0, "there should be no active incidents")
+			assert.NoError(t, <-errCh)
+
+			incidentsLen = 0
+			pairCh, errCh = Yield(t.Context(), db, logs, runtimeConfig)
+			for range pairCh {
+				incidentsLen++
+			}
+			assert.NoError(t, <-errCh)
+			assert.Equal(t, 0, incidentsLen, "there should be no active incidents")
 			testData = make(map[string]*Incident) // Reset test data for the next test run.
 		})
 	})
@@ -326,17 +335,17 @@ func TestIncidents(t *testing.T) {
 //
 // The incident loading process is limited to a maximum duration of 10 seconds and will be
 // aborted and causes the entire test suite to fail immediately, if it takes longer.
-func assertIncidents(ctx context.Context, db *database.DB, l *logging.Logger, rc *config.RuntimeConfig, t *testing.T, testData map[string]*Incident) {
+func assertIncidents(ctx context.Context, db *database.DB, l *logging.Logging, rc *config.RuntimeConfig, t *testing.T, testData map[string]*Incident) {
 	// The incident loading process may hang due to unknown bugs or semaphore lock waits.
 	// Therefore, give it maximum time of 10s to finish normally, otherwise give up and fail.
 	ctx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(10*time.Second))
 	defer cancelFunc()
 
-	is, err := GetActiveIncidents(ctx, db, l, rc)
-	assert.NoError(t, err)
-	assert.Len(t, is, len(testData), "failed to load all active incidents")
-
-	for _, current := range is {
+	var incidentsLen int
+	pairCh, errCh := Yield(ctx, db, l, rc)
+	for pair := range pairCh {
+		incidentsLen++
+		current := pair.Incident
 		i := testData[current.ObjectID.String()]
 		assert.NotNilf(t, i, "found mysterious incident that's not part of our test data")
 		assert.NotNil(t, mustIncidentObject(t, current), "failed to restore incident object")
@@ -354,6 +363,8 @@ func assertIncidents(ctx context.Context, db *database.DB, l *logging.Logger, rc
 			assert.Equal(t, mustIncidentObject(t, i), mustIncidentObject(t, current), "failed to fully restore incident")
 		}
 	}
+	assert.NoError(t, <-errCh)
+	assert.Equal(t, len(testData), incidentsLen, "failed to load all active incidents")
 }
 
 // cleanupDB removes all test data from the database tables used by the incident package.
@@ -395,10 +406,11 @@ func cleanupDB(ctx context.Context, db *database.DB, t *testing.T) {
 // The incident is guaranteed to be fully initialized and ready for assertions but might be nil if it's immediately closed.
 func makeIncident(db *database.DB, logs *logging.Logging, runtimeConfig *config.RuntimeConfig, t *testing.T, ev *event.Event) *Incident {
 	require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, ev))
-	obj := object.New(ev)
-	i := NewIncident(db, obj, runtimeConfig, logs.GetChildLogger("incident").With(zap.String("object", obj.DisplayName())))
+	i := new(Incident)
+	i.ObjectID = object.ID(ev.SourceId, ev.Tags)
+	i.initializeFields(db, runtimeConfig, logs.GetChildLogger("incident").SugaredLogger)
 	stmt := db.Rebind(db.BuildSelectStmt(i, i) + ` WHERE "recovered_at" IS NULL AND "object_id" = ?`)
-	err := db.GetContext(t.Context(), i, stmt, obj.ID)
+	err := db.GetContext(t.Context(), i, stmt, i.ObjectID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}

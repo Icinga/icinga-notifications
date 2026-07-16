@@ -20,7 +20,6 @@ import (
 	"github.com/icinga/icinga-go-library/notifications"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/notifications/source"
-	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -32,14 +31,13 @@ import (
 )
 
 // responseWriter is a wrapper around [http.ResponseWriter] that captures the status code written to the response.
-//
-// Note: This struct satisfies only the [http.ResponseWriter] interface, but not the optional [http.Flusher],
-// [http.Hijacker], and [http.Pusher] interfaces. If the underlying [http.ResponseWriter] implements any of
-// these interfaces, the caller must use the [http.ResponseWriter] directly to access them.
 type responseWriter struct {
 	http.ResponseWriter
 	status int
 }
+
+// Unwrap returns the underlying [http.ResponseWriter] that is wrapped by this [responseWriter].
+func (rw *responseWriter) Unwrap() http.ResponseWriter { return rw.ResponseWriter }
 
 // WriteHeader captures the status code and writes it to the underlying [ResponseWriter].
 func (rw *responseWriter) WriteHeader(status int) {
@@ -332,7 +330,7 @@ func (l *Listener) abort(w http.ResponseWriter, statusCode int, src *config.Sour
 	}
 
 	http.Error(w, msg, statusCode)
-	logger.Debugw("Abort listener submitted event processing")
+	logger.Debugw("Request aborted")
 }
 
 func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
@@ -444,48 +442,81 @@ func (l *Listener) IncidentsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	incidents, err := incident.GetActiveIncidentsForSource(
-		r.Context(),
-		l.db,
-		l.logs.GetChildLogger("incident"),
-		l.runtimeConfig,
-		src.ID)
-	if err != nil {
-		l.abort(w, http.StatusInternalServerError, src, "cannot fetch current incidents for source: %v", err)
-		return
-	}
+	onStreamErr := func(enc *json.Encoder, wroteHeader *bool, err error) {
+		// The database query is bound to the HTTP request context, so if the client disconnects prematurely but
+		// still normally closes the connection, the context will be canceled and the DB query will return that
+		// error. In that case, there is no client to send a response to, so debug log it and be done with it.
+		if errors.Is(err, context.Canceled) {
+			l.logger.Debugw("Client disconnected prematurely", zap.String("source", src.Name), zap.Error(err))
+			return
+		}
+		l.logger.Warnw("Error processing incident request", zap.String("source", src.Name), zap.Error(err))
 
-	objectIds := make([]types.Binary, 0, len(incidents))
-	for _, inc := range incidents {
-		objectIds = append(objectIds, inc.ObjectID)
-	}
-	objects, err := object.GetAll(r.Context(), l.db, objectIds)
-	if err != nil {
-		l.abort(w, http.StatusInternalServerError, src, "server cannot fetch incident objects: %v", err)
-		return
+		var code int
+		var errState source.ErrorState
+		if errors.Is(err, ErrFilterEval) {
+			code = http.StatusBadRequest
+			errState.Error = err.Error()
+		} else {
+			code = http.StatusInternalServerError
+			errState.Error = "some incidents could not be modified due to an internal error, see server logs for details"
+			if r.Method == http.MethodGet {
+				errState.Error = "some incidents could not be retrieved due to an internal error, see server logs for details"
+			}
+		}
+
+		if !*wroteHeader {
+			*wroteHeader = true
+			l.abort(w, code, src, "%s", errState.Error)
+		} else if err := enc.Encode(&errState); err != nil {
+			l.logger.Warnw("Error serializing error response", zap.String("source", src.Name), zap.Error(err))
+		}
 	}
 
 	if r.Method == http.MethodGet {
-		l.getIncidents(w, src, filter, incidents, objects)
+		l.getIncidentsHandler(w, r, src, filter, onStreamErr)
 	} else {
-		l.modifyIncidents(w, r, src, filter, incidents, objects)
+		l.modifyIncidentsHandler(w, r, src, filter, onStreamErr)
 	}
 }
 
-// modifyIncidents handles POST requests to the /incidents endpoint.
+// getIncidentsHandler handles GET requests to the /incidents endpoint.
+//
+// It retrieves the current incidents for the authenticated source, applies any filters provided in the query
+// parameters, and streams the filtered incidents back to the client in NDJSON format.
+//
+// The filters are evaluated against the object tags of each incident, and only incidents that match the filters
+// are included in the response.
+func (l *Listener) getIncidentsHandler(w http.ResponseWriter, r *http.Request, src *config.Source, filter any, errF OnErrFunc) {
+	opts := []StreamOpt[incident.Pair]{
+		WithOnError[incident.Pair](errF),
+		WithOnResult(func(pair incident.Pair) (any, error) {
+			if match, err := EvaluateQueryFilter(filter, pair.Object.Tags); err != nil {
+				return nil, err
+			} else if match {
+				return &source.Incident{
+					IsMuted:    pair.Incident.IsMuted(),
+					ObjectTags: pair.Object.Tags,
+					Severity:   pair.Incident.Severity,
+				}, nil
+			}
+			return nil, nil
+		}),
+	}
+
+	pairCh, errCh := incident.YieldForSource(r.Context(), l.db, l.logs, l.runtimeConfig, src.ID)
+	if err := StreamJsonResults(r.Context(), w, pairCh, errCh, opts...); err != nil {
+		l.logger.Debugw("Error streaming get incidents response", zap.String("source", src.Name), zap.Error(err))
+	}
+}
+
+// modifyIncidentsHandler handles POST requests to the /incidents endpoint.
 //
 // It retrieves the current incidents for the authenticated source, applies any filters provided in the query params,
 // and modifies the filtered incidents based on the JSON body of the request. The JSON body can contain a "message"
 // field to update the incident message and a "close" field to close the incident. If there is an error parsing the
 // filters or evaluating them against the incidents, it responds with an appropriate HTTP status code and error message.
-func (l *Listener) modifyIncidents(
-	w http.ResponseWriter,
-	r *http.Request,
-	src *config.Source,
-	filter any,
-	incidents []*incident.Incident,
-	objects map[string]*object.Object,
-) {
+func (l *Listener) modifyIncidentsHandler(w http.ResponseWriter, r *http.Request, src *config.Source, filter any, errF OnErrFunc) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 
@@ -500,110 +531,55 @@ func (l *Listener) modifyIncidents(
 		return
 	}
 
-	var results []any
-	status := http.StatusOK
-	for _, i := range incidents {
-		obj, ok := objects[i.ObjectID.String()]
-		if !ok {
-			l.abort(w, http.StatusInternalServerError, src, "server cannot find incident objects: %d", i.Id)
-			return
-		}
+	opts := []StreamOpt[incident.Pair]{
+		WithSendHeaderEarly[incident.Pair](),
+		WithOnError[incident.Pair](errF),
+		WithOnResult(func(pair incident.Pair) (any, error) {
+			if match, err := EvaluateQueryFilter(filter, pair.Object.Tags); err != nil {
+				return nil, err
+			} else if match {
+				err := l.db.ExecTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelReadCommitted},
+					func(ctx context.Context, tx *sqlx.Tx) error {
+						// This is a bit of a hack since we already have a fully restored incident, but this acquires
+						// an exclusive lock on the incident row in the database to prevent concurrent modifications.
+						if err := pair.Incident.RestoreState(ctx, tx, false); err != nil {
+							return err
+						}
 
-		if match, err := EvaluateQueryFilter(filter, obj.Tags); err != nil {
-			l.abort(w, http.StatusBadRequest, src, "invalid query string filter: %v", err)
-			return
-		} else if match {
-			err := l.db.ExecTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelReadCommitted},
-				func(ctx context.Context, tx *sqlx.Tx) error {
-					if err := i.RestoreState(ctx, tx); err != nil {
-						return err
-					}
+						if attrs.Message.Valid {
+							pair.Incident.Message = attrs.Message
+						}
+						if attrs.Close.Valid {
+							if err := pair.Incident.Close(ctx, tx); err != nil {
+								return err
+							}
+						}
+						return pair.Incident.Sync(ctx, tx)
+					})
 
-					if attrs.Message.Valid {
-						i.Message = attrs.Message
-					}
+				switch {
+				case errors.Is(err, sql.ErrNoRows):
+					// The incident was closed in the meantime, so we cannot modify it anymore!
 
-					if attrs.Close.Valid {
-						return i.Close(ctx, tx, true)
-					}
-					return i.Sync(ctx, tx)
-				})
-			switch {
-			case errors.Is(err, sql.ErrNoRows):
-				results = append(results, map[string]any{
-					"object_tags": obj.Tags,
-					"code":        http.StatusOK,
-					"status":      "incident is no longer active, nothing modified",
-				})
-			case err != nil:
-				l.logger.Errorw("Failed to modify incident", zap.String("source", src.Name), zap.Error(err))
-				status = http.StatusInternalServerError
-				results = append(results, map[string]any{
-					"object_tags": obj.Tags,
-					"code":        status,
-					"status":      "failed to modify incident, see server logs for details",
-				})
-			default:
-				results = append(results, map[string]any{
-					"object_tags": obj.Tags,
-					"code":        http.StatusOK,
-					"status":      "incident modified successfully",
-				})
+				case err != nil:
+					l.logger.Errorw("Failed to modify incident", zap.String("source", src.Name), zap.Error(err))
+					return &source.ModifiedIncidentResp{
+						ObjectTags: pair.Object.Tags,
+						ErrorState: source.ErrorState{
+							Error: "failed to modify incident, see server logs for details",
+						},
+					}, nil
+				default:
+					return &source.ModifiedIncidentResp{ObjectTags: pair.Object.Tags}, nil
+				}
 			}
-		}
+			return nil, nil
+		}),
 	}
 
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(results); err != nil {
-		l.logger.Errorw("Failed to serialize modify incidents response", zap.String("source", src.Name), zap.Error(err))
-	}
-}
-
-// getIncidents handles GET requests to the /incidents endpoint.
-//
-// It retrieves the current incidents for the authenticated source, applies any filters provided in the query
-// parameters, and returns the filtered incidents as a JSON response. If there is an error parsing the filters
-// or evaluating them against the incidents, it responds with an appropriate HTTP status code and error message.
-//
-// The filters are evaluated against the object tags of each incident, and only incidents that match the filters
-// are included in the response.
-func (l *Listener) getIncidents(
-	w http.ResponseWriter,
-	src *config.Source,
-	filter any,
-	incidents []*incident.Incident,
-	objects map[string]*object.Object,
-) {
-	result := make([]*source.Incident, 0, len(incidents))
-	for _, i := range incidents {
-		obj, ok := objects[i.ObjectID.String()]
-		if !ok {
-			l.abort(w, http.StatusInternalServerError, src, "server cannot find incident objects: %d", i.Id)
-			return
-		}
-
-		if match, err := EvaluateQueryFilter(filter, obj.Tags); err != nil {
-			l.abort(w, http.StatusBadRequest, src, "%+v", err)
-			return
-		} else if match {
-			result = append(result, &source.Incident{
-				IsMuted:    i.IsMuted(),
-				ObjectTags: obj.Tags,
-				Severity:   i.Severity,
-			})
-		}
-	}
-	w.Header().Add("Content-Type", "application/json")
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(result); err != nil {
-		l.logger.Errorw("Failed to serialize incidents for source", zap.Object("source", src), zap.Error(err))
-		return
+	pairCh, errCh := incident.YieldForSource(r.Context(), l.db, l.logs, l.runtimeConfig, src.ID)
+	if err := StreamJsonResults(r.Context(), w, pairCh, errCh, opts...); err != nil {
+		l.logger.Debugw("Error streaming modify incidents response", zap.String("source", src.Name), zap.Error(err))
 	}
 }
 
@@ -654,37 +630,27 @@ func (l *Listener) DumpConfig(w http.ResponseWriter, r *http.Request) {
 // DumpIncidents is used as /debug prefixed endpoint to dump all incidents. The authorization has to be done beforehand.
 func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		_, _ = fmt.Fprintln(w, "GET required")
-		return
-	}
-	w.Header().Add("Content-Type", "application/json")
-
-	incidents, err := incident.GetActiveIncidents(r.Context(), l.db, l.logs.GetChildLogger("incident"), l.runtimeConfig)
-	if err != nil {
-		l.logger.Errorw("Failed to fetch current active incidents", zap.Error(err))
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprintf(w, "Server cannot fetch current incidents: %v", err)
+		l.abort(w, http.StatusMethodNotAllowed, nil, "GET required")
 		return
 	}
 
-	encodedIncidents := make(map[int64]json.RawMessage, len(incidents))
-	for id, inc := range incidents {
-		encoded, err := json.Marshal(inc)
-		if err != nil {
-			encoded, err = json.Marshal(err.Error())
-			if err != nil {
-				// If a string can't be marshalled, something is very wrong.
-				panic(err)
+	opts := []StreamOpt[incident.Pair]{
+		WithOnError[incident.Pair](func(enc *json.Encoder, wroteHeader *bool, err error) {
+			if errors.Is(err, context.Canceled) {
+				l.logger.Debugw("Client disconnected while retrieving incidents from database", zap.Error(err))
+				return
 			}
-		}
-
-		encodedIncidents[id] = encoded
+			l.logger.Errorw("Failed to fetch current active incidents", zap.Error(err))
+			if !*wroteHeader {
+				*wroteHeader = true
+				l.abort(w, http.StatusInternalServerError, nil, "cannot dump incidents due to an internal error, see server logs for details")
+			}
+			// It's a debugging endpoint, so don't care about sending a proper error response here.
+		}),
+		WithOnResult(func(pair incident.Pair) (any, error) { return pair, nil }),
 	}
-
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(encodedIncidents)
+	pairCh, errCh := incident.Yield(r.Context(), l.db, l.logs, l.runtimeConfig)
+	_ = StreamJsonResults(r.Context(), w, pairCh, errCh, opts...)
 }
 
 // DumpSchedules is used as /debug prefixed endpoint to dump all schedules. The authorization has to be done beforehand.

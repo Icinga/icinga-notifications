@@ -57,35 +57,6 @@ func Get(ctx context.Context, db *database.DB, id types.Binary) (*Object, error)
 	return o, nil
 }
 
-// GetAll fetches the Objects for the requested IDs from the database, keyed by their string ID.
-//
-// IDs without a matching object are omitted from the result.
-func GetAll(ctx context.Context, db *database.DB, ids []types.Binary) (map[string]*Object, error) {
-	if len(ids) == 0 {
-		return make(map[string]*Object), nil
-	}
-
-	objects := make(map[string]*Object, len(ids))
-	err := utils.ForEachRow(ctx, db, db, "id", ids, func(o *Object) {
-		o.Tags = make(map[string]string)
-		objects[o.ID.String()] = o
-	})
-	if err != nil {
-		return nil, fmt.Errorf("cannot fetch objects from database: %w", err)
-	}
-
-	err = utils.ForEachRow(ctx, db, db, "object_id", ids, func(ir *IdTagRow) {
-		if o, ok := objects[ir.ObjectId.String()]; ok {
-			o.Tags[ir.Tag] = ir.Value
-		}
-	})
-	if err != nil {
-		return nil, fmt.Errorf("cannot fetch object id tags from database: %w", err)
-	}
-
-	return objects, nil
-}
-
 // SyncFromEvent syncs the object in the database with the given event.
 //
 // It inserts or updates the object and its tags in the database based on the provided event.
