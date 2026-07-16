@@ -81,6 +81,7 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 	l.mux.Handle("/debug/", http.StripPrefix("/debug", l.requireDebugAuth(debugMux)))
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
 	l.mux.HandleFunc("/incidents", l.IncidentsHandler)
+	l.mux.HandleFunc("/health", l.HealthCheckHandler)
 	return l
 }
 
@@ -470,6 +471,33 @@ func (l *Listener) IncidentsHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		l.modifyIncidents(w, r, src, filter, incidents, objects)
 	}
+}
+
+// HealthCheckHandler handles GET requests to the /health endpoint.
+//
+// It performs a health check by pinging the database and responds with a 200 OK status if the database
+// connection is healthy. Just like the other endpoints, this endpoint also requires an authenticated source.
+func (l *Listener) HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		l.abort(w, http.StatusMethodNotAllowed, nil, "GET required")
+		return
+	}
+
+	src := l.sourceFromAuthOrAbort(w, r)
+	if src == nil {
+		// Listener.sourceFromAuthOrAbort writes 401 response by itself; no abort() necessary.
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	if err := l.db.PingContext(ctx); err != nil {
+		l.abort(w, http.StatusInternalServerError, src, "database connection is unhealthy: %v", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintln(w, "listener is healthy")
 }
 
 // modifyIncidents handles POST requests to the /incidents endpoint.
