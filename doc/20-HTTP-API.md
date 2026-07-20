@@ -122,11 +122,12 @@ Basic Auth with username and password, while a Unix socket identifies the caller
 In order to retrieve incidents, one can send a `GET` request to the `/incidents` endpoint with the appropriate `filter`
 query parameter. Currently, this endpoint will include the attributes listed below in the response for each incident:
 
-| Attribute   | Description                                                                |
-|-------------|----------------------------------------------------------------------------|
-| is_muted    | A boolean indicating whether the incident is muted or not.                 |
-| object_tags | A dictionary containing the object ID tags associated with the incident.   |
-| severity    | The severity level of the incident (e.g., `crit`, `err`, `warning`, etc.). |
+| Attribute   | Description                                                                                   |
+|-------------|-----------------------------------------------------------------------------------------------|
+| is_muted    | A boolean indicating whether the incident is muted or not.                                    |
+| object_tags | A dictionary containing the object ID tags associated with the incident.                      |
+| severity    | The severity level of the incident (e.g., `crit`, `err`, `warning`, etc.).                    |
+| error       | An optional attribute that may be present if an error occurred while retrieving the incident. |
 
 For instance, when using Icinga DB as a source, the `environment` object ID tag can be used to filter incidents for a
 specific Icinga DB environment. The following example shows how to retrieve all incidents for the
@@ -134,27 +135,19 @@ specific Icinga DB environment. The following example shows how to retrieve all 
 
 ```
 $ curl -u 'example:insecureinsecure' 'http://localhost:5680/incidents?filter=%7B%22environment%22%3A%2208434a503ec43bb67cd380c5d0b6217a1ebf924b%22%7D'
-[
-  {
-    "is_muted": false,
-    "object_tags": {
-      "environment": "08434a503ec43bb67cd380c5d0b6217a1ebf924b",
-      "host": "mailserver",
-      "service": "filesystem"
-    },
-    "severity": "crit"
-  },
-  {
-    "is_muted": true,
-    "object_tags": {
-      "environment": "08434a503ec43bb67cd380c5d0b6217a1ebf924b",
-      "host": "database",
-      "service": "load"
-    },
-    "severity": "err"
-  }
-]
+...
+{"is_muted":false,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"},"severity":"crit"}
+{"is_muted":true,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"severity":"err"}
 ```
+
+Icinga Notifications will stream the response as a series of JSON objects, one per line, for each incident that matches
+the filter. This format is known as [JSON Lines/NDJSON](https://jsonlines.org/), and allows for efficient processing of
+large datasets without requiring the entire response to be loaded into memory at once. Each line in the response
+represents a single incident JSON object, and can be read and processed independently. As a consequence, the general
+HTTP status code of the response will always be `202 Accepted` in the successful case, even if the response contains no
+incidents at all. If some error occurs after Icinga Notifications has already started streaming the response, it will
+send a final JSON object with the `error` attribute set to a string describing the error. In all other cases, the
+`error` attribute will be omitted entirely from the response.
 
 ### Modifying Incidents
 
@@ -174,6 +167,14 @@ note that the `close` attribute can only be set to `true`, otherwise Icinga Noti
 a 400 status code. The `message` attribute can be used to update the incident's message without any side effects, as
 well. For instance, this can be useful to regularly synchronize only the plugin output of the associated object so that
 the incident's message is always up to date.
+
+This endpoint will return the following attributes for each modified, but not necessarily successfully modified,
+incident in the response:
+
+| Attribute   | Description                                                                                  |
+|-------------|----------------------------------------------------------------------------------------------|
+| object_tags | A dictionary containing the object ID tags associated with the incident.                     |
+| error       | An optional attribute that may be present if an error occurred while modifying the incident. |
 
 The following example shows how to close the incident for the `mailserver` host and `filesystem` service in the
 `08434a503ec43bb67cd380c5d0b6217a1ebf924b` environment:
@@ -210,32 +211,16 @@ EOF
 
 When bulk modifying incidents, the changes will be applied to all the matching incidents that satisfy the filter
 sequentially. If any of the incidents cannot be modified due to some reason, each incident will convey its own status
-in the response, and the general HTTP status code will be the most severe one among all the incidents. For instance, if
-one incident is successfully closed, but another one cannot, the response will contain a `200 OK` status code for the
-first incident and a `500` status code for the second incident, and the overall HTTP status code will be
-`500 Internal Server Error`. The complete response body looks like this:
+in the response, and the general HTTP status code will be `202 Accepted` if the request validation was successful.
+Icinga Notifications will stream each incident's modification result as a JSON object, one per line, in the same
+[JSON Lines/NDJSON](https://jsonlines.org/) format as the retrieval endpoint. The following snippet shows the result of
+the above curl request, where the incident for the `mailserver` host and `filesystem` service was successfully modified,
+while the incident for the `database` host and `load` service failed to be modified due to some server-side error.
 
-```json
-[
-  {
-    "object_tags": {
-      "environment": "08434a503ec43bb67cd380c5d0b6217a1ebf924b",
-      "host": "mailserver",
-      "service": "filesystem"
-    },
-    "code": 200,
-    "status": "incident modified successfully"
-  },
-  {
-    "object_tags": {
-      "environment": "08434a503ec43bb67cd380c5d0b6217a1ebf924b",
-      "host": "database",
-      "service": "load"
-    },
-    "code": 500,
-    "status": "failed to modify incident, see server logs for details"
-  }
-]
+```
+...
+{"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"}}
+{"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"error":"failed to modify incident, see server logs for details"}
 ```
 
 ## API Filtering
