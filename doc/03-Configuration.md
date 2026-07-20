@@ -50,6 +50,10 @@ TLS options apply only to the TCP listener.
 When a Unix socket is configured, Icinga Notifications identifies connecting processes by their OS user,
 and matches the OS username against the source's configured username. No password or HTTP Basic Auth is involved.
 
+When TLS is enabled, sources can optionally be identified by a TLS client certificate's Subject
+instead of a username/password pair. To use this, configure a CA via `ca` so that client certificates
+can be verified, and set the `client_certificate_subject` field on the source in Icinga Notifications Web.
+
 For YAML configuration, the options are part of the `listener` section.
 For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_LISTENER_`.
 
@@ -65,6 +69,7 @@ For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_LI
 | cert                | **Optional.** Path to TLS server certificate. Required if `tls` is enabled.                                |
 | key                 | **Optional.** Path to the TLS private key. Required if `tls` is enabled.                                   |
 | ca                  | **Optional.** Path to TLS CA cert/bundle to verify client certs. Required if `tls` is enabled.             |
+| crl_file            | **Optional.** Path to CRL file to verify client certificates. Requires `ca` to be set.                     |
 
 !!! important
 

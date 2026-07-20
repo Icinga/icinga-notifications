@@ -123,11 +123,14 @@ func (l *Listener) Run(ctx context.Context) error {
 		ErrorLog: stdlogger,
 	}
 
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
 	var listeningFunc func() error
 	if l.useSocket {
 		listeningFunc, err = l.initSocketServer(server)
 	} else {
-		listeningFunc, err = l.initTcpServer(server)
+		listeningFunc, err = l.initTcpServer(ctx, cancel, server)
 	}
 	if err != nil {
 		return err
@@ -140,9 +143,12 @@ func (l *Listener) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		return server.Shutdown(shutdownCtx)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer shutdownCancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		return context.Cause(ctx)
 
 	case err := <-serverErr:
 		return err
@@ -151,11 +157,21 @@ func (l *Listener) Run(ctx context.Context) error {
 
 // initTcpServer configures the given HTTP(S) server for the configured TCP address and returns a function that
 // starts serving. The caller is responsible for actually calling that function and for graceful shutdown.
-func (l *Listener) initTcpServer(server *http.Server) (func() error, error) {
+func (l *Listener) initTcpServer(ctx context.Context, cancel context.CancelCauseFunc, server *http.Server) (func() error, error) {
 	conf := daemon.Config().Listener
-	tlsConfig, err := conf.GetTlsConfig()
+	tlsConfig, crlChecker, hasCrlChecker, err := conf.GetTlsConfig()
 	if err != nil {
 		return nil, err
+	}
+
+	if hasCrlChecker {
+		go func() {
+			err := crlChecker.WatchAndReload(ctx, l.logger.SugaredLogger)
+			if err != nil && ctx.Err() == nil {
+				l.logger.Errorw("CRL watcher exited unexpectedly", zap.Error(err))
+				cancel(fmt.Errorf("CRL watcher exited: %w", err))
+			}
+		}()
 	}
 
 	var https string
@@ -272,45 +288,98 @@ func (l *Listener) initSocketServer(server *http.Server) (fn func() error, retEr
 // up by the OS username of the connecting process via peer credentials. For TCP connections, HTTP Basic Auth is used.
 // If no matching source is found, nil is returned and 401 is written to the response.
 func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request) (src *config.Source) {
-	errFunc := func(errMsg string) *config.Source {
-		w.WriteHeader(http.StatusUnauthorized)
+	var errMsg string
+	errFunc := func(httpCode int, sendAuthHeader bool) *config.Source {
+		if sendAuthHeader {
+			w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications source"`)
+		}
+		l.logger.Debugw("Error in sourceFromAuthOrAbort", zap.String("error", errMsg))
+		w.WriteHeader(httpCode)
 		_, _ = fmt.Fprintln(w, errMsg)
 		return nil
 	}
 
 	if l.useSocket {
-		l.logger.Debugw("Source is authenticated via socket connection")
+		errMsg = "unix socket: "
 		value := r.Context().Value(peerUserLookupKey{})
 		if value == nil {
-			return errFunc("no value found in context")
+			errMsg += "no lookup function present in context"
+			return errFunc(http.StatusUnauthorized, false)
 		}
 
 		lookup, ok := value.(peerUserLookupFunc)
 		if !ok {
-			return errFunc("no lookup function present")
+			errMsg += "lookup function has wrong method signature"
+			return errFunc(http.StatusUnauthorized, false)
 		}
 
 		username, err := lookup()
 		if err != nil {
-			return errFunc(err.Error())
+			errMsg += err.Error()
+			return errFunc(http.StatusUnauthorized, false)
 		}
 
 		src = l.runtimeConfig.GetSourceByUsername(username)
 		if src == nil {
-			return errFunc(fmt.Sprintf("system user %q is not registered as a source username", username))
-		}
-	} else {
-		l.logger.Debugw("Source is authenticated via HTTP Basic Auth")
-		authUser, authPass, authOk := r.BasicAuth()
-		if !authOk {
-			w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications source"`)
-			return errFunc("missing or malformed basic auth credentials")
+			errMsg += fmt.Sprintf("system user %q is not registered as a source username", username)
+			return errFunc(http.StatusUnauthorized, false)
 		}
 
-		src = l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
-		if src == nil {
-			w.Header().Set("WWW-Authenticate", `Basic realm="icinga-notifications source"`)
-			return errFunc("expected valid icinga-notifications source basic auth credentials")
+		l.logger.Debugw(
+			"Source is authenticated via socket connection",
+			zap.String("source_name", src.Name),
+			zap.String("username", username),
+		)
+	} else {
+		authUser, authPass, authOk := r.BasicAuth()
+		if r.TLS != nil && len(r.TLS.VerifiedChains) > 0 {
+			// if VerifiedChains isn't empty, the request doesn't fall back to basic auth
+			errMsg = "tls cert: "
+			if authUser != "" || authPass != "" {
+				errMsg += " both client certificate and basic auth provided"
+				return errFunc(http.StatusBadRequest, false)
+			}
+
+			if len(r.TLS.VerifiedChains[0]) == 0 {
+				errMsg += "no verified chain found"
+				return errFunc(http.StatusUnauthorized, true)
+			}
+
+			clientCert := r.TLS.VerifiedChains[0][0]
+			if clientCert == nil {
+				errMsg += "no client certificate found"
+				return errFunc(http.StatusUnauthorized, true)
+			}
+
+			src = l.runtimeConfig.GetSourceByClientCertSubject(clientCert.Subject.String())
+			if src == nil {
+				errMsg += "no matching source found"
+				return errFunc(http.StatusUnauthorized, true)
+			}
+
+			l.logger.Debugw(
+				"Source is authenticated via a TLS client certificate",
+				zap.String("source_name", src.Name),
+				zap.String("common_name", clientCert.Subject.CommonName),
+			)
+		} else {
+			errMsg = "basic auth: "
+			if !authOk {
+				errMsg += "missing or malformed basic auth credentials"
+				return errFunc(http.StatusUnauthorized, true)
+			}
+
+			src = l.runtimeConfig.GetSourceFromCredentials(authUser, authPass, l.logger)
+			if src == nil {
+				errMsg += "expected valid icinga-notifications source basic auth credentials"
+				return errFunc(http.StatusUnauthorized, true)
+			}
+
+			l.logger.Debugw(
+				"Source is authenticated via HTTP Basic Auth",
+				zap.String("source_name", src.Name),
+				zap.String("username", authUser),
+			)
 		}
 	}
 

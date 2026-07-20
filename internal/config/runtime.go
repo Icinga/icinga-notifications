@@ -210,6 +210,31 @@ func (r *RuntimeConfig) GetSourceByUsername(user string) *Source {
 	return nil
 }
 
+// GetSourceByClientCertSubject returns a *Source by the given certificate subject.
+func (r *RuntimeConfig) GetSourceByClientCertSubject(subject string) *Source {
+	r.RLock()
+	defer r.RUnlock()
+	for _, src := range r.Sources {
+		if src.ClientCertificateSubject.Valid && src.ClientCertificateSubject.String == subject {
+			return src
+		}
+	}
+
+	// In this case, a valid client certificate, signed by the CA, has no source. Might be a subject mismatch.
+	subjects := make([]string, 0, len(r.Sources))
+	for _, src := range r.Sources {
+		if src.ClientCertificateSubject.Valid {
+			subjects = append(subjects, src.ClientCertificateSubject.String)
+		}
+	}
+	r.logger.Warnw(
+		"Valid client certificate's subject matches no source",
+		zap.String("subject", subject),
+		zap.Strings("known_subjects", subjects))
+
+	return nil
+}
+
 func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
 	tx, err := r.db.BeginTxx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
