@@ -415,7 +415,7 @@ CREATE TABLE incident_history (
     contactgroup_id bigint,
     schedule_id bigint,
     rule_id bigint,
-    channel_id big,
+    channel_id bigint,
     time bigint NOT NULL,
     message mediumtext,
     -- Order to be honored for events with identical millisecond timestamps.
