@@ -671,22 +671,22 @@ func (i *Incident) notifyContacts(
 			}
 			notification.SentAt = types.UnixMilli(time.Now())
 		}
-		entry := &DeliveryEntry{
-			IncidentID:        i.Id,
-			RuleID:            types.MakeInt(notification.Origin.RuleID, types.TransformZeroIntToNull),
-			RuleEscalationID:  types.MakeInt(notification.Origin.RuleEscalationID, types.TransformZeroIntToNull),
-			ContactID:         contact.ID,
-			ContactgroupID:    types.MakeInt(notification.Origin.ContactGroupID, types.TransformZeroIntToNull),
-			ChannelID:         notification.ChannelID,
-			ScheduleID:        types.MakeInt(notification.Origin.ScheduleID, types.TransformZeroIntToNull),
-			Message:           i.Message,
-			Reason:            notification.Reason,
-			SentAt:            notification.SentAt,
-			NotificationState: notification.State,
+		entry := &NotificationHistoryEntry{
+			IncidentID:       i.Id,
+			RuleID:           notification.Origin.RuleID,
+			RuleEscalationID: notification.Origin.RuleEscalationID,
+			ContactID:        contact.ID,
+			ContactgroupID:   types.MakeInt(notification.Origin.ContactGroupID, types.TransformZeroIntToNull),
+			ChannelID:        types.MakeInt(notification.ChannelID, types.TransformZeroIntToNull),
+			ScheduleID:       types.MakeInt(notification.Origin.ScheduleID, types.TransformZeroIntToNull),
+			Message:          i.Message,
+			Reason:           notification.Reason,
+			SentAt:           notification.SentAt,
+			State:            notification.State,
 		}
 		if err := entry.WriteToDatabase(ctx, i.db); err != nil {
 			i.logger.Errorw(
-				"Failed to insert notification delivery history", zap.String("contact", contact.String()),
+				"Failed to insert notification history entry", zap.String("contact", contact.String()),
 				zap.Error(err),
 			)
 		}
