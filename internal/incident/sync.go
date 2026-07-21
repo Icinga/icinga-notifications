@@ -103,7 +103,7 @@ func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *ru
 			cr.Role = state.Role
 		}
 
-		stmt, _ := i.db.BuildUpsertStmt(cr, "id")
+		stmt, _ := i.db.BuildUpsertStmt(cr)
 		_, err := tx.NamedExecContext(ctx, stmt, cr)
 		if err != nil {
 			i.logger.Errorw(
@@ -131,17 +131,22 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 //
 // This function will just insert NotificationStateSuppressed incident histories and return an empty slice if
 // the incident is muted, otherwise a slice of pending *NotificationEntry(ies) that can be used to update
-// the corresponding histories after the actual notifications have been sent out.
+// the corresponding histories after the actual notifications have been sent out. The given reason denotes
+// the incident event that triggered the notifications and is carried over to the returned entries.
+//
+// A contact+channel pair selected by multiple origins yields a single pending entry for the first origin,
+// plus one NotificationStateSuperfluous entry per additional origin. Superfluous entries are only recorded
+// in the notification history, they do not get an incident_history row and are never delivered.
 //
 // Note: handleUnmute clears i.MuteReason before this function runs, and handleMute sets it after, so a single
 // i.IsMuted() check captures the correct transitional state for mute/unmute and steady-state events alike.
 func (i *Incident) generateNotifications(
-	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
+	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels, reason HistoryEventType,
 ) ([]*NotificationEntry, error) {
 	var notifications []*NotificationEntry
 	suppress := i.IsMuted()
 	for contact, channels := range contactChannels {
-		for chID := range channels {
+		for chID, origins := range channels {
 			hr := &HistoryRow{
 				IncidentID:        i.Id,
 				Key:               recipient.ToKey(contact),
@@ -163,13 +168,26 @@ func (i *Incident) generateNotifications(
 				return nil, err
 			}
 
-			if !suppress {
-				notifications = append(notifications, &NotificationEntry{
-					HistoryRowID: hr.ID,
-					ContactID:    contact.ID,
-					State:        NotificationStatePending,
-					ChannelID:    chID,
-				})
+			if suppress {
+				continue
+			}
+
+			for idx, origin := range origins {
+				entry := &NotificationEntry{
+					ContactID: contact.ID,
+					ChannelID: chID,
+					Origin:    origin,
+					Reason:    reason,
+				}
+				if idx == 0 {
+					entry.HistoryRowID = hr.ID
+					entry.State = NotificationStatePending
+				} else {
+					entry.State = NotificationStateSuperfluous
+					entry.Superfluous = true
+				}
+
+				notifications = append(notifications, entry)
 			}
 		}
 	}

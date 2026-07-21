@@ -145,6 +145,10 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	i.logger = i.logger.With(zap.String("object", obj.DisplayName()))
 
 	triggerNotifications := true
+	// notificationReason denotes the incident event the generated notifications are attributed to.
+	// Precedence: Opened > Muted/Unmuted > EscalationTriggered > IncidentSeverityChanged > Notified.
+	notificationReason := Notified
+
 	isNew := i.IsNew()
 	if isNew {
 		if !ev.OpenOrEscalate() {
@@ -162,6 +166,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 
 		i.logger = i.logger.With(zap.String("incident", i.String()))
+		notificationReason = Opened
 	} else {
 		i.logger = i.logger.With(zap.String("incident", i.String()))
 		if sevChanged, err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
@@ -169,6 +174,18 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		} else {
 			// In case the severity didn't change, we need to check whether we can trigger notifications nonetheless.
 			triggerNotifications = sevChanged || ev.NotifyRecipients() || (ev.Muted.Valid && ev.IsMuted() != i.IsMuted())
+
+			if sevChanged {
+				notificationReason = IncidentSeverityChanged
+			}
+			// The mute state must be evaluated here, before handleUnmute below clears i.MuteReason.
+			if ev.Muted.Valid && ev.IsMuted() != i.IsMuted() {
+				if ev.IsMuted() {
+					notificationReason = Muted
+				} else {
+					notificationReason = Unmuted
+				}
+			}
 		}
 	}
 
@@ -196,6 +213,10 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 			// even if the event itself doesn't request it.
 			triggerNotifications = triggerNotifications || len(escalations) > 0
 
+			if len(escalations) > 0 && (notificationReason == Notified || notificationReason == IncidentSeverityChanged) {
+				notificationReason = EscalationTriggered
+			}
+
 			if !isNew {
 				// Even if the severity didn't change, we want to update the message nonetheless.
 				i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
@@ -211,7 +232,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 
 		if triggerNotifications {
-			notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
+			notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time), notificationReason)
 			if err != nil {
 				return err
 			}
@@ -294,7 +315,7 @@ func (i *Incident) RetriggerEscalations(ctx context.Context, o *object.Object, e
 				channels.LoadFromEscalationRecipients(escalation, ev.Time, i.isRecipientNotifiable)
 			}
 
-			notifications, err = i.generateNotifications(ctx, tx, ev, channels)
+			notifications, err = i.generateNotifications(ctx, tx, ev, channels, EscalationTriggered)
 			if err != nil {
 				return fmt.Errorf("cannot generate notifications for reevaluated escalations: %w", err)
 			}
@@ -641,20 +662,43 @@ func (i *Incident) notifyContacts(
 		}
 		i.runtimeConfig.RUnlock()
 
-		err := i.notifyContact(obj, contact, ev, ch)
-		if err != nil {
-			notification.State = NotificationStateFailed
-		} else {
-			notification.State = NotificationStateSent
+		if !notification.Superfluous {
+			err := i.notifyContact(obj, contact, ev, ch)
+			if err != nil {
+				notification.State = NotificationStateFailed
+			} else {
+				notification.State = NotificationStateSent
+			}
+			notification.SentAt = types.UnixMilli(time.Now())
 		}
-
-		notification.SentAt = types.UnixMilli(time.Now())
-		stmt, _ := i.db.BuildUpdateStmt(notification)
-		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
+		entry := &DeliveryEntry{
+			IncidentID:        i.Id,
+			RuleID:            types.MakeInt(notification.Origin.RuleID, types.TransformZeroIntToNull),
+			RuleEscalationID:  types.MakeInt(notification.Origin.RuleEscalationID, types.TransformZeroIntToNull),
+			ContactID:         contact.ID,
+			ContactgroupID:    types.MakeInt(notification.Origin.ContactGroupID, types.TransformZeroIntToNull),
+			ChannelID:         notification.ChannelID,
+			ScheduleID:        types.MakeInt(notification.Origin.ScheduleID, types.TransformZeroIntToNull),
+			Message:           i.Message,
+			Reason:            notification.Reason,
+			SentAt:            notification.SentAt,
+			NotificationState: notification.State,
+		}
+		if err := entry.WriteToDatabase(ctx, i.db); err != nil {
 			i.logger.Errorw(
-				"Failed to update contact notified incident history", zap.String("contact", contactName),
+				"Failed to insert notification delivery history", zap.String("contact", contact.String()),
 				zap.Error(err),
 			)
+		}
+
+		if !notification.Superfluous {
+			stmt, _ := i.db.BuildUpdateStmt(notification)
+			if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
+				i.logger.Errorw(
+					"Failed to update contact notified incident history", zap.String("contact", contactName),
+					zap.Error(err),
+				)
+			}
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -716,8 +760,9 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 
 				for _, contact := range contacts {
 					if contactChs[contact] == nil {
-						contactChs[contact] = make(map[int64]bool)
-						contactChs[contact][contact.DefaultChannelID] = true
+						// The zero value origin denotes a recipient without rule involvement.
+						contactChs[contact] = make(map[int64][]rule.ChannelOrigin)
+						contactChs[contact][contact.DefaultChannelID] = []rule.ChannelOrigin{{}}
 					}
 				}
 			} else {
