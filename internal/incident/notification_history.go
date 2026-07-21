@@ -17,8 +17,8 @@ type NotificationHistoryEntry struct {
 	RuleID           int64             `db:"rule_id"`
 	RuleEscalationID int64             `db:"rule_escalation_id"`
 	ContactID        int64             `db:"contact_id"`
+	ChannelID        int64             `db:"channel_id"`
 	ContactgroupID   types.Int         `db:"contactgroup_id"`
-	ChannelID        types.Int         `db:"channel_id"`
 	ScheduleID       types.Int         `db:"schedule_id"`
 	Message          types.String      `db:"message"`
 	Reason           HistoryEventType  `db:"reason"`

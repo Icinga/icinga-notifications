@@ -15,8 +15,8 @@ CREATE TABLE notification_history (
     rule_id bigint NOT NULL,
     rule_escalation_id bigint NOT NULL,
     contact_id bigint NOT NULL,
+    channel_id bigint NOT NULL,
     contactgroup_id bigint,
-    channel_id bigint,
     schedule_id bigint,
     message text,
     reason notification_trigger_reason NOT NULL,
@@ -28,8 +28,8 @@ CREATE TABLE notification_history (
     CONSTRAINT fk_notification_history_rule FOREIGN KEY (rule_id) REFERENCES rule(id),
     CONSTRAINT fk_notification_history_rule_escalation FOREIGN KEY (rule_escalation_id) REFERENCES rule_escalation(id),
     CONSTRAINT fk_notification_history_contact FOREIGN KEY (contact_id) REFERENCES contact(id),
-    CONSTRAINT fk_notification_history_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
     CONSTRAINT fk_notification_history_channel FOREIGN KEY (channel_id) REFERENCES channel(id),
+    CONSTRAINT fk_notification_history_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
     CONSTRAINT fk_notification_history_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id)
 );
 
