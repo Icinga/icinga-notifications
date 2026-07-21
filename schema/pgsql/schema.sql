@@ -492,7 +492,7 @@ CREATE TABLE notification_history (
     message text,
     reason notification_trigger_reason NOT NULL,
     state notification_history_state_type NOT NULL,
-    sent_at bigint,
+    triggered_at bigint NOT NULL,
 
     CONSTRAINT pk_notification_history PRIMARY KEY (id),
     CONSTRAINT fk_notification_history_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
@@ -504,7 +504,7 @@ CREATE TABLE notification_history (
     CONSTRAINT fk_notification_history_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id)
 );
 
-CREATE INDEX idx_notification_history_time ON notification_history(sent_at);
+CREATE INDEX idx_notification_history_time ON notification_history(triggered_at);
 CREATE INDEX idx_notification_history_incident_id ON notification_history(incident_id);
 
 CREATE TABLE event_queue (

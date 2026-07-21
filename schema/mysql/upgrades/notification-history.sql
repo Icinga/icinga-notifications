@@ -11,7 +11,7 @@ CREATE TABLE notification_history (
     -- NOT NULL is enforced via CHECK not to default to 'incident_severity_changed'
     reason enum('incident_severity_changed', 'escalation_triggered', 'opened', 'closed', 'muted', 'unmuted'),
     state enum('suppressed', 'pending', 'sent', 'failed', 'superfluous'),
-    sent_at bigint,
+    triggered_at bigint NOT NULL,
 
     CONSTRAINT pk_notification_history PRIMARY KEY (id),
     CONSTRAINT ck_notification_history_type_notnull CHECK (reason IS NOT NULL),
@@ -25,5 +25,5 @@ CREATE TABLE notification_history (
     CONSTRAINT fk_notification_history_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-CREATE INDEX idx_notification_history_time ON notification_history(sent_at);
+CREATE INDEX idx_notification_history_time ON notification_history(triggered_at);
 CREATE INDEX idx_notification_history_incident_id ON notification_history(incident_id);

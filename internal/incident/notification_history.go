@@ -23,7 +23,7 @@ type NotificationHistoryEntry struct {
 	Message          types.String      `db:"message"`
 	Reason           HistoryEventType  `db:"reason"`
 	State            NotificationState `db:"state"`
-	SentAt           types.UnixMilli   `db:"sent_at"`
+	TriggeredAt      types.UnixMilli   `db:"triggered_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.

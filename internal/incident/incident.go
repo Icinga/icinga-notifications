@@ -669,8 +669,8 @@ func (i *Incident) notifyContacts(
 			} else {
 				notification.State = NotificationStateSent
 			}
-			notification.SentAt = types.UnixMilli(time.Now())
 		}
+		notification.SentAt = types.UnixMilli(time.Now())
 		entry := &NotificationHistoryEntry{
 			IncidentID:       i.Id,
 			RuleID:           notification.Origin.RuleID,
@@ -681,8 +681,8 @@ func (i *Incident) notifyContacts(
 			ScheduleID:       types.MakeInt(notification.Origin.ScheduleID, types.TransformZeroIntToNull),
 			Message:          i.Message,
 			Reason:           notification.Reason,
-			SentAt:           notification.SentAt,
 			State:            notification.State,
+			TriggeredAt:      notification.SentAt,
 		}
 		if err := entry.WriteToDatabase(ctx, i.db); err != nil {
 			i.logger.Errorw(
