@@ -20,7 +20,7 @@ CREATE TYPE delivery_trigger_reason AS ENUM (
     'opened',
     'closed',
     'muted',
-    'unmuted',
+    'unmuted'
 );
 CREATE TYPE rotation_type AS ENUM ( '24-7', 'partial', 'multi' );
 CREATE TYPE notification_state_type AS ENUM ( 'suppressed', 'pending', 'sent', 'failed' );
