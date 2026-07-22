@@ -672,11 +672,11 @@ func (i *Incident) notifyContacts(
 		}
 		notification.SentAt = types.UnixMilli(time.Now())
 		entry := &NotificationHistoryEntry{
-			IncidentID:       i.Id,
 			RuleID:           notification.Origin.RuleID,
 			RuleEscalationID: notification.Origin.RuleEscalationID,
 			ContactID:        contact.ID,
 			ChannelID:        notification.ChannelID,
+			IncidentID:       types.MakeInt(i.Id, types.TransformZeroIntToNull),
 			ContactgroupID:   types.MakeInt(notification.Origin.ContactGroupID, types.TransformZeroIntToNull),
 			ScheduleID:       types.MakeInt(notification.Origin.ScheduleID, types.TransformZeroIntToNull),
 			Message:          i.Message,

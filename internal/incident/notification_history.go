@@ -13,11 +13,11 @@ import (
 // attempt of a notification to a contact including the rule/escalation/recipient it originated from.
 type NotificationHistoryEntry struct {
 	ID               int64             `db:"id"`
-	IncidentID       int64             `db:"incident_id"`
 	RuleID           int64             `db:"rule_id"`
 	RuleEscalationID int64             `db:"rule_escalation_id"`
 	ContactID        int64             `db:"contact_id"`
 	ChannelID        int64             `db:"channel_id"`
+	IncidentID       types.Int         `db:"incident_id"`
 	ContactgroupID   types.Int         `db:"contactgroup_id"`
 	ScheduleID       types.Int         `db:"schedule_id"`
 	Message          types.String      `db:"message"`

@@ -444,11 +444,11 @@ CREATE INDEX idx_incident_history_time_type ON incident_history(time, type) COMM
 
 CREATE TABLE notification_history (
     id bigint NOT NULL AUTO_INCREMENT,
-    incident_id bigint NOT NULL,
     rule_id bigint NOT NULL,
     rule_escalation_id bigint NOT NULL,
     contact_id bigint NOT NULL,
     channel_id bigint NOT NULL,
+    incident_id bigint,
     contactgroup_id bigint,
     schedule_id bigint,
     message text,
@@ -460,11 +460,11 @@ CREATE TABLE notification_history (
     CONSTRAINT pk_notification_history PRIMARY KEY (id),
     CONSTRAINT ck_notification_history_type_notnull CHECK (reason IS NOT NULL),
     CONSTRAINT ck_notification_history_state_notnull CHECK (state IS NOT NULL),
-    CONSTRAINT fk_notification_history_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
     CONSTRAINT fk_notification_history_rule FOREIGN KEY (rule_id) REFERENCES rule(id),
     CONSTRAINT fk_notification_history_rule_escalation FOREIGN KEY (rule_escalation_id) REFERENCES rule_escalation(id),
     CONSTRAINT fk_notification_history_contact FOREIGN KEY (contact_id) REFERENCES contact(id),
     CONSTRAINT fk_notification_history_channel FOREIGN KEY (channel_id) REFERENCES channel(id),
+    CONSTRAINT fk_notification_history_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
     CONSTRAINT fk_notification_history_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
     CONSTRAINT fk_notification_history_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
