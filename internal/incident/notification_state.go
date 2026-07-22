@@ -13,13 +13,15 @@ const (
 	NotificationStatePending
 	NotificationStateSent
 	NotificationStateFailed
+	NotificationStateSuperfluous
 )
 
 var notificationStatTypeByName = map[string]NotificationState{
-	"suppressed": NotificationStateSuppressed,
-	"pending":    NotificationStatePending,
-	"sent":       NotificationStateSent,
-	"failed":     NotificationStateFailed,
+	"suppressed":  NotificationStateSuppressed,
+	"pending":     NotificationStatePending,
+	"sent":        NotificationStateSent,
+	"failed":      NotificationStateFailed,
+	"superfluous": NotificationStateSuperfluous,
 }
 
 var notificationStateTypeToName = func() map[NotificationState]string {
