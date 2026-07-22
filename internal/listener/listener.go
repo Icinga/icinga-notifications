@@ -79,6 +79,7 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 	l.mux.Handle("/debug/", http.StripPrefix("/debug", l.requireDebugAuth(debugMux)))
 	l.mux.HandleFunc("/process-event", l.ProcessEvent)
 	l.mux.HandleFunc("/incidents", l.IncidentsHandler)
+	l.mux.HandleFunc("/notification-history", l.GetNotificationHistory)
 	return l
 }
 
@@ -580,6 +581,69 @@ func (l *Listener) modifyIncidentsHandler(w http.ResponseWriter, r *http.Request
 	pairCh, errCh := incident.YieldForSource(r.Context(), l.db, l.logs, l.runtimeConfig, src.ID)
 	if err := StreamJsonResults(r.Context(), w, pairCh, errCh, opts...); err != nil {
 		l.logger.Debugw("Error streaming modify incidents response", zap.String("source", src.Name), zap.Error(err))
+	}
+}
+
+// GetNotificationHistory handles GET requests to the /notification-history endpoint.
+func (l *Listener) GetNotificationHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		l.abort(w, http.StatusMethodNotAllowed, nil, "GET required")
+		return
+	}
+
+	src := l.sourceFromAuthOrAbort(w, r)
+	if src == nil {
+		// Listener.sourceFromAuthOrAbort writes 401 response by itself; no abort() necessary.
+		return
+	}
+
+	since := r.URL.Query().Get("since")
+	if since == "" {
+		l.abort(w, http.StatusBadRequest, nil, "missing required 'since' query parameter")
+		return
+	}
+
+	onStreamErr := func(enc *json.Encoder, wroteHeader *bool, err error) {
+		//// The database query is bound to the HTTP request context, so if the client disconnects prematurely but
+		//// still normally closes the connection, the context will be canceled and the DB query will return that
+		//// error. In that case, there is no client to send a response to, so debug log it and be done with it.
+		//if errors.Is(err, context.Canceled) {
+		//	l.logger.Debugw("Client disconnected prematurely", zap.String("source", src.Name), zap.Error(err))
+		//	return
+		//}
+		//l.logger.Warnw("Error processing incident request", zap.String("source", src.Name), zap.Error(err))
+		//
+		//var code int
+		//var errState source.ErrorState
+		//if errors.Is(err, ErrFilterEval) {
+		//	code = http.StatusBadRequest
+		//	errState.Error = err.Error()
+		//} else {
+		//	code = http.StatusInternalServerError
+		//	errState.Error = "some incidents could not be modified due to an internal error, see server logs for details"
+		//	if r.Method == http.MethodGet {
+		//		errState.Error = "some incidents could not be retrieved due to an internal error, see server logs for details"
+		//	}
+		//}
+		//
+		//if !*wroteHeader {
+		//	*wroteHeader = true
+		//	l.abort(w, code, src, "%s", errState.Error)
+		//} else if err := enc.Encode(&errState); err != nil {
+		//	l.logger.Warnw("Error serializing error response", zap.String("source", src.Name), zap.Error(err))
+		//}
+	}
+	onStreamResult := func(entry incident.NotificationHistoryEntry) (any, error) {
+		return entry, nil
+	}
+	opts := []StreamOpt[incident.NotificationHistoryEntry]{
+		WithOnError[incident.NotificationHistoryEntry](onStreamErr),
+		WithOnResult(onStreamResult),
+	}
+
+	historyEntryCh, errCh := incident.YieldNotificationHistoryForSource(r.Context(), l.db, since, src.ID)
+	if err := StreamJsonResults(r.Context(), w, historyEntryCh, errCh, opts...); err != nil {
+		l.logger.Debugw("Error streaming get incidents response", zap.String("source", src.Name), zap.Error(err))
 	}
 }
 
