@@ -9,8 +9,9 @@ CREATE TABLE notification_history (
     schedule_id bigint,
     message mediumtext,
     -- NOT NULL is enforced via CHECK not to default to 'incident_severity_changed'
-    reason enum('incident_severity_changed', 'escalation_triggered', 'opened', 'closed', 'muted', 'unmuted'),
-    state enum('suppressed', 'pending', 'sent', 'failed', 'superfluous'),
+    reason enum('incident_severity_changed', 'escalation_triggered', 'opened', 'closed', 'muted', 'unmuted', 'recipient_role_changed', 'notified'),
+--     TODO: remove `superfluous` state once the notification_skipped table is introduced and tracks notifications that were skipped due to being superfluous.
+    state enum('pending', 'sent', 'failed', 'superfluous'),
     triggered_at bigint NOT NULL,
 
     CONSTRAINT pk_notification_history PRIMARY KEY (id),

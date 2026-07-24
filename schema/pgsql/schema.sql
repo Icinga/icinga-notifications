@@ -20,11 +20,13 @@ CREATE TYPE notification_trigger_reason AS ENUM (
     'opened',
     'closed',
     'muted',
-    'unmuted'
+    'unmuted',
+    'recipient_role_changed',
+    'notified'
 );
 CREATE TYPE rotation_type AS ENUM ( '24-7', 'partial', 'multi' );
 CREATE TYPE notification_state_type AS ENUM ( 'suppressed', 'pending', 'sent', 'failed' );
-CREATE TYPE notification_history_state_type AS ENUM ( 'suppressed', 'pending', 'sent', 'failed', 'superfluous' );;
+CREATE TYPE notification_history_state_type AS ENUM ( 'pending', 'sent', 'failed', 'superfluous' );;
 
 -- IPL ORM renders SQL queries with LIKE operators for all suggestions in the search bar,
 -- which fails for numeric and enum types on PostgreSQL. Just like in Icinga DB Web.
