@@ -15,6 +15,8 @@ Authentication differs by transport:
 
 - **TCP:** HTTP Basic Authentication is used; both the source's username and password must match
   the configured credentials.
+- **TCP with TLS:** If the request arrives with a TLS client certificate signed by the CA, the source is identified by the
+  certificate's Subject.
 - **Unix socket:** The caller is identified automatically by their OS user. No HTTP Basic Auth or
   password is involved.
 
@@ -105,6 +107,13 @@ No credentials are needed; the daemon identifies the caller by their OS user aut
 !!! info
 
     curl must be executed as a user which is configured as listener_username of a source.
+
+To submit over TLS using a client certificate instead of HTTP Basic Authentication,
+pass `--cacert ca.crt --cert client.crt --key client.key` to curl and omit `-u`:
+
+!!! info
+
+    The daemon identifies the source by the certificate's Subject. If no matching source is found, the request is rejected.
 
 ## Incidents
 

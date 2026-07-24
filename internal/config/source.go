@@ -3,12 +3,13 @@ package config
 import (
 	"crypto/subtle"
 	"fmt"
+	"slices"
+	"sync"
+
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/crypto/bcrypt"
-	"slices"
-	"sync"
 )
 
 // Source entry within the ConfigSet to describe a source.
@@ -18,10 +19,11 @@ type Source struct {
 	Type string `db:"type"`
 	Name string `db:"name"`
 
-	ListenerUsername      types.String `db:"listener_username"`
-	ListenerPasswordHash  types.String `db:"listener_password_hash"`
-	listenerPassword      []byte       `db:"-"`
-	listenerPasswordMutex sync.Mutex
+	ClientCertificateSubject types.String `db:"client_certificate_subject"`
+	ListenerUsername         types.String `db:"listener_username"`
+	ListenerPasswordHash     types.String `db:"listener_password_hash"`
+	listenerPassword         []byte       `db:"-"`
+	listenerPasswordMutex    sync.Mutex
 
 	// ruleIDs is a list of rule IDs belonging to this source.
 	//

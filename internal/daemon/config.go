@@ -48,6 +48,7 @@ type Listener struct {
 	DebugPassword     string           `yaml:"debug_password" env:"DEBUG_PASSWORD"`
 	DebugPasswordFile string           `yaml:"debug_password_file" env:"DEBUG_PASSWORD_FILE"`
 	TLSOptions        config.TLSCommon `yaml:",inline"`
+	CrlFile           string           `yaml:"crl_file" env:"CRL_FILE"`
 }
 
 func (l *Listener) Validate() error {
@@ -85,7 +86,11 @@ func (l *Listener) Validate() error {
 			return errors.New("missing CA certificate")
 		}
 
-		tlsOpts := &config.ServerTLS{TLSCommon: l.TLSOptions, ClientAuth: config.TlsClientAuthType(tls.VerifyClientCertIfGiven)}
+		tlsOpts := &config.ServerTLS{
+			TLSCommon:  l.TLSOptions,
+			ClientAuth: config.TlsClientAuthType(tls.VerifyClientCertIfGiven),
+			CrlFile:    l.CrlFile,
+		}
 		if err := tlsOpts.Validate(); err != nil {
 			return err
 		}
@@ -93,10 +98,30 @@ func (l *Listener) Validate() error {
 	return nil
 }
 
-// GetTlsConfig returns a *[tls.Config] based on the TLS options specified in the Listener configuration.
-func (l *Listener) GetTlsConfig() (*tls.Config, error) {
-	tlsOpts := &config.ServerTLS{TLSCommon: l.TLSOptions, ClientAuth: config.TlsClientAuthType(tls.VerifyClientCertIfGiven)}
-	return tlsOpts.MakeConfig()
+// GetTlsConfig returns a *[tls.Config] and a *[config.CrlChecker] based on the TLS options
+// specified in the Listener configuration.
+// The boolean return value indicates whether revocation checking is enabled (true) or not (false).
+func (l *Listener) GetTlsConfig() (*tls.Config, *config.CrlChecker, bool, error) {
+	tlsOpts := &config.ServerTLS{
+		TLSCommon:  l.TLSOptions,
+		ClientAuth: config.TlsClientAuthType(tls.VerifyClientCertIfGiven),
+		CrlFile:    l.CrlFile,
+	}
+	tlsConfig, err := tlsOpts.MakeConfig()
+	if err != nil {
+		return nil, nil, false, err
+	}
+
+	if l.TLSOptions.Enable && tlsOpts.CrlFile != "" {
+		crlChecker, err := tlsOpts.InitRevocationChecking(tlsConfig)
+		if err != nil {
+			return nil, nil, false, err
+		}
+
+		return tlsConfig, crlChecker, true, nil
+	}
+
+	return tlsConfig, nil, false, nil
 }
 
 type ConfigFile struct {
