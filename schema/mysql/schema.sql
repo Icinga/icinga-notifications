@@ -243,12 +243,16 @@ CREATE TABLE source (
     listener_username varchar(255),
     listener_password_hash text,
 
+    client_certificate_subject varchar(768) DEFAULT NULL,
+
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
     locked enum('n', 'y') NOT NULL DEFAULT 'n',  -- set to 'y' when the source is maintained by an integration
 
     CONSTRAINT uk_source_listener_username UNIQUE (listener_username),
-    CONSTRAINT ck_source_listener_username_or_deleted CHECK (deleted = 'y' OR listener_username IS NOT NULL),
+    CONSTRAINT uk_source_client_certificate_subject UNIQUE (client_certificate_subject),
+    CONSTRAINT ck_source_listener_identity_or_deleted CHECK (deleted = 'y' OR listener_username IS NOT NULL OR client_certificate_subject IS NOT NULL),
+    CONSTRAINT ck_source_listener_cert_xor_credentials CHECK (listener_username IS NULL OR client_certificate_subject IS NULL),
 
     -- The hash is a PHP password_hash with PASSWORD_DEFAULT algorithm, defaulting to bcrypt. This check roughly ensures
     -- that listener_password_hash can only be populated with bcrypt hashes.

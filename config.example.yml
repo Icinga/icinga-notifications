@@ -51,6 +51,11 @@ listener:
   # Required if TLS is enabled to be able to verify client certificate if the client provides one.
   #ca: /path/to/ca.crt
 
+  # Path to a Certificate Revocation List (CRL) file in PEM or DER format to enable client certificate revocation checks.
+  # When set, client certificates signed by the configured CA are checked against this CRL during the TLS handshake.
+  # Requires ca to be set. Leave unset (the default) to disable CRL checking.
+  #crl_file: /path/to/ca.crl
+
 # Connection configuration for the database where Icinga Notifications stores configuration and historical data.
 # This is also the database used in Icinga Notifications Web to view and work with the data.
 database:
