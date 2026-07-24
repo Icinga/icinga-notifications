@@ -89,7 +89,7 @@ func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context) error {
 		return err
 	}
 
-	r.applyPending()
+	r.applyPending(ctx)
 	if r.configChangeAvailable {
 		r.logger.Debug("Synchronizing applied configuration changes, verifying state")
 		if err := r.debugVerify(); err != nil {
@@ -272,12 +272,11 @@ func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
 }
 
 // applyPending synchronizes all changes.
-func (r *RuntimeConfig) applyPending() {
+func (r *RuntimeConfig) applyPending(ctx context.Context) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	applyFns := []func(){
-		r.applyPendingChannels,
 		r.applyPendingContacts,
 		r.applyPendingGroups,
 		r.applyPendingSchedules,
@@ -285,6 +284,7 @@ func (r *RuntimeConfig) applyPending() {
 		r.applyPendingRules,
 		r.applyPendingSources,
 	}
+	r.applyPendingChannels(ctx) // This is special because it requires the context, so it is called separately.
 	for _, f := range applyFns {
 		f()
 	}
