@@ -443,36 +443,7 @@ func (l *Listener) IncidentsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	onStreamErr := func(enc *json.Encoder, wroteHeader *bool, err error) {
-		// The database query is bound to the HTTP request context, so if the client disconnects prematurely but
-		// still normally closes the connection, the context will be canceled and the DB query will return that
-		// error. In that case, there is no client to send a response to, so debug log it and be done with it.
-		if errors.Is(err, context.Canceled) {
-			l.logger.Debugw("Client disconnected prematurely", zap.String("source", src.Name), zap.Error(err))
-			return
-		}
-		l.logger.Warnw("Error processing incident request", zap.String("source", src.Name), zap.Error(err))
-
-		var code int
-		var errState source.ErrorState
-		if errors.Is(err, ErrFilterEval) {
-			code = http.StatusBadRequest
-			errState.Error = err.Error()
-		} else {
-			code = http.StatusInternalServerError
-			errState.Error = "some incidents could not be modified due to an internal error, see server logs for details"
-			if r.Method == http.MethodGet {
-				errState.Error = "some incidents could not be retrieved due to an internal error, see server logs for details"
-			}
-		}
-
-		if !*wroteHeader {
-			*wroteHeader = true
-			l.abort(w, code, src, "%s", errState.Error)
-		} else if err := enc.Encode(&errState); err != nil {
-			l.logger.Warnw("Error serializing error response", zap.String("source", src.Name), zap.Error(err))
-		}
-	}
+	onStreamErr := l.createStreamErrFunc(r, w, src, "incidents")
 
 	if r.Method == http.MethodGet {
 		l.getIncidentsHandler(w, r, src, filter, onStreamErr)
@@ -603,36 +574,7 @@ func (l *Listener) GetNotificationHistory(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	onStreamErr := func(enc *json.Encoder, wroteHeader *bool, err error) {
-		//// The database query is bound to the HTTP request context, so if the client disconnects prematurely but
-		//// still normally closes the connection, the context will be canceled and the DB query will return that
-		//// error. In that case, there is no client to send a response to, so debug log it and be done with it.
-		//if errors.Is(err, context.Canceled) {
-		//	l.logger.Debugw("Client disconnected prematurely", zap.String("source", src.Name), zap.Error(err))
-		//	return
-		//}
-		//l.logger.Warnw("Error processing incident request", zap.String("source", src.Name), zap.Error(err))
-		//
-		//var code int
-		//var errState source.ErrorState
-		//if errors.Is(err, ErrFilterEval) {
-		//	code = http.StatusBadRequest
-		//	errState.Error = err.Error()
-		//} else {
-		//	code = http.StatusInternalServerError
-		//	errState.Error = "some incidents could not be modified due to an internal error, see server logs for details"
-		//	if r.Method == http.MethodGet {
-		//		errState.Error = "some incidents could not be retrieved due to an internal error, see server logs for details"
-		//	}
-		//}
-		//
-		//if !*wroteHeader {
-		//	*wroteHeader = true
-		//	l.abort(w, code, src, "%s", errState.Error)
-		//} else if err := enc.Encode(&errState); err != nil {
-		//	l.logger.Warnw("Error serializing error response", zap.String("source", src.Name), zap.Error(err))
-		//}
-	}
+	onStreamErr := l.createStreamErrFunc(r, w, src, "notification history entries")
 	onStreamResult := func(entry incident.NotificationHistoryEntry) (any, error) {
 		return entry, nil
 	}
@@ -779,6 +721,40 @@ func (l *Listener) sendMissingAttrsError(w http.ResponseWriter, src *config.Sour
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		l.logger.Errorw("Failed to send missing attributes required for rule evaluation", zap.Error(err))
 		return
+	}
+}
+
+func (l *Listener) createStreamErrFunc(r *http.Request, w http.ResponseWriter, src *config.Source, namePlural string) OnErrFunc {
+
+	return func(enc *json.Encoder, wroteHeader *bool, err error) {
+		// The database query is bound to the HTTP request context, so if the client disconnects prematurely but
+		// still normally closes the connection, the context will be canceled and the DB query will return that
+		// error. In that case, there is no client to send a response to, so debug log it and be done with it.
+		if errors.Is(err, context.Canceled) {
+			l.logger.Debugw("Client disconnected prematurely", zap.String("source", src.Name), zap.Error(err))
+			return
+		}
+		l.logger.Warnw(fmt.Sprintf("Error processing %s request", namePlural), zap.String("source", src.Name), zap.Error(err))
+
+		var code int
+		var errState source.ErrorState
+		if errors.Is(err, ErrFilterEval) {
+			code = http.StatusBadRequest
+			errState.Error = err.Error()
+		} else {
+			code = http.StatusInternalServerError
+			errState.Error = fmt.Sprintf("some %s could not be modified due to an internal error, see server logs for details", namePlural)
+			if r.Method == http.MethodGet {
+				errState.Error = fmt.Sprintf("some %s could not be retrieved due to an internal error, see server logs for details", namePlural)
+			}
+		}
+
+		if !*wroteHeader {
+			*wroteHeader = true
+			l.abort(w, code, src, "%s", errState.Error)
+		} else if err := enc.Encode(&errState); err != nil {
+			l.logger.Warnw("Error serializing error response", zap.String("source", src.Name), zap.Error(err))
+		}
 	}
 }
 
