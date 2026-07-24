@@ -5,20 +5,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-notifications/internal"
-	"net/http"
-	"time"
 )
 
 func main() {
-	plugin.RunPlugin(&RocketChat{})
+	plugin.Run(&RocketChat{})
 }
 
 type RocketChat struct {
 	URL    string `json:"url"`
 	UserID string `json:"user_id"`
 	Token  string `json:"token"`
+
+	mu sync.Mutex // Protects access to the above fields.
 }
 
 func (ch *RocketChat) GetInfo() *plugin.Info {
@@ -61,12 +65,23 @@ func (ch *RocketChat) GetInfo() *plugin.Info {
 }
 
 func (ch *RocketChat) SetConfig(jsonStr json.RawMessage) error {
-	err := plugin.PopulateDefaults(ch)
-	if err != nil {
+	var tmpRC RocketChat
+	if err := plugin.PopulateDefaults(&tmpRC); err != nil {
 		return err
 	}
 
-	return json.Unmarshal(jsonStr, ch)
+	if err := json.Unmarshal(jsonStr, &tmpRC); err != nil {
+		return fmt.Errorf("could not unmarshal configuration: %w", err)
+	}
+
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+
+	ch.URL = tmpRC.URL
+	ch.UserID = tmpRC.UserID
+	ch.Token = tmpRC.Token
+
+	return nil
 }
 
 func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
@@ -100,13 +115,19 @@ func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 		return err
 	}
 
-	request, err := http.NewRequest(http.MethodPost, ch.URL+"/api/v1/chat.postMessage", bytes.NewReader(body))
+	ch.mu.Lock()
+	url := ch.URL
+	token := ch.Token
+	userID := ch.UserID
+	ch.mu.Unlock()
+
+	request, err := http.NewRequest(http.MethodPost, url+"/api/v1/chat.postMessage", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 
-	request.Header.Set("X-Auth-Token", ch.Token)
-	request.Header.Set("X-User-Id", ch.UserID)
+	request.Header.Set("X-Auth-Token", token)
+	request.Header.Set("X-User-Id", userID)
 	request.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 10 * time.Second}

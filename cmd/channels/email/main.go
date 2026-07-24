@@ -5,6 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/mail"
+	"sync"
+
 	"github.com/emersion/go-sasl"
 	"github.com/emersion/go-smtp"
 	"github.com/google/uuid"
@@ -12,12 +16,10 @@ import (
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/jhillyerd/enmime"
-	"net"
-	"net/mail"
 )
 
 func main() {
-	plugin.RunPlugin(&Email{})
+	plugin.Run(&Email{})
 }
 
 const (
@@ -34,6 +36,8 @@ type Email struct {
 	User       string `json:"user"`
 	Password   string `json:"password"` // #nosec G117 -- exported password field
 	Encryption string `json:"encryption"`
+
+	mu sync.Mutex // Protects access to the above fields.
 }
 
 func (ch *Email) GetInfo() *plugin.Info {
@@ -122,19 +126,31 @@ func (ch *Email) GetInfo() *plugin.Info {
 }
 
 func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
-	err := plugin.PopulateDefaults(ch)
+	var tmpEm Email
+	err := plugin.PopulateDefaults(&tmpEm)
 	if err != nil {
 		return err
 	}
 
-	err = json.Unmarshal(jsonStr, ch)
+	err = json.Unmarshal(jsonStr, &tmpEm)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %s %w", jsonStr, err)
 	}
 
-	if (ch.User == "") != (ch.Password == "") {
+	if (tmpEm.User == "") != (tmpEm.Password == "") {
 		return fmt.Errorf("user and password fields must both be set or empty")
 	}
+
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+
+	ch.Host = tmpEm.Host
+	ch.Port = tmpEm.Port
+	ch.SenderName = tmpEm.SenderName
+	ch.SenderMail = tmpEm.SenderMail
+	ch.User = tmpEm.User
+	ch.Password = tmpEm.Password
+	ch.Encryption = tmpEm.Encryption
 
 	return nil
 }
@@ -154,13 +170,15 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 	var msg bytes.Buffer
 	plugin.FormatMessage(&msg, req)
 
-	return enmime.Builder().
+	ch.mu.Lock()
+	b := enmime.Builder().
 		ToAddrs(to).
 		From(ch.SenderName, ch.SenderMail).
 		Subject(plugin.FormatSubject(req)).
-		Header("Message-Id", fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail)).
-		Text(msg.Bytes()).
-		Send(ch)
+		Header("Message-Id", fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail))
+	ch.mu.Unlock()
+
+	return b.Text(msg.Bytes()).Send(ch)
 }
 
 // Send implements the enmime.Sender interface.
@@ -170,9 +188,14 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 		err    error
 	)
 
+	ch.mu.Lock()
 	serverAddr := net.JoinHostPort(ch.Host, ch.Port)
+	encryption := ch.Encryption
+	password := ch.Password
+	username := ch.User
+	ch.mu.Unlock()
 
-	switch ch.Encryption {
+	switch encryption {
 	case EncryptionStartTLS:
 		client, err = smtp.DialStartTLS(serverAddr, nil)
 	case EncryptionTLS:
@@ -180,15 +203,15 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	case EncryptionNone:
 		client, err = smtp.Dial(serverAddr)
 	default:
-		return fmt.Errorf("unsupported mail encryption type %q", ch.Encryption)
+		return fmt.Errorf("unsupported mail encryption type %q", encryption)
 	}
 	if err != nil {
 		return err
 	}
 	defer func() { _ = client.Close() }()
 
-	if ch.Password != "" {
-		if err = client.Auth(sasl.NewPlainClient("", ch.User, ch.Password)); err != nil {
+	if password != "" {
+		if err = client.Auth(sasl.NewPlainClient("", username, password)); err != nil {
 			return err
 		}
 	}
