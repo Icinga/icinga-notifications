@@ -2,16 +2,17 @@ package config
 
 import (
 	"context"
+
 	"github.com/icinga/icinga-notifications/internal/channel"
 )
 
 // applyPendingChannels synchronizes changed channels.
-func (r *RuntimeConfig) applyPendingChannels() {
+func (r *RuntimeConfig) applyPendingChannels(ctx context.Context) {
 	incrementalApplyPending(
 		r,
 		&r.Channels, &r.configChange.Channels,
 		func(newElement *channel.Channel) error {
-			newElement.Start(context.TODO(), r.logs.GetChildLogger("channel").SugaredLogger)
+			newElement.Start(ctx, r.logs.GetChildLogger("channel").SugaredLogger)
 			return nil
 		},
 		func(curElement, update *channel.Channel) error {
