@@ -4,18 +4,20 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/icinga/icinga-go-library/notifications/plugin"
-	"github.com/icinga/icinga-notifications/internal"
 	"io"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
+
+	"github.com/icinga/icinga-go-library/notifications/plugin"
+	"github.com/icinga/icinga-notifications/internal"
 )
 
 func main() {
-	plugin.RunPlugin(&Webhook{})
+	plugin.Run(&Webhook{})
 }
 
 type Webhook struct {
@@ -28,6 +30,7 @@ type Webhook struct {
 	tmplRequestBody *template.Template
 
 	respStatusCodes []int
+	mu              sync.Mutex // Protects access to the Webhook struct fields during concurrent RPC calls.
 }
 
 func (ch *Webhook) GetInfo() *plugin.Info {
@@ -97,12 +100,13 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 }
 
 func (ch *Webhook) SetConfig(jsonStr json.RawMessage) error {
-	err := plugin.PopulateDefaults(ch)
+	var tmpWh Webhook
+	err := plugin.PopulateDefaults(&tmpWh)
 	if err != nil {
 		return err
 	}
 
-	err = json.Unmarshal(jsonStr, ch)
+	err = json.Unmarshal(jsonStr, &tmpWh)
 	if err != nil {
 		return err
 	}
@@ -118,39 +122,58 @@ func (ch *Webhook) SetConfig(jsonStr json.RawMessage) error {
 		},
 	}
 
-	ch.tmplUrl, err = template.New("url").Funcs(tmplFuncs).Parse(ch.URLTemplate)
+	tmpWh.tmplUrl, err = template.New("url").Funcs(tmplFuncs).Parse(tmpWh.URLTemplate)
 	if err != nil {
 		return fmt.Errorf("cannot parse URL template: %w", err)
 	}
 
-	ch.tmplRequestBody, err = template.New("request_body").Funcs(tmplFuncs).Parse(ch.RequestBodyTemplate)
+	tmpWh.tmplRequestBody, err = template.New("request_body").Funcs(tmplFuncs).Parse(tmpWh.RequestBodyTemplate)
 	if err != nil {
 		return fmt.Errorf("cannot parse Request Body template: %w", err)
 	}
 
-	respStatusCodes := strings.Split(ch.ResponseStatusCodes, ",")
-	ch.respStatusCodes = make([]int, len(respStatusCodes))
+	respStatusCodes := strings.Split(tmpWh.ResponseStatusCodes, ",")
+	tmpWh.respStatusCodes = make([]int, len(respStatusCodes))
 	for i, respStatusCodeStr := range respStatusCodes {
 		respStatusCode, err := strconv.Atoi(respStatusCodeStr)
 		if err != nil {
 			return fmt.Errorf("cannot convert status code %q to int: %w", respStatusCodeStr, err)
 		}
-		ch.respStatusCodes[i] = respStatusCode
+		tmpWh.respStatusCodes[i] = respStatusCode
 	}
+
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+
+	ch.Method = tmpWh.Method
+	ch.URLTemplate = tmpWh.URLTemplate
+	ch.RequestBodyTemplate = tmpWh.RequestBodyTemplate
+	ch.ResponseStatusCodes = tmpWh.ResponseStatusCodes
+
+	ch.tmplUrl = tmpWh.tmplUrl
+	ch.tmplRequestBody = tmpWh.tmplRequestBody
+	ch.respStatusCodes = tmpWh.respStatusCodes
 
 	return nil
 }
 
 func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
+	ch.mu.Lock()
+	method := ch.Method
+	tmplUrl := ch.tmplUrl
+	tmplRequestBody := ch.tmplRequestBody
+	respStatusCodes := ch.respStatusCodes
+	ch.mu.Unlock()
+
 	var urlBuff, reqBodyBuff bytes.Buffer
-	if err := ch.tmplUrl.Execute(&urlBuff, req); err != nil {
+	if err := tmplUrl.Execute(&urlBuff, req); err != nil {
 		return fmt.Errorf("cannot execute URL template: %w", err)
 	}
-	if err := ch.tmplRequestBody.Execute(&reqBodyBuff, req); err != nil {
+	if err := tmplRequestBody.Execute(&reqBodyBuff, req); err != nil {
 		return fmt.Errorf("cannot execute Request Body template: %w", err)
 	}
 
-	httpReq, err := http.NewRequest(ch.Method, urlBuff.String(), &reqBodyBuff)
+	httpReq, err := http.NewRequest(method, urlBuff.String(), &reqBodyBuff)
 	if err != nil {
 		return err
 	}
@@ -161,9 +184,9 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
 	_, _ = io.Copy(io.Discard, httpResp.Body)
 	_ = httpResp.Body.Close()
 
-	if !slices.Contains(ch.respStatusCodes, httpResp.StatusCode) {
+	if !slices.Contains(respStatusCodes, httpResp.StatusCode) {
 		return fmt.Errorf("unaccepted HTTP response status code %d not in %v",
-			httpResp.StatusCode, ch.respStatusCodes)
+			httpResp.StatusCode, respStatusCodes)
 	}
 
 	return nil
