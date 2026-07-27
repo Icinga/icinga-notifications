@@ -83,7 +83,10 @@ func YieldNotificationHistoryForSource(
 // yieldQuery runs the given query in a separate goroutine and sends each result to the returned channel.
 //
 // The query must not be a named query, and must ensure to provide the correct arguments (if any) for the query.
-func yieldQuery[T any](
+func yieldQuery[T any, PT interface {
+	*T
+	database.TableNamer
+}](
 	ctx context.Context,
 	db *database.DB,
 	query string,
@@ -96,9 +99,12 @@ func yieldQuery[T any](
 		defer close(valueCh)
 		defer close(errCh)
 
+		var zero T
+		tableName := PT(&zero).TableName()
+
 		rows, err := db.QueryxContext(ctx, db.Rebind(query), args...)
 		if err != nil {
-			errCh <- fmt.Errorf("cannot query notification history entries: %w", err)
+			errCh <- fmt.Errorf("cannot query %s entries: %w", tableName, err)
 			return
 		}
 		defer func() { _ = rows.Close() }()
@@ -106,7 +112,7 @@ func yieldQuery[T any](
 		for rows.Next() {
 			nh := new(T)
 			if err := rows.StructScan(nh); err != nil {
-				errCh <- fmt.Errorf("cannot scan notification history entries from row: %w", err)
+				errCh <- fmt.Errorf("cannot scan %s entries from row: %w", tableName, err)
 				return
 			}
 
@@ -119,7 +125,7 @@ func yieldQuery[T any](
 		}
 
 		if err := rows.Err(); err != nil {
-			errCh <- fmt.Errorf("incidents cursor error: %w", err)
+			errCh <- fmt.Errorf("%s cursor error: %w", tableName, err)
 		}
 	}()
 
