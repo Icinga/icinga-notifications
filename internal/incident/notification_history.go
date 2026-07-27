@@ -15,6 +15,7 @@ import (
 // attempt of a notification to a contact including the rule/escalation/recipient it originated from.
 type NotificationHistoryEntry struct {
 	ID               int64             `db:"id"`
+	EventID          types.Binary      `db:"event_id"`
 	RuleID           int64             `db:"rule_id"`
 	RuleEscalationID int64             `db:"rule_escalation_id"`
 	ContactID        int64             `db:"contact_id"`
@@ -122,7 +123,7 @@ func YieldNotificationHistoryForSource(
 // notification for a given rule/escalation/recipient was skipped instead of being sent.
 type NotificationSkippedHistoryEntry struct {
 	ID               int64     `db:"id"`
-	NotificationID   int64     `db:"notification_id"`
+	NotificationID   int64     `db:"notification_history_id"`
 	RuleID           int64     `db:"rule_id"`
 	RuleEscalationID int64     `db:"rule_escalation_id"`
 	IncidentID       types.Int `db:"incident_id"`
@@ -234,7 +235,7 @@ func loadSkippedHistoryBatch(
 		ids[i] = entry.ID
 	}
 
-	query, args, err := sqlx.In(`SELECT * FROM skipped_notification_history WHERE notification_id IN (?)`, ids)
+	query, args, err := sqlx.In(`SELECT * FROM skipped_notification_history WHERE notification_history_id IN (?)`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("cannot build skipped_notification_history query: %w", err)
 	}

@@ -143,6 +143,13 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 func (i *Incident) generateNotifications(
 	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels, reason HistoryEventType,
 ) ([]*NotificationEntry, error) {
+	// EnsureID is a no-op for events that already went through the event queue; it computes the content hash for
+	// events that didn't, e.g. escalation-reevaluation timers (see ReevaluateEscalations).
+	eventID, err := ev.EnsureID()
+	if err != nil {
+		return nil, fmt.Errorf("cannot compute event id: %w", err)
+	}
+
 	var notifications []*NotificationEntry
 	suppress := i.IsMuted()
 	for contact, channels := range contactChannels {
@@ -176,6 +183,7 @@ func (i *Incident) generateNotifications(
 			for idx, origin := range origins {
 				if idx == 0 {
 					historyEntry := &NotificationHistoryEntry{
+						EventID:          eventID,
 						RuleID:           origin.RuleID,
 						RuleEscalationID: origin.RuleEscalationID,
 						ContactID:        contact.ID,
