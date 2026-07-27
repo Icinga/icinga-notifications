@@ -37,21 +37,33 @@ func (n *NotificationHistoryEntry) TableName() string {
 	return "notification_history"
 }
 
-// NotificationSkippedHistoryEntry represents a single notification_skipped_history database entry, recording why a
-// notification for a given rule/escalation/recipient was skipped instead of being sent.
-type NotificationSkippedHistoryEntry struct {
-	ID               int64     `db:"id"`
-	NotificationID   int64     `db:"notification_id"`
-	RuleID           int64     `db:"rule_id"`
-	RuleEscalationID int64     `db:"rule_escalation_id"`
-	IncidentID       types.Int `db:"incident_id"`
-	ContactgroupID   types.Int `db:"contactgroup_id"`
-	ScheduleID       types.Int `db:"schedule_id"`
+// notificationHistoryStateUpdate is a partial view of NotificationHistoryEntry used to update only the state and
+// triggered_at columns of an already persisted notification_history row.
+//
+// database.BuildUpdateStmt derives its column list from all db-tagged fields of the given struct's type, not from
+// which fields happen to be set at runtime. Building an update statement from the full NotificationHistoryEntry
+// would therefore overwrite rule_id, contact_id, message, reason, etc. with zero values whenever only the state is
+// meant to change, so a dedicated struct with just the touched columns is used instead.
+type notificationHistoryStateUpdate struct {
+	ID          int64             `db:"id"`
+	State       NotificationState `db:"state"`
+	TriggeredAt types.UnixMilli   `db:"triggered_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.
-func (n *NotificationSkippedHistoryEntry) TableName() string {
-	return "notification_skipped_history"
+func (n *notificationHistoryStateUpdate) TableName() string {
+	return "notification_history"
+}
+
+// UpdateNotificationHistoryState updates only the state and triggered_at columns of an already persisted notification_history row
+// identified by id.
+func UpdateNotificationHistoryState(ctx context.Context, db *database.DB, id int64, state NotificationState, triggeredAt types.UnixMilli) error {
+	update := &notificationHistoryStateUpdate{ID: id, State: state, TriggeredAt: triggeredAt}
+
+	stmt, _ := db.BuildUpdateStmt(update)
+	_, err := db.NamedExecContext(ctx, stmt, update)
+
+	return err
 }
 
 // Sync persists the current state of this history to the database and retrieves the just inserted history ID.
@@ -104,6 +116,34 @@ func YieldNotificationHistoryForSource(
 	entryCh, entryErrCh := yieldQuery[NotificationHistoryEntry](ctx, db, query, since, sourceID)
 
 	return attachSkippedHistory(ctx, db, entryCh, entryErrCh)
+}
+
+// NotificationSkippedHistoryEntry represents a single notification_skipped_history database entry, recording why a
+// notification for a given rule/escalation/recipient was skipped instead of being sent.
+type NotificationSkippedHistoryEntry struct {
+	ID               int64     `db:"id"`
+	NotificationID   int64     `db:"notification_id"`
+	RuleID           int64     `db:"rule_id"`
+	RuleEscalationID int64     `db:"rule_escalation_id"`
+	IncidentID       types.Int `db:"incident_id"`
+	ContactgroupID   types.Int `db:"contactgroup_id"`
+	ScheduleID       types.Int `db:"schedule_id"`
+}
+
+// TableName implements the contracts.TableNamer interface.
+func (ns *NotificationSkippedHistoryEntry) TableName() string {
+	return "notification_skipped_history"
+}
+
+func (ns *NotificationSkippedHistoryEntry) Sync(ctx context.Context, db *database.DB, tx *sqlx.Tx) error {
+	skippedHistoryId, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, ns, "id"), ns)
+	if err != nil {
+		return err
+	}
+
+	ns.ID = skippedHistoryId
+
+	return nil
 }
 
 // skippedHistoryBatchSize is the number of NotificationHistoryEntry values buffered before their

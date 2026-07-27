@@ -172,22 +172,54 @@ func (i *Incident) generateNotifications(
 				continue
 			}
 
+			var notificationHistoryID int64
 			for idx, origin := range origins {
-				entry := &NotificationEntry{
-					ContactID: contact.ID,
-					ChannelID: chID,
-					Origin:    origin,
-					Reason:    reason,
-				}
 				if idx == 0 {
-					entry.HistoryRowID = hr.ID
-					entry.State = NotificationStatePending
+					historyEntry := &NotificationHistoryEntry{
+						RuleID:           origin.RuleID,
+						RuleEscalationID: origin.RuleEscalationID,
+						ContactID:        contact.ID,
+						ChannelID:        chID,
+						ContactgroupID:   types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
+						ScheduleID:       types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
+						IncidentID:       types.MakeInt(i.Id, types.TransformZeroIntToNull),
+						Message:          types.MakeString(ev.Message, types.TransformEmptyStringToNull),
+						Reason:           reason,
+						State:            NotificationStatePending,
+						TriggeredAt:      types.UnixMilli(time.Now()),
+					}
+					if err := historyEntry.Sync(ctx, i.db, tx); err != nil {
+						i.logger.Errorw("Failed to insert notification history",
+							zap.String("contact", contact.FullName),
+							zap.Bool("incident_muted", i.IsMuted()),
+							zap.Error(err))
+						return nil, err
+					}
+					notifications = append(notifications, &NotificationEntry{
+						HistoryRowID:             hr.ID,
+						ContactID:                contact.ID,
+						ChannelID:                chID,
+						State:                    NotificationStatePending,
+						NotificationHistoryRowID: historyEntry.ID,
+					})
+					notificationHistoryID = historyEntry.ID
 				} else {
-					entry.State = NotificationStateSuperfluous
-					entry.Superfluous = true
+					skippedHistoryEntry := &NotificationSkippedHistoryEntry{
+						NotificationID:   notificationHistoryID,
+						RuleID:           origin.RuleID,
+						RuleEscalationID: origin.RuleEscalationID,
+						ContactgroupID:   types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
+						ScheduleID:       types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
+						IncidentID:       types.MakeInt(i.Id, types.TransformZeroIntToNull),
+					}
+					if err := skippedHistoryEntry.Sync(ctx, i.db, tx); err != nil {
+						i.logger.Errorw("Failed to insert notification skipped history",
+							zap.String("contact", contact.FullName),
+							zap.Bool("incident_muted", i.IsMuted()),
+							zap.Error(err))
+						return nil, err
+					}
 				}
-
-				notifications = append(notifications, entry)
 			}
 		}
 	}

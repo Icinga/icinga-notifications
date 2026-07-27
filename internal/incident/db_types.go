@@ -7,7 +7,6 @@ import (
 	"github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/recipient"
-	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -107,14 +106,7 @@ type NotificationEntry struct {
 	State        NotificationState `db:"notification_state"`
 	SentAt       types.UnixMilli   `db:"sent_at"`
 
-	// Origin identifies the rule escalation recipient this notification originated from.
-	Origin rule.ChannelOrigin `db:"-"`
-	// Reason is the incident event that triggered this notification.
-	Reason HistoryEventType `db:"-"`
-	// Superfluous marks a notification whose contact and channel are already covered by another entry
-	// of the same batch. It is recorded in the notification history but not actually delivered, and it
-	// has no corresponding incident_history row (HistoryRowID is zero).
-	Superfluous bool `db:"-"`
+	NotificationHistoryRowID int64 `db:"-"`
 }
 
 // TableName implements the contracts.TableNamer interface.

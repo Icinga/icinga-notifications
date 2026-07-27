@@ -662,43 +662,29 @@ func (i *Incident) notifyContacts(
 		}
 		i.runtimeConfig.RUnlock()
 
-		if !notification.Superfluous {
-			err := i.notifyContact(obj, contact, ev, ch)
-			if err != nil {
-				notification.State = NotificationStateFailed
-			} else {
-				notification.State = NotificationStateSent
-			}
+		err := i.notifyContact(obj, contact, ev, ch)
+		if err != nil {
+			notification.State = NotificationStateFailed
+		} else {
+			notification.State = NotificationStateSent
 		}
+
 		notification.SentAt = types.UnixMilli(time.Now())
-		entry := &NotificationHistoryEntry{
-			RuleID:           notification.Origin.RuleID,
-			RuleEscalationID: notification.Origin.RuleEscalationID,
-			ContactID:        contact.ID,
-			ChannelID:        notification.ChannelID,
-			IncidentID:       types.MakeInt(i.Id, types.TransformZeroIntToNull),
-			ContactgroupID:   types.MakeInt(notification.Origin.ContactGroupID, types.TransformZeroIntToNull),
-			ScheduleID:       types.MakeInt(notification.Origin.ScheduleID, types.TransformZeroIntToNull),
-			Message:          i.Message,
-			Reason:           notification.Reason,
-			State:            notification.State,
-			TriggeredAt:      notification.SentAt,
-		}
-		if err := entry.WriteToDatabase(ctx, i.db); err != nil {
+		if err := UpdateNotificationHistoryState(
+			ctx, i.db, notification.NotificationHistoryRowID, notification.State, notification.SentAt,
+		); err != nil {
 			i.logger.Errorw(
-				"Failed to insert notification history entry", zap.String("contact", contact.String()),
+				"Failed to update contact notified incident history", zap.String("contact", contactName),
 				zap.Error(err),
 			)
 		}
 
-		if !notification.Superfluous {
-			stmt, _ := i.db.BuildUpdateStmt(notification)
-			if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
-				i.logger.Errorw(
-					"Failed to update contact notified incident history", zap.String("contact", contactName),
-					zap.Error(err),
-				)
-			}
+		stmt, _ := i.db.BuildUpdateStmt(notification)
+		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
+			i.logger.Errorw(
+				"Failed to update contact notified incident history", zap.String("contact", contactName),
+				zap.Error(err),
+			)
 		}
 
 		if err := ctx.Err(); err != nil {
