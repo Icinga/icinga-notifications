@@ -13,6 +13,7 @@ CREATE TYPE notification_trigger_reason AS ENUM (
 
 CREATE TABLE notification_history (
     id bigserial,
+    event_id bytea NOT NULL, -- SHA256 of JSON representation.
     rule_id bigint NOT NULL,
     rule_escalation_id bigint NOT NULL,
     contact_id bigint NOT NULL,

@@ -1,5 +1,6 @@
 CREATE TABLE notification_history (
     id bigint NOT NULL AUTO_INCREMENT,
+    event_id binary(32) NOT NULL, -- SHA256 of JSON representation.
     rule_id bigint NOT NULL,
     rule_escalation_id bigint NOT NULL,
     contact_id bigint NOT NULL,
