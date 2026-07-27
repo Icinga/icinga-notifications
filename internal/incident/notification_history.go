@@ -106,12 +106,18 @@ func YieldNotificationHistoryForSource(
 	return attachSkippedHistory(ctx, db, entryCh, entryErrCh)
 }
 
+// skippedHistoryBatchSize is the number of NotificationHistoryEntry values buffered before their
+// notification_skipped_history rows are looked up in a single batched query.
+const skippedHistoryBatchSize = 100
+
 // attachSkippedHistory consumes entries from entryCh, populates each entry's SkippedHistory field with its
 // associated notification_skipped_history rows, and forwards the enriched entries on the returned channel.
 //
 // notification_history has a one-to-many relation to notification_skipped_history, which can't be flattened into a
-// single struct via a JOIN and StructScan (one SQL row always scans into exactly one Go value). Looking up the
-// skipped rows per entry instead keeps the result streaming, at the cost of one extra query per entry.
+// single struct via a JOIN and StructScan (one SQL row always scans into exactly one Go value). Since the caller may
+// be streaming an unbounded, timestamp-selected range rather than a small fixed set, entries are buffered in bounded
+// batches and their skipped-history rows fetched with one IN(...) query per batch, instead of either buffering the
+// whole result set or issuing one lookup query per entry.
 func attachSkippedHistory(
 	ctx context.Context,
 	db *database.DB,
@@ -125,20 +131,47 @@ func attachSkippedHistory(
 		defer close(outCh)
 		defer close(errCh)
 
-		for entry := range entryCh {
-			skipped, err := loadSkippedHistory(ctx, db, entry.ID)
+		batch := make([]NotificationHistoryEntry, 0, skippedHistoryBatchSize)
+
+		// flush looks up and attaches SkippedHistory for the buffered batch, sends each entry on outCh, and
+		// resets the batch. It reports whether the caller should keep consuming entryCh.
+		flush := func() bool {
+			if len(batch) == 0 {
+				return true
+			}
+
+			skipped, err := loadSkippedHistoryBatch(ctx, db, batch)
 			if err != nil {
 				errCh <- err
-				return
+				return false
 			}
-			entry.SkippedHistory = skipped
 
-			select {
-			case outCh <- entry:
-			case <-ctx.Done():
-				errCh <- ctx.Err()
-				return
+			for _, entry := range batch {
+				entry.SkippedHistory = skipped[entry.ID]
+
+				select {
+				case outCh <- entry:
+				case <-ctx.Done():
+					errCh <- ctx.Err()
+					return false
+				}
 			}
+
+			batch = batch[:0]
+			return true
+		}
+
+		for entry := range entryCh {
+			batch = append(batch, entry)
+			if len(batch) >= skippedHistoryBatchSize {
+				if !flush() {
+					return
+				}
+			}
+		}
+
+		if !flush() {
+			return
 		}
 
 		if err, ok := <-entryErrCh; ok {
@@ -149,16 +182,34 @@ func attachSkippedHistory(
 	return outCh, errCh
 }
 
-// loadSkippedHistory returns all notification_skipped_history rows recorded for the given notification_history ID.
-func loadSkippedHistory(ctx context.Context, db *database.DB, notificationID int64) ([]NotificationSkippedHistoryEntry, error) {
-	query := db.Rebind(`SELECT * FROM notification_skipped_history WHERE notification_id = ?`)
+// loadSkippedHistoryBatch returns the notification_skipped_history rows for all given entries, grouped by
+// notification_id.
+func loadSkippedHistoryBatch(
+	ctx context.Context,
+	db *database.DB,
+	batch []NotificationHistoryEntry,
+) (map[int64][]NotificationSkippedHistoryEntry, error) {
+	ids := make([]int64, len(batch))
+	for i, entry := range batch {
+		ids[i] = entry.ID
+	}
 
-	var skipped []NotificationSkippedHistoryEntry
-	if err := db.SelectContext(ctx, &skipped, query, notificationID); err != nil {
+	query, args, err := sqlx.In(`SELECT * FROM notification_skipped_history WHERE notification_id IN (?)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("cannot build notification_skipped_history query: %w", err)
+	}
+
+	var rows []NotificationSkippedHistoryEntry
+	if err := db.SelectContext(ctx, &rows, db.Rebind(query), args...); err != nil {
 		return nil, fmt.Errorf("cannot query notification_skipped_history entries: %w", err)
 	}
 
-	return skipped, nil
+	grouped := make(map[int64][]NotificationSkippedHistoryEntry, len(batch))
+	for _, row := range rows {
+		grouped[row.NotificationID] = append(grouped[row.NotificationID], row)
+	}
+
+	return grouped, nil
 }
 
 // yieldQuery runs the given query in a separate goroutine and sends each result to the returned channel.
