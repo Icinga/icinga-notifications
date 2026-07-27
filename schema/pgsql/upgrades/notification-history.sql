@@ -1,4 +1,4 @@
-CREATE TYPE notification_history_state_type AS ENUM ( 'pending', 'sent', 'failed', 'superfluous' );
+CREATE TYPE notification_history_state_type AS ENUM ( 'pending', 'sent', 'failed' );
 CREATE TYPE notification_trigger_reason AS ENUM (
     -- Order to be honored for events with identical millisecond timestamps.
     'incident_severity_changed',

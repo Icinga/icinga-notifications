@@ -454,7 +454,7 @@ CREATE TABLE notification_history (
     message text,
     -- NOT NULL is enforced via CHECK not to default to 'incident_severity_changed'
     reason enum('incident_severity_changed', 'escalation_triggered', 'opened', 'closed', 'muted', 'unmuted', 'recipient_role_changed', 'notified'),
-    state enum('pending', 'sent', 'failed', 'superfluous'),
+    state enum('pending', 'sent', 'failed'),
     triggered_at bigint NOT NULL,
 
     CONSTRAINT pk_notification_history PRIMARY KEY (id),
