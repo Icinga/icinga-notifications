@@ -3,6 +3,7 @@ package rule
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
@@ -10,7 +11,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"go.uber.org/zap/zapcore"
-	"time"
 )
 
 type Rule struct {

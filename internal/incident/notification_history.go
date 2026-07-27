@@ -27,7 +27,7 @@ type NotificationHistoryEntry struct {
 	State            NotificationState `db:"state"`
 	TriggeredAt      types.UnixMilli   `db:"triggered_at"`
 
-	// SkippedHistory holds all notification_skipped_history rows recorded for this notification, if any.
+	// SkippedHistory holds all skipped_notification_history rows recorded for this notification, if any.
 	// It is not part of the notification_history table itself and must not be scanned or written from/to it.
 	SkippedHistory []NotificationSkippedHistoryEntry `db:"-"`
 }
@@ -100,7 +100,7 @@ func (n *NotificationHistoryEntry) WriteToDatabase(ctx context.Context, db *data
 
 // YieldNotificationHistoryForSource returns a channel of [Pair] for all active incidents of the given source (see yield docstring).
 //
-// Each yielded entry has its SkippedHistory field populated with the notification_skipped_history rows recorded
+// Each yielded entry has its SkippedHistory field populated with the skipped_notification_history rows recorded
 // for it, if any.
 func YieldNotificationHistoryForSource(
 	ctx context.Context,
@@ -118,7 +118,7 @@ func YieldNotificationHistoryForSource(
 	return attachSkippedHistory(ctx, db, entryCh, entryErrCh)
 }
 
-// NotificationSkippedHistoryEntry represents a single notification_skipped_history database entry, recording why a
+// NotificationSkippedHistoryEntry represents a single skipped_notification_history database entry, recording why a
 // notification for a given rule/escalation/recipient was skipped instead of being sent.
 type NotificationSkippedHistoryEntry struct {
 	ID               int64     `db:"id"`
@@ -132,7 +132,7 @@ type NotificationSkippedHistoryEntry struct {
 
 // TableName implements the contracts.TableNamer interface.
 func (ns *NotificationSkippedHistoryEntry) TableName() string {
-	return "notification_skipped_history"
+	return "skipped_notification_history"
 }
 
 func (ns *NotificationSkippedHistoryEntry) Sync(ctx context.Context, db *database.DB, tx *sqlx.Tx) error {
@@ -147,13 +147,13 @@ func (ns *NotificationSkippedHistoryEntry) Sync(ctx context.Context, db *databas
 }
 
 // skippedHistoryBatchSize is the number of NotificationHistoryEntry values buffered before their
-// notification_skipped_history rows are looked up in a single batched query.
+// skipped_notification_history rows are looked up in a single batched query.
 const skippedHistoryBatchSize = 100
 
 // attachSkippedHistory consumes entries from entryCh, populates each entry's SkippedHistory field with its
-// associated notification_skipped_history rows, and forwards the enriched entries on the returned channel.
+// associated skipped_notification_history rows, and forwards the enriched entries on the returned channel.
 //
-// notification_history has a one-to-many relation to notification_skipped_history, which can't be flattened into a
+// notification_history has a one-to-many relation to skipped_notification_history, which can't be flattened into a
 // single struct via a JOIN and StructScan (one SQL row always scans into exactly one Go value). Since the caller may
 // be streaming an unbounded, timestamp-selected range rather than a small fixed set, entries are buffered in bounded
 // batches and their skipped-history rows fetched with one IN(...) query per batch, instead of either buffering the
@@ -222,7 +222,7 @@ func attachSkippedHistory(
 	return outCh, errCh
 }
 
-// loadSkippedHistoryBatch returns the notification_skipped_history rows for all given entries, grouped by
+// loadSkippedHistoryBatch returns the skipped_notification_history rows for all given entries, grouped by
 // notification_id.
 func loadSkippedHistoryBatch(
 	ctx context.Context,
@@ -234,14 +234,14 @@ func loadSkippedHistoryBatch(
 		ids[i] = entry.ID
 	}
 
-	query, args, err := sqlx.In(`SELECT * FROM notification_skipped_history WHERE notification_id IN (?)`, ids)
+	query, args, err := sqlx.In(`SELECT * FROM skipped_notification_history WHERE notification_id IN (?)`, ids)
 	if err != nil {
-		return nil, fmt.Errorf("cannot build notification_skipped_history query: %w", err)
+		return nil, fmt.Errorf("cannot build skipped_notification_history query: %w", err)
 	}
 
 	var rows []NotificationSkippedHistoryEntry
 	if err := db.SelectContext(ctx, &rows, db.Rebind(query), args...); err != nil {
-		return nil, fmt.Errorf("cannot query notification_skipped_history entries: %w", err)
+		return nil, fmt.Errorf("cannot query skipped_notification_history entries: %w", err)
 	}
 
 	grouped := make(map[int64][]NotificationSkippedHistoryEntry, len(batch))
