@@ -26,11 +26,32 @@ type NotificationHistoryEntry struct {
 	Reason           HistoryEventType  `db:"reason"`
 	State            NotificationState `db:"state"`
 	TriggeredAt      types.UnixMilli   `db:"triggered_at"`
+
+	// SkippedHistory holds all notification_skipped_history rows recorded for this notification, if any.
+	// It is not part of the notification_history table itself and must not be scanned or written from/to it.
+	SkippedHistory []NotificationSkippedHistoryEntry `db:"-"`
 }
 
 // TableName implements the contracts.TableNamer interface.
 func (n *NotificationHistoryEntry) TableName() string {
 	return "notification_history"
+}
+
+// NotificationSkippedHistoryEntry represents a single notification_skipped_history database entry, recording why a
+// notification for a given rule/escalation/recipient was skipped instead of being sent.
+type NotificationSkippedHistoryEntry struct {
+	ID               int64     `db:"id"`
+	NotificationID   int64     `db:"notification_id"`
+	RuleID           int64     `db:"rule_id"`
+	RuleEscalationID int64     `db:"rule_escalation_id"`
+	IncidentID       types.Int `db:"incident_id"`
+	ContactgroupID   types.Int `db:"contactgroup_id"`
+	ScheduleID       types.Int `db:"schedule_id"`
+}
+
+// TableName implements the contracts.TableNamer interface.
+func (n *NotificationSkippedHistoryEntry) TableName() string {
+	return "notification_skipped_history"
 }
 
 // Sync persists the current state of this history to the database and retrieves the just inserted history ID.
@@ -66,6 +87,9 @@ func (n *NotificationHistoryEntry) WriteToDatabase(ctx context.Context, db *data
 }
 
 // YieldNotificationHistoryForSource returns a channel of [Pair] for all active incidents of the given source (see yield docstring).
+//
+// Each yielded entry has its SkippedHistory field populated with the notification_skipped_history rows recorded
+// for it, if any.
 func YieldNotificationHistoryForSource(
 	ctx context.Context,
 	db *database.DB,
@@ -77,7 +101,64 @@ func YieldNotificationHistoryForSource(
     JOIN rule r ON nh.rule_id = r.id
 	WHERE nh.triggered_at >= ? AND r.source_id = ?`
 
-	return yieldQuery[NotificationHistoryEntry](ctx, db, query, since, sourceID)
+	entryCh, entryErrCh := yieldQuery[NotificationHistoryEntry](ctx, db, query, since, sourceID)
+
+	return attachSkippedHistory(ctx, db, entryCh, entryErrCh)
+}
+
+// attachSkippedHistory consumes entries from entryCh, populates each entry's SkippedHistory field with its
+// associated notification_skipped_history rows, and forwards the enriched entries on the returned channel.
+//
+// notification_history has a one-to-many relation to notification_skipped_history, which can't be flattened into a
+// single struct via a JOIN and StructScan (one SQL row always scans into exactly one Go value). Looking up the
+// skipped rows per entry instead keeps the result streaming, at the cost of one extra query per entry.
+func attachSkippedHistory(
+	ctx context.Context,
+	db *database.DB,
+	entryCh <-chan NotificationHistoryEntry,
+	entryErrCh <-chan error,
+) (<-chan NotificationHistoryEntry, <-chan error) {
+	outCh := make(chan NotificationHistoryEntry)
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer close(outCh)
+		defer close(errCh)
+
+		for entry := range entryCh {
+			skipped, err := loadSkippedHistory(ctx, db, entry.ID)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			entry.SkippedHistory = skipped
+
+			select {
+			case outCh <- entry:
+			case <-ctx.Done():
+				errCh <- ctx.Err()
+				return
+			}
+		}
+
+		if err, ok := <-entryErrCh; ok {
+			errCh <- err
+		}
+	}()
+
+	return outCh, errCh
+}
+
+// loadSkippedHistory returns all notification_skipped_history rows recorded for the given notification_history ID.
+func loadSkippedHistory(ctx context.Context, db *database.DB, notificationID int64) ([]NotificationSkippedHistoryEntry, error) {
+	query := db.Rebind(`SELECT * FROM notification_skipped_history WHERE notification_id = ?`)
+
+	var skipped []NotificationSkippedHistoryEntry
+	if err := db.SelectContext(ctx, &skipped, query, notificationID); err != nil {
+		return nil, fmt.Errorf("cannot query notification_skipped_history entries: %w", err)
+	}
+
+	return skipped, nil
 }
 
 // yieldQuery runs the given query in a separate goroutine and sends each result to the returned channel.
