@@ -213,10 +213,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 			// even if the event itself doesn't request it.
 			triggerNotifications = triggerNotifications || len(escalations) > 0
 
-			if len(escalations) > 0 && (notificationReason == Notified || notificationReason == IncidentSeverityChanged) {
-				notificationReason = EscalationTriggered
-			}
-
 			if !isNew {
 				// Even if the severity didn't change, we want to update the message nonetheless.
 				i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
