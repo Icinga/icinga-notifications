@@ -196,23 +196,26 @@ func ProcessQueue(
 			return fmt.Errorf("cannot fetch event from event queue: %w", err)
 		}
 
-		logger.Debugw("Claimed event queue entry for processing",
-			zap.Stringer("id", q.ID),
-			zap.Stringer("object_id", q.ObjectId))
-
 		callbackCtx, cancel := context.WithTimeout(ctx, time.Minute)
-		defer cancel()
 
-		if ev, err := q.toEvent(); err != nil {
-			logger.Errorw("Invalid event queue event cannot get decoded", zap.Stringer("id", q.ID), zap.Error(err))
-			q.State = QueueStateError
-		} else if err = callback(callbackCtx, ev); err != nil {
-			logger.Errorw("Event queue event cannot be processed", zap.Stringer("id", q.ID), zap.Error(err))
+		ev, err := q.toEvent()
+		if err != nil {
+			logger.Errorw("Cannot recreate event from event queue entry", zap.Stringer("id", q.ID), zap.Error(err))
 			q.State = QueueStateError
 		} else {
-			logger.Debugw("Processed event from event queue", zap.Stringer("id", q.ID))
-			q.State = QueueStateDone
+			logger.Debugw("Claimed event queue entry for processing",
+				zap.Stringer("id", q.ID),
+				zap.Object("event", ev))
+
+			if err := callback(callbackCtx, ev); err != nil {
+				logger.Errorw("Failed to process event", zap.Stringer("id", q.ID), zap.Error(err))
+				q.State = QueueStateError
+			} else {
+				logger.Debugw("Successfully processed event", zap.Stringer("id", q.ID))
+				q.State = QueueStateDone
+			}
 		}
+		cancel()
 
 		err = retry.WithBackoff(
 			ctx,

@@ -141,23 +141,16 @@ func run() int {
 						zap.String("event_name", ev.Name),
 						zap.Error(err))
 					return nil
-				} else if err != nil {
-					logger.Errorw("Failed to successfully process event",
-						zap.String("event_name", ev.Name),
-						zap.Error(err))
-					return err
 				}
-
-				logger.Infow("Successfully processed event", zap.String("event_name", ev.Name))
-				return nil
+				return err
 			})
-		if err == nil || errors.Is(err, context.Canceled) {
-			logger.Info("Event queue processor has finished")
-			return nil
-		} else {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			logger.Errorf("Event queue processor has finished with an error: %+v", err)
 			return err
 		}
+
+		logger.Info("Event queue processor has finished")
+		return nil
 	})
 
 	// When Icinga Notifications is started by systemd, we've to notify systemd that we're ready.
