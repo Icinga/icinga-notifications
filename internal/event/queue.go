@@ -201,7 +201,6 @@ func ProcessQueue(
 			zap.Stringer("object_id", q.ObjectId))
 
 		callbackCtx, cancel := context.WithTimeout(ctx, time.Minute)
-		defer cancel()
 
 		if ev, err := q.toEvent(); err != nil {
 			logger.Errorw("Invalid event queue event cannot get decoded", zap.Stringer("id", q.ID), zap.Error(err))
@@ -213,6 +212,7 @@ func ProcessQueue(
 			logger.Debugw("Processed event from event queue", zap.Stringer("id", q.ID))
 			q.State = QueueStateDone
 		}
+		cancel()
 
 		err = retry.WithBackoff(
 			ctx,
