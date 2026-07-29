@@ -355,6 +355,7 @@ CREATE TABLE incident (
     mute_reason mediumtext,
     message longtext, -- contains the latest plugin output of the respective object.
     next_escalation_check_at bigint,
+    last_severity_change_event_id binary(32) NOT NULL,
 
     CONSTRAINT pk_incident PRIMARY KEY (id),
     CONSTRAINT ck_incident_severity_notnull CHECK (severity IS NOT NULL),
@@ -478,7 +479,6 @@ CREATE TABLE skipped_notification_history (
     notification_history_id bigint NOT NULL,
     rule_id bigint NOT NULL,
     rule_escalation_id bigint NOT NULL,
-    incident_id bigint,
     contactgroup_id bigint,
     schedule_id bigint,
 
@@ -486,7 +486,6 @@ CREATE TABLE skipped_notification_history (
     CONSTRAINT fk_skipped_notification_history_notification FOREIGN KEY (notification_history_id) REFERENCES notification_history(id),
     CONSTRAINT fk_skipped_notification_history_rule FOREIGN KEY (rule_id) REFERENCES rule(id),
     CONSTRAINT fk_skipped_notification_history_rule_escalation FOREIGN KEY (rule_escalation_id) REFERENCES rule_escalation(id),
-    CONSTRAINT fk_skipped_notification_history_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
     CONSTRAINT fk_skipped_notification_history_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
     CONSTRAINT fk_skipped_notification_history_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

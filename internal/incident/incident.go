@@ -44,7 +44,8 @@ type Incident struct {
 	//   - If the incident is between 1h and 2h old, this field contains the incident start time plus two hours.
 	//   - If the incident is already older than 2h, no future escalations can be reached solely based on the incident
 	//     aging, so the field is left nil.
-	NextEscalationCheckAt types.UnixMilli `db:"next_escalation_check_at"`
+	NextEscalationCheckAt     types.UnixMilli `db:"next_escalation_check_at"`
+	LastSeverityChangeEventID types.Binary    `db:"last_severity_change_event_id"`
 
 	EscalationState map[escalationID]*EscalationState `db:"-"`
 	Rules           map[ruleID]struct{}               `db:"-"`
@@ -410,6 +411,14 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 	i.StartedAt = types.UnixMilli(ev.Time)
 	i.Severity = ev.Severity
 	i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
+
+	if eventID, err := ev.EnsureID(); err != nil {
+		i.logger.Errorw("Cannot fetch event id from incident", zap.Error(err))
+		return err
+	} else {
+		i.LastSeverityChangeEventID = eventID
+	}
+
 	if err := i.Sync(ctx, tx); err != nil {
 		i.logger.Errorw("Cannot insert incident to the database", zap.Error(err))
 		return err

@@ -149,6 +149,9 @@ func (i *Incident) generateNotifications(
 	if err != nil {
 		return nil, fmt.Errorf("cannot compute event id: %w", err)
 	}
+	if reason == IncidentSeverityChanged || reason == Opened {
+		i.LastSeverityChangeEventID = eventID
+	}
 
 	var notifications []*NotificationEntry
 	suppress := i.IsMuted()
@@ -218,7 +221,6 @@ func (i *Incident) generateNotifications(
 						RuleEscalationID: origin.RuleEscalationID,
 						ContactgroupID:   types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
 						ScheduleID:       types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
-						IncidentID:       types.MakeInt(i.Id, types.TransformZeroIntToNull),
 					}
 					if err := skippedHistoryEntry.Sync(ctx, i.db, tx); err != nil {
 						i.logger.Errorw("Failed to insert notification skipped history",

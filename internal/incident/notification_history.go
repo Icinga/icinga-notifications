@@ -58,7 +58,13 @@ func (n *notificationHistoryStateUpdate) TableName() string {
 
 // UpdateNotificationHistoryState updates only the state and triggered_at columns of an already persisted notification_history row
 // identified by id.
-func UpdateNotificationHistoryState(ctx context.Context, db *database.DB, id int64, state NotificationState, triggeredAt types.UnixMilli) error {
+func UpdateNotificationHistoryState(
+	ctx context.Context,
+	db *database.DB,
+	id int64,
+	state NotificationState,
+	triggeredAt types.UnixMilli,
+) error {
 	update := &notificationHistoryStateUpdate{ID: id, State: state, TriggeredAt: triggeredAt}
 
 	stmt, _ := db.BuildUpdateStmt(update)
@@ -126,7 +132,6 @@ type NotificationSkippedHistoryEntry struct {
 	NotificationID   int64     `db:"notification_history_id"`
 	RuleID           int64     `db:"rule_id"`
 	RuleEscalationID int64     `db:"rule_escalation_id"`
-	IncidentID       types.Int `db:"incident_id"`
 	ContactgroupID   types.Int `db:"contactgroup_id"`
 	ScheduleID       types.Int `db:"schedule_id"`
 }
