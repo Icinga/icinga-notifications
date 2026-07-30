@@ -486,11 +486,12 @@ COMMENT ON INDEX idx_incident_history_time_type IS 'Incident History ordered by 
 CREATE TABLE notification_history (
     id bigserial,
     event_id bytea NOT NULL, -- SHA256 of JSON representation.
-    rule_id bigint NOT NULL,
-    rule_escalation_id bigint NOT NULL,
     contact_id bigint NOT NULL,
     channel_id bigint NOT NULL,
+    rule_id bigint,
+    rule_escalation_id bigint,
     incident_id bigint,
+    role incident_contact_role NOT NULL DEFAULT 'recipient',
     contactgroup_id bigint,
     schedule_id bigint,
     message text,
@@ -499,10 +500,10 @@ CREATE TABLE notification_history (
     triggered_at bigint NOT NULL,
 
     CONSTRAINT pk_notification_history PRIMARY KEY (id),
-    CONSTRAINT fk_notification_history_rule FOREIGN KEY (rule_id) REFERENCES rule(id),
-    CONSTRAINT fk_notification_history_rule_escalation FOREIGN KEY (rule_escalation_id) REFERENCES rule_escalation(id),
     CONSTRAINT fk_notification_history_contact FOREIGN KEY (contact_id) REFERENCES contact(id),
     CONSTRAINT fk_notification_history_channel FOREIGN KEY (channel_id) REFERENCES channel(id),
+    CONSTRAINT fk_notification_history_rule FOREIGN KEY (rule_id) REFERENCES rule(id),
+    CONSTRAINT fk_notification_history_rule_escalation FOREIGN KEY (rule_escalation_id) REFERENCES rule_escalation(id),
     CONSTRAINT fk_notification_history_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
     CONSTRAINT fk_notification_history_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
     CONSTRAINT fk_notification_history_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id)

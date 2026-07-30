@@ -1,4 +1,4 @@
-package incident
+package utils
 
 import (
 	"database/sql/driver"

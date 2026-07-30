@@ -10,6 +10,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
+	"github.com/icinga/icinga-notifications/internal/utils"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -91,10 +92,11 @@ func (r *Rule) Eval(filterable filter.Filterable) (bool, error) {
 // A zero value denotes a contact that was added without any rule involvement,
 // e.g. a recipient that subscribed to or manages an incident via the UI.
 type ChannelOrigin struct {
-	RuleID           int64
-	RuleEscalationID int64
+	RuleID           int64 // Zero if the contact subscribed via web-gui
+	RuleEscalationID int64 // Zero if the contact subscribed via web-gui
 	ContactGroupID   int64 // Non-zero if the contact was resolved from a contact group.
 	ScheduleID       int64 // Non-zero if the contact was resolved from a schedule.
+	Role             utils.ContactRole
 }
 
 // ContactChannels stores, per contact and channel ID, the origins that selected this channel.
@@ -123,6 +125,7 @@ func (ch ContactChannels) LoadRecipientChannel(er *EscalationRecipient, ruleID i
 			RuleEscalationID: er.EscalationID,
 			ContactGroupID:   er.GroupID.Int64,
 			ScheduleID:       er.ScheduleID.Int64,
+			Role:             utils.RoleRecipient,
 		}
 		for _, c := range er.Recipient.GetContactsAt(t) {
 			if ch[c] == nil {

@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/icinga/icinga-go-library/backoff"
 	"github.com/icinga/icinga-go-library/database"
-	"github.com/icinga/icinga-go-library/retry"
 	"github.com/icinga/icinga-go-library/types"
+	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -16,11 +15,12 @@ import (
 type NotificationHistoryEntry struct {
 	ID               int64             `db:"id"`
 	EventID          types.Binary      `db:"event_id"`
-	RuleID           int64             `db:"rule_id"`
-	RuleEscalationID int64             `db:"rule_escalation_id"`
 	ContactID        int64             `db:"contact_id"`
 	ChannelID        int64             `db:"channel_id"`
+	RuleID           types.Int         `db:"rule_id"`
+	RuleEscalationID types.Int         `db:"rule_escalation_id"`
 	IncidentID       types.Int         `db:"incident_id"`
+	Role             utils.ContactRole `db:"role,omitzero"`
 	ContactgroupID   types.Int         `db:"contactgroup_id"`
 	ScheduleID       types.Int         `db:"schedule_id"`
 	Message          types.String      `db:"message"`
@@ -84,25 +84,6 @@ func (n *NotificationHistoryEntry) Sync(ctx context.Context, db *database.DB, tx
 	n.ID = historyId
 
 	return nil
-}
-
-// WriteToDatabase inserts this notification history entry into the database, retrying on transient errors.
-func (n *NotificationHistoryEntry) WriteToDatabase(ctx context.Context, db *database.DB) error {
-	stmt := database.BuildInsertStmtWithout(db, n, "id")
-
-	return retry.WithBackoff(
-		ctx,
-		func(ctx context.Context) error {
-			_, err := db.NamedExecContext(ctx, stmt, n)
-			if err != nil {
-				return database.CantPerformQuery(err, stmt)
-			}
-
-			return nil
-		},
-		retry.Retryable,
-		backoff.DefaultBackoff,
-		db.GetDefaultRetrySettings())
 }
 
 // YieldNotificationHistoryForSource returns a channel of [Pair] for all active incidents of the given source (see yield docstring).

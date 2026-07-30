@@ -103,7 +103,7 @@ func (i *Incident) HasManager() bool {
 			i.logger.Debugw("Incident refers unknown recipient key, might got deleted", zap.Inline(recipientKey))
 			continue
 		}
-		if state.Role == RoleManager {
+		if state.Role == utils.RoleManager {
 			return true
 		}
 	}
@@ -115,12 +115,12 @@ func (i *Incident) HasManager() bool {
 //
 // For a managed incident, only managers and subscribers should be notified, for unmanaged incidents,
 // regular recipients are notified as well.
-func (i *Incident) IsNotifiable(role ContactRole) bool {
+func (i *Incident) IsNotifiable(role utils.ContactRole) bool {
 	if !i.HasManager() {
 		return true
 	}
 
-	return role > RoleRecipient
+	return role > utils.RoleRecipient
 }
 
 // ProcessEvent processes the given event for the current incident in an own transaction.
@@ -753,7 +753,9 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 					if contactChs[contact] == nil {
 						// The zero value origin denotes a recipient without rule involvement.
 						contactChs[contact] = make(map[int64][]rule.ChannelOrigin)
-						contactChs[contact][contact.DefaultChannelID] = []rule.ChannelOrigin{{}}
+						contactChs[contact][contact.DefaultChannelID] = []rule.ChannelOrigin{{
+							Role: state.Role,
+						}}
 					}
 				}
 			} else {
@@ -856,7 +858,7 @@ func (e *EscalationState) TableName() string {
 }
 
 type RecipientState struct {
-	Role ContactRole
+	Role utils.ContactRole
 }
 
 var (

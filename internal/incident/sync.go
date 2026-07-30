@@ -11,6 +11,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
+	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )
@@ -61,9 +62,9 @@ func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, stat
 // AddRecipient adds recipient from the given *rule.Escalation to this incident.
 // Syncs also all the recipients with the database and returns an error on db failure.
 func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation) error {
-	newRole := RoleRecipient
+	newRole := utils.RoleRecipient
 	if i.HasManager() {
-		newRole = RoleSubscriber
+		newRole = utils.RoleSubscriber
 	}
 
 	for _, escalationRecipient := range escalation.Recipients {
@@ -187,13 +188,14 @@ func (i *Incident) generateNotifications(
 				if idx == 0 {
 					historyEntry := &NotificationHistoryEntry{
 						EventID:          eventID,
-						RuleID:           origin.RuleID,
-						RuleEscalationID: origin.RuleEscalationID,
 						ContactID:        contact.ID,
 						ChannelID:        chID,
+						RuleID:           types.MakeInt(origin.RuleID, types.TransformZeroIntToNull),
+						RuleEscalationID: types.MakeInt(origin.RuleEscalationID, types.TransformZeroIntToNull),
 						ContactgroupID:   types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
 						ScheduleID:       types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
 						IncidentID:       types.MakeInt(i.Id, types.TransformZeroIntToNull),
+						Role:             origin.Role,
 						Message:          types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 						Reason:           reason,
 						State:            NotificationStatePending,
