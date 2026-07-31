@@ -311,6 +311,9 @@ CREATE TABLE object_id_tag (
     CONSTRAINT fk_object_id_tag_object FOREIGN KEY (object_id) REFERENCES object(id)
 );
 
+-- Indexes for object_id_tag to speed up the cleanup queries by object id.
+CREATE INDEX idx_object_id_tag_object_id ON object_id_tag(object_id);
+
 CREATE TYPE severity AS ENUM ('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg');
 
 CREATE TABLE rule (
@@ -392,6 +395,9 @@ CREATE TABLE incident (
     CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id)
 );
 
+-- PostgreSQL doesn't automatically create an index for foreign keys, so we need to do this manually.
+-- This is important for the retention queries, which become quite unusable without an index on object_id.
+CREATE INDEX idx_incident_object_id ON incident(object_id);
 CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
 CREATE INDEX idx_incident_object_id_recovered_at ON incident(object_id, recovered_at);
 CREATE INDEX idx_incident_next_escalation_check_at ON incident(next_escalation_check_at);
@@ -422,6 +428,9 @@ CREATE TABLE incident_contact (
     CONSTRAINT fk_incident_contact_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id)
 );
 
+-- PostgreSQL doesn't automatically create an index for foreign keys, so we need to do this manually.
+CREATE INDEX idx_incident_contact_incident_id ON incident_contact(incident_id);
+
 CREATE TABLE incident_rule (
     incident_id bigint NOT NULL,
     rule_id bigint NOT NULL,
@@ -430,6 +439,9 @@ CREATE TABLE incident_rule (
     CONSTRAINT fk_incident_rule_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
     CONSTRAINT fk_incident_rule_rule FOREIGN KEY (rule_id) REFERENCES rule(id)
 );
+
+-- PostgreSQL doesn't automatically create an index for foreign keys, so we need to do this manually.
+CREATE INDEX idx_incident_rule_incident_id ON incident_rule(incident_id);
 
 CREATE TABLE incident_rule_escalation_state (
     incident_id bigint NOT NULL,
@@ -440,6 +452,9 @@ CREATE TABLE incident_rule_escalation_state (
     CONSTRAINT fk_incident_rule_escalation_state_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
     CONSTRAINT fk_incident_rule_escalation_state_rule_escalation FOREIGN KEY (rule_escalation_id) REFERENCES rule_escalation(id)
 );
+
+-- PostgreSQL doesn't automatically create an index for foreign keys, so we need to do this manually.
+CREATE INDEX idx_incident_rule_escalation_state_incident_id ON incident_rule_escalation_state(incident_id);
 
 CREATE TABLE incident_history (
     id bigserial,
@@ -471,6 +486,8 @@ CREATE TABLE incident_history (
     CONSTRAINT fk_incident_history_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
 );
 
+-- PostgreSQL doesn't automatically create an index for foreign keys, so we need to do this manually.
+CREATE INDEX idx_incident_history_incident_id ON incident_history(incident_id);
 CREATE INDEX idx_incident_history_time_type ON incident_history(time, type);
 COMMENT ON INDEX idx_incident_history_time_type IS 'Incident History ordered by time/type';
 
