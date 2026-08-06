@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"time"
 
+	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-go-library/types"
@@ -18,6 +20,12 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+var (
+	// ErrChannelDeleted is used as a cancellation cause when the channel is deleted, allowing the
+	// plugin control loop to clean up its state in the database before exiting.
+	ErrChannelDeleted = errors.New("channel deleted")
+)
+
 type Channel struct {
 	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
 
@@ -27,12 +35,13 @@ type Channel struct {
 	Config       string     `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
 
 	Logger *zap.SugaredLogger `db:"-"`
+	db     *database.DB
 
 	restartCh chan newConfig
 	pluginCh  chan *pluginSupervisor
 
 	pluginCtx       context.Context
-	pluginCtxCancel func()
+	pluginCtxCancel context.CancelCauseFunc
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
@@ -59,12 +68,14 @@ type newConfig struct {
 // It should be called after the channel has been created and its properties have been set.
 // The provided context is used to manage the lifecycle of the plugin control loop, and the
 // logger is used for logging messages related to the channel and its plugin.
-func (c *Channel) Start(ctx context.Context, logger *zap.SugaredLogger) {
+func (c *Channel) Start(ctx context.Context, db *database.DB, logger *zap.SugaredLogger) {
 	c.Logger = logger.With(zap.Object("channel", c))
+	c.db = db
 	c.restartCh = make(chan newConfig)
 	c.pluginCh = make(chan *pluginSupervisor)
-	c.pluginCtx, c.pluginCtxCancel = context.WithCancel(ctx)
+	c.pluginCtx, c.pluginCtxCancel = context.WithCancelCause(ctx)
 
+	// #nosec G118 -- The goroutine uses a background ctx with timeout after c.pluginCtx is canceled to perform a DB cleanup.
 	go c.pluginControlLoop(newConfig{c.Type, c.Config})
 }
 
@@ -72,7 +83,7 @@ func (c *Channel) Start(ctx context.Context, logger *zap.SugaredLogger) {
 func (c *Channel) instantiatePluginSupervisor(cType string, config string) *pluginSupervisor {
 	c.Logger.Debug("Initializing channel plugin")
 
-	p, err := newPluginSupervisor(c.pluginCtx, cType, c.Logger)
+	p, err := newPluginSupervisor(c.pluginCtx, c.db, c.Logger, cType, c.ID)
 	if err != nil {
 		c.Logger.Errorw("Failed to initialize channel plugin", zap.Error(err))
 		return nil
@@ -119,6 +130,14 @@ func (c *Channel) pluginControlLoop(currentConfig newConfig) {
 		select {
 		case c.pluginCh <- current:
 		case <-c.pluginCtx.Done():
+			if errors.Is(context.Cause(c.pluginCtx), ErrChannelDeleted) {
+				c.Logger.Info("Channel has been deleted, purging its plugin state from the database")
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				if err := deleteByChannelID(ctx, c.db, c.ID); err != nil {
+					c.Logger.Warnw("Failed to purge channel plugin state from the database", zap.Error(err))
+				}
+				cancel()
+			}
 			return
 
 		case <-rpcDone(): // Plugin crashed??
@@ -144,6 +163,21 @@ func (c *Channel) pluginControlLoop(currentConfig newConfig) {
 				}
 			} else {
 				stopReset()
+				if currentConfig.ctype != newConf.ctype {
+					c.Logger.Infow("Plugin type has changed, cleaning up plugin state in the database",
+						zap.String("old_type", currentConfig.ctype),
+						zap.String("new_type", newConf.ctype))
+
+					// If the plugin type has changed, we need to clean up the plugin state in the database,
+					// as it's no longer relevant for the new plugin type. It'll will the query internally
+					// for 5m before giving up, so we don't need to retry here.
+					if err := deleteByChannelID(c.pluginCtx, c.db, c.ID); err != nil {
+						c.Logger.Warnw("Failed to clean up channel plugin state after plugin type change",
+							zap.String("old_type", currentConfig.ctype),
+							zap.String("new_type", newConf.ctype),
+							zap.Error(err))
+					}
+				}
 			}
 
 			currentConfig = newConf
@@ -164,10 +198,17 @@ func (c *Channel) getPlugin() *pluginSupervisor {
 	return p
 }
 
-// Stop ends the lifecycle of its plugin.
-// This should only be called when the channel is not more required.
-func (c *Channel) Stop() {
-	c.pluginCtxCancel()
+// Stop cancels the plugin context, which will cause the plugin control loop to exit.
+//
+// If chDeleted is true, the cancellation cause will be set to [ErrChannelDeleted], which signals
+// to the plugin control loop that the channel has been deleted, and it should clean up its state
+// in the database before exiting.
+func (c *Channel) Stop(chDeleted bool) {
+	if chDeleted {
+		c.pluginCtxCancel(ErrChannelDeleted)
+	} else {
+		c.pluginCtxCancel(nil)
+	}
 }
 
 // Restart signals to restart the channel plugin with the updated channel config

@@ -12,7 +12,7 @@ func (r *RuntimeConfig) applyPendingChannels(ctx context.Context) {
 		r,
 		&r.Channels, &r.configChange.Channels,
 		func(newElement *channel.Channel) error {
-			newElement.Start(ctx, r.logs.GetChildLogger("channel").SugaredLogger)
+			newElement.Start(ctx, r.db, r.logs.GetChildLogger("channel").SugaredLogger)
 			return nil
 		},
 		func(curElement, update *channel.Channel) error {
@@ -24,7 +24,7 @@ func (r *RuntimeConfig) applyPendingChannels(ctx context.Context) {
 			return nil
 		},
 		func(delElement *channel.Channel) error {
-			delElement.Stop()
+			delElement.Stop(true)
 			return nil
 		})
 }

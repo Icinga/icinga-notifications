@@ -54,6 +54,17 @@ CREATE TABLE channel (
 
 CREATE INDEX idx_channel_changed_at ON channel(changed_at);
 
+CREATE TABLE channel_state (
+    channel_id bigint NOT NULL,
+    state_key varchar(255) NOT NULL,
+    value varchar(4096) NOT NULL,
+
+    CONSTRAINT pk_channel_state PRIMARY KEY (channel_id, state_key),
+    CONSTRAINT fk_channel_state_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE INDEX idx_channel_state_channel_id ON channel_state(channel_id);
+
 CREATE TABLE contact (
     id bigint NOT NULL AUTO_INCREMENT,
     external_uuid binary(16), -- used for external references
