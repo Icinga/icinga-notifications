@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
@@ -25,6 +26,7 @@ type Channel struct {
 	Config string `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
 
 	Logger *zap.SugaredLogger `db:"-"`
+	db     *database.DB
 
 	restartCh chan newConfig
 	pluginCh  chan *pluginSupervisor
@@ -57,8 +59,9 @@ type newConfig struct {
 // It should be called after the channel has been created and its properties have been set.
 // The provided context is used to manage the lifecycle of the plugin control loop, and the
 // logger is used for logging messages related to the channel and its plugin.
-func (c *Channel) Start(ctx context.Context, logger *zap.SugaredLogger) {
+func (c *Channel) Start(ctx context.Context, db *database.DB, logger *zap.SugaredLogger) {
 	c.Logger = logger.With(zap.Object("channel", c))
+	c.db = db
 	c.restartCh = make(chan newConfig)
 	c.pluginCh = make(chan *pluginSupervisor)
 	c.pluginCtx, c.pluginCtxCancel = context.WithCancel(ctx)
@@ -70,7 +73,7 @@ func (c *Channel) Start(ctx context.Context, logger *zap.SugaredLogger) {
 func (c *Channel) instantiatePluginSupervisor(cType string, config string) *pluginSupervisor {
 	c.Logger.Debug("Initializing channel plugin")
 
-	p, err := newPluginSupervisor(c.pluginCtx, cType, c.Logger)
+	p, err := newPluginSupervisor(c.pluginCtx, c.db, c.Logger, cType, c.ID)
 	if err != nil {
 		c.Logger.Errorw("Failed to initialize channel plugin", zap.Error(err))
 		return nil
@@ -140,6 +143,13 @@ func (c *Channel) pluginControlLoop(currentConfig newConfig) {
 				}
 			} else {
 				stopReset()
+				if currentConfig.ctype != newConf.ctype {
+					// If the plugin type has changed, we need to clean up the plugin state in the database,
+					// as it's no longer relevant for the new plugin type.
+					if err := deleteByChannelID(c.pluginCtx, c.db, c.ID); err != nil {
+						c.Logger.Warnw("Failed to clean up channel plugin state after plugin type change", zap.Error(err))
+					}
+				}
 			}
 
 			currentConfig = newConf

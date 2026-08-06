@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/mail"
 	"sync"
@@ -12,6 +14,8 @@ import (
 	"github.com/emersion/go-sasl"
 	"github.com/emersion/go-smtp"
 	"github.com/google/uuid"
+	"github.com/icinga/icinga-go-library/notifications"
+	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal"
@@ -37,7 +41,31 @@ type Email struct {
 	Password   string `json:"password"` // #nosec G117 -- exported password field
 	Encryption string `json:"encryption"`
 
-	mu sync.Mutex // Protects access to the above fields.
+	// state is a map of composite keys to State objects, used to track the state of notifications sent to recipients.
+	//
+	// The composite key is generated using the recipient's email address and the incident ID, ensuring that each
+	// recipient-incident combination has a unique state entry. Currently, the only state tracked is the last message
+	// ID sent to a recipient for a specific incident, which is used to set the "In-Reply-To" and "References" headers
+	// in subsequent emails. We might extend this in the future to include additional state information as needed.
+	state map[string]State
+	mu    sync.Mutex // Protects access to the above fields.
+
+	// rpcCtx and rpcEp are used to make RPC calls back to Icinga Notifications.
+	rpcCtx context.Context
+	rpcEp  *jsonrpc.Endpoint
+}
+
+// State represents the state of the Email channel, including the last message ID sent to a recipient.
+//
+// It is used to track the state of notifications sent to a specific recipient and incident combination.
+type State struct {
+	LastMessageID string `json:"last_message_id"`
+}
+
+// ReceiveEndpoint implements the [plugin.RPCEndpointReceiver] interface.
+func (ch *Email) ReceiveEndpoint(ctx context.Context, ep *jsonrpc.Endpoint) {
+	ch.rpcCtx = ctx
+	ch.rpcEp = ep
 }
 
 func (ch *Email) GetInfo() *plugin.Info {
@@ -156,29 +184,57 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
-	var to []mail.Address
+	var to *mail.Address
 	for _, address := range req.Contact.Addresses {
 		if address.Type == "email" {
-			to = append(to, mail.Address{Name: req.Contact.FullName, Address: address.Address})
+			to = &mail.Address{Name: req.Contact.FullName, Address: address.Address}
+			break
 		}
 	}
 
-	if len(to) == 0 {
+	if to == nil {
 		return fmt.Errorf("contact user %s does not have an e-mail address", req.Contact.FullName)
+	}
+
+	if err := ch.mergeState(req.State); err != nil {
+		return err
 	}
 
 	var msg bytes.Buffer
 	plugin.FormatMessage(&msg, req)
 
+	compositeKey := makeStateKey(to, req.Incident)
+
 	ch.mu.Lock()
+	messageID := fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail)
 	b := enmime.Builder().
-		ToAddrs(to).
+		ToAddrs([]mail.Address{*to}).
 		From(ch.SenderName, ch.SenderMail).
 		Subject(plugin.FormatSubject(req)).
-		Header("Message-Id", fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail))
+		Header("Message-Id", messageID)
+
+	if s, exists := ch.state[compositeKey]; exists {
+		b = b.Header("In-Reply-To", s.LastMessageID).Header("References", s.LastMessageID)
+	}
 	ch.mu.Unlock()
 
-	return b.Text(msg.Bytes()).Send(ch)
+	if err := b.Text(msg.Bytes()).Send(ch); err != nil {
+		return err
+	}
+
+	if req.Incident.IsRecovered {
+		if err := ch.rpcEp.Call(ch.rpcCtx, notifications.MethodDeleteState, compositeKey, nil); err != nil {
+			slog.ErrorContext(ch.rpcCtx, "Failed to delete channel state", "error", err)
+		}
+	} else {
+		s := State{LastMessageID: messageID}
+		ch.mu.Lock()
+		ch.state[compositeKey] = s
+		ch.mu.Unlock()
+		ch.callUpsertState(compositeKey, s)
+	}
+
+	return nil
 }
 
 // Send implements the enmime.Sender interface.
@@ -221,4 +277,44 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	}
 
 	return client.Quit()
+}
+
+// callUpsertState is a helper function to call the UpsertState RPC method on the Icinga Notifications.
+func (ch *Email) callUpsertState(key string, s State) {
+	if err := ch.rpcEp.Call(ch.rpcCtx, notifications.MethodUpsertState, map[string]string{key: jsonMust(s)}, nil); err != nil {
+		slog.ErrorContext(ch.rpcCtx, "Failed to upsert channel state", "error", err)
+	}
+}
+
+// mergeState merges the provided state into the existing state of the Email channel.
+func (ch *Email) mergeState(stateM map[string]string) error {
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+
+	if ch.state == nil {
+		ch.state = make(map[string]State)
+	}
+
+	for k, v := range stateM {
+		var s State
+		if err := json.Unmarshal([]byte(v), &s); err != nil {
+			return err
+		}
+		ch.state[k] = s
+	}
+	return nil
+}
+
+// makeStateKey composes a unique key for the channel state based on the recipient's email address and the incident ID.
+func makeStateKey(to *mail.Address, i *plugin.Incident) string {
+	return fmt.Sprintf("%s-#%d", to.Address, i.Id)
+}
+
+// jsonMust is a helper function that marshals the given value to JSON and panics if it fails.
+func jsonMust(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
