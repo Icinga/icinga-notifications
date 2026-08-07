@@ -31,6 +31,7 @@ type Channel struct {
 	Name   string `db:"name"`
 	Type   string `db:"type"`
 	Config string `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
+	Uuid   string `db:"external_uuid"`
 
 	Logger *zap.SugaredLogger `db:"-"`
 	db     *database.DB
