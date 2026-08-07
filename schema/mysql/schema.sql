@@ -36,7 +36,7 @@ CREATE TABLE available_channel_type (
 
 CREATE TABLE channel (
     id bigint NOT NULL AUTO_INCREMENT,
-    external_uuid char(36) NOT NULL, -- used for external references, lower case
+    external_uuid char(36), -- used for external references, lower case
     name text NOT NULL COLLATE utf8mb4_unicode_ci,
     type varchar(255) NOT NULL, -- 'email', 'sms', ...
     config mediumtext, -- JSON with channel-specific attributes
@@ -48,14 +48,15 @@ CREATE TABLE channel (
 
     CONSTRAINT pk_channel PRIMARY KEY (id),
     CONSTRAINT uk_channel_external_uuid UNIQUE (external_uuid),
-    CONSTRAINT fk_channel_available_channel_type FOREIGN KEY (type) REFERENCES available_channel_type(type)
+    CONSTRAINT fk_channel_available_channel_type FOREIGN KEY (type) REFERENCES available_channel_type(type),
+    CONSTRAINT ck_channel_non_deleted_needs_external_uuid CHECK (deleted = 'y' OR external_uuid IS NOT NULL)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_channel_changed_at ON channel(changed_at);
 
 CREATE TABLE contact (
     id bigint NOT NULL AUTO_INCREMENT,
-    external_uuid char(36) NOT NULL, -- used for external references, lower case
+    external_uuid char(36), -- used for external references, lower case
     full_name text NOT NULL COLLATE utf8mb4_unicode_ci,
     username varchar(254) COLLATE utf8mb4_unicode_ci, -- reference to web user
     default_channel_id bigint NOT NULL,
@@ -69,7 +70,8 @@ CREATE TABLE contact (
     -- As the username is unique, it must be NULLed for deletion via "deleted = 'y'"
     CONSTRAINT uk_contact_username UNIQUE (username),
 
-    CONSTRAINT fk_contact_channel FOREIGN KEY (default_channel_id) REFERENCES channel(id)
+    CONSTRAINT fk_contact_channel FOREIGN KEY (default_channel_id) REFERENCES channel(id),
+    CONSTRAINT ck_contact_non_deleted_needs_external_uuid CHECK (deleted = 'y' OR external_uuid IS NOT NULL)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_contact_changed_at ON contact(changed_at);
@@ -91,14 +93,15 @@ CREATE INDEX idx_contact_address_changed_at ON contact_address(changed_at);
 
 CREATE TABLE contactgroup (
     id bigint NOT NULL AUTO_INCREMENT,
-    external_uuid char(36) NOT NULL, -- used for external references, lower case
+    external_uuid char(36), -- used for external references, lower case
     name text NOT NULL COLLATE utf8mb4_unicode_ci,
 
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
 
     CONSTRAINT pk_contactgroup PRIMARY KEY (id),
-    CONSTRAINT uk_contactgroup_external_uuid UNIQUE (external_uuid)
+    CONSTRAINT uk_contactgroup_external_uuid UNIQUE (external_uuid),
+    CONSTRAINT ck_contactgroup_non_deleted_needs_external_uuid CHECK (deleted = 'y' OR external_uuid IS NOT NULL)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_contactgroup_changed_at ON contactgroup(changed_at);
