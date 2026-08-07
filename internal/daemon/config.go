@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/user"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/creasty/defaults"
@@ -251,9 +252,12 @@ func (f Flags) IsExplicitConfigPath() bool {
 	return f.Config != ""
 }
 
-// daemonConfig holds the configuration state as a singleton.
-// It is initialised by the ParseFlagsAndConfig func and exposed through the Config function.
-var daemonConfig *ConfigFile
+var (
+	// daemonConfig holds the configuration state as a singleton.
+	// It is initialised by the ParseFlagsAndConfig func and exposed through the Config function.
+	daemonConfig   *ConfigFile
+	initConfigOnce sync.Once
+)
 
 // Config returns the config that was loaded while starting the daemon.
 // Panics when ParseFlagsAndConfig was not called earlier.
@@ -282,8 +286,8 @@ func ParseFlagsAndConfig() {
 		os.Exit(ExitSuccess)
 	}
 
-	daemonConfig = new(ConfigFile)
-	if err := config.Load(daemonConfig, config.LoadOptions{
+	conf := new(ConfigFile)
+	if err := config.Load(conf, config.LoadOptions{
 		Flags:      flags,
 		EnvOptions: config.EnvOptions{Prefix: "ICINGA_NOTIFICATIONS_"},
 	}); err != nil {
@@ -293,4 +297,8 @@ func ParseFlagsAndConfig() {
 
 		utils.PrintErrorThenExit(err, ExitFailure)
 	}
+	initConfigOnce.Do(func() { daemonConfig = conf })
 }
+
+// SetTestConfig sets the global daemon config instance for testing purposes.
+func SetTestConfig(conf *ConfigFile) { initConfigOnce.Do(func() { daemonConfig = conf }) }

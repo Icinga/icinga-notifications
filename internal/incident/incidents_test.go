@@ -12,6 +12,7 @@ import (
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
+	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/rule"
@@ -19,18 +20,16 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"go.uber.org/zap/zaptest"
 )
 
 func TestIncidents(t *testing.T) {
 	t.Parallel()
 
-	db := testutils.GetTestDB(t.Context(), t)
-	logs := logging.NewLoggingWithFactory("testing", zapcore.DebugLevel, time.Second, func(level zap.AtomicLevel) zapcore.Core {
-		return zaptest.NewLogger(t, zaptest.Level(level.Level())).Core()
+	db := testutils.GetTestDB(t.Context(), t, func(dc *daemon.ConfigFile) *database.Config {
+		daemon.SetTestConfig(dc)
+		return &dc.Database
 	})
+	logs := testutils.GetTestLogging(t)
 
 	// Insert a dummy source for our test cases!
 	source := &config.Source{
