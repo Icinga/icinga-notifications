@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
@@ -23,8 +24,10 @@ type Channel struct {
 	Name   string `db:"name"`
 	Type   string `db:"type"`
 	Config string `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
+	Uuid   string `db:"external_uuid"`
 
 	Logger *zap.SugaredLogger `db:"-"`
+	db     *database.DB
 
 	restartCh chan newConfig
 	pluginCh  chan *pluginSupervisor
@@ -57,8 +60,9 @@ type newConfig struct {
 // It should be called after the channel has been created and its properties have been set.
 // The provided context is used to manage the lifecycle of the plugin control loop, and the
 // logger is used for logging messages related to the channel and its plugin.
-func (c *Channel) Start(ctx context.Context, logger *zap.SugaredLogger) {
+func (c *Channel) Start(ctx context.Context, db *database.DB, logger *zap.SugaredLogger) {
 	c.Logger = logger.With(zap.Object("channel", c))
+	c.db = db
 	c.restartCh = make(chan newConfig)
 	c.pluginCh = make(chan *pluginSupervisor)
 	c.pluginCtx, c.pluginCtxCancel = context.WithCancel(ctx)
@@ -70,7 +74,7 @@ func (c *Channel) Start(ctx context.Context, logger *zap.SugaredLogger) {
 func (c *Channel) instantiatePluginSupervisor(cType string, config string) *pluginSupervisor {
 	c.Logger.Debug("Initializing channel plugin")
 
-	p, err := newPluginSupervisor(c.pluginCtx, cType, c.Logger)
+	p, err := newPluginSupervisor(c.pluginCtx, c.db, c.Logger, cType, c.ID)
 	if err != nil {
 		c.Logger.Errorw("Failed to initialize channel plugin", zap.Error(err))
 		return nil
@@ -130,16 +134,25 @@ func (c *Channel) pluginControlLoop(currentConfig newConfig) {
 			if current != nil && currentConfig.ctype == newConf.ctype {
 				c.Logger.Infow("Reloading channel plugin config on the fly", zap.Int("pid", current.cmd.Process.Pid))
 				if err := current.SetConfig(c.pluginCtx, newConf.config); err != nil {
-					c.Logger.Warnw("Failed to reload plugin config, restarting the plugin", zap.Error(err))
 					// If we got a JSON-RPC error, then it's because the plugin rejected the new config for some
 					// reason, so we can just keep the plugin running with the old config. Otherwise, the plugin is
 					// probably already gone, so call stopReset() to clean up and prepare for a new plugin instance.
 					if _, ok := errors.AsType[*jsonrpc.Error](err); !ok {
+						c.Logger.Warnw("Failed to reload plugin config, restarting the plugin", zap.Error(err))
 						stopReset()
+					} else {
+						c.Logger.Warnw("Failed to reload plugin config, continuing with the old config", zap.Error(err))
 					}
 				}
 			} else {
 				stopReset()
+				if currentConfig.ctype != newConf.ctype {
+					// If the plugin type has changed, we need to clean up the plugin state in the database,
+					// as it's no longer relevant for the new plugin type.
+					if err := deleteByChannelID(c.pluginCtx, c.db, c.ID); err != nil {
+						c.Logger.Warnw("Failed to clean up channel plugin state after plugin type change", zap.Error(err))
+					}
+				}
 			}
 
 			currentConfig = newConf

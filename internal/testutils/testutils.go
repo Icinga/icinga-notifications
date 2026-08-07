@@ -4,54 +4,28 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"github.com/creasty/defaults"
+	"os"
+	"testing"
+	"time"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
-	"os"
-	"strconv"
-	"strings"
-	"testing"
-	"time"
 )
 
-// GetTestDB retrieves the database config from env variables, opens a new database and returns it.
+// GetTestDB returns a database connection for testing purposes.
 //
-// The test suite will be skipped if no environment variable is set, otherwise fails fatally when
-// invalid configurations are specified.
-func GetTestDB(ctx context.Context, t *testing.T) *database.DB {
-	c := &database.Config{}
-	require.NoError(t, defaults.Set(c), "applying config default should not fail")
+// It requires the environment variable "ICINGA_NOTIFICATIONS_DATABASE_TYPE" to be set, otherwise it will
+// skip the test. The function validates the provided database configuration, establishes a connection,
+// and pings the database to ensure it's reachable.
+func GetTestDB(ctx context.Context, t *testing.T, conf *database.Config) *database.DB {
+	if _, ok := os.LookupEnv("ICINGA_NOTIFICATIONS_DATABASE_TYPE"); !ok {
+		t.Skipf("Environment %q not set, skipping test!", "ICINGA_NOTIFICATIONS_DATABASE_TYPE")
+	}
+	require.NoError(t, conf.Validate(), "database config validation should not fail")
 
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB_TYPE"); ok {
-		c.Type = strings.ToLower(v)
-	} else {
-		t.Skipf("Environment %q not set, skipping test!", "NOTIFICATIONS_TESTS_DB_TYPE")
-	}
-
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB"); ok {
-		c.Database = v
-	}
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB_USER"); ok {
-		c.User = v
-	}
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB_PASSWORD"); ok {
-		c.Password = v
-	}
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB_HOST"); ok {
-		c.Host = v
-	}
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB_PORT"); ok {
-		port, err := strconv.Atoi(v)
-		require.NoError(t, err, "invalid port provided")
-
-		c.Port = port
-	}
-
-	require.NoError(t, c.Validate(), "database config validation should not fail")
-
-	db, err := database.NewDbFromConfig(c, logging.NewLogger(zaptest.NewLogger(t).Sugar(), time.Hour), database.RetryConnectorCallbacks{})
+	db, err := database.NewDbFromConfig(conf, logging.NewLogger(zaptest.NewLogger(t).Sugar(), time.Hour), database.RetryConnectorCallbacks{})
 	require.NoError(t, err, "connecting to database should not fail")
 	require.NoError(t, db.PingContext(ctx), "pinging the database should not fail")
 
