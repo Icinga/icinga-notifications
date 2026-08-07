@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
+	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/rule"
@@ -27,7 +29,15 @@ import (
 func TestIncidents(t *testing.T) {
 	t.Parallel()
 
-	db := testutils.GetTestDB(t.Context(), t)
+	// This very same check in testutils.GetTestDB() is too late because daemon.LoadTestConfig() will fail
+	// if the environment variable is not set, so we check it here first.
+	if _, ok := os.LookupEnv("ICINGA_NOTIFICATIONS_DATABASE_TYPE"); !ok {
+		t.Skipf("Environment %q not set, skipping test!", "ICINGA_NOTIFICATIONS_DATABASE_TYPE")
+	}
+	require.NoError(t, os.Setenv("ICINGA_NOTIFICATIONS_ICINGAWEB2_URL", "http://example.com")) // Is required, so populate it.
+	require.NoError(t, daemon.LoadTestConfig())
+
+	db := testutils.GetTestDB(t.Context(), t, &daemon.Config().Database)
 	logs := logging.NewLoggingWithFactory("testing", zapcore.DebugLevel, time.Second, func(level zap.AtomicLevel) zapcore.Core {
 		return zaptest.NewLogger(t, zaptest.Level(level.Level())).Core()
 	})

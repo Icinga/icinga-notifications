@@ -294,3 +294,10 @@ func ParseFlagsAndConfig() {
 		utils.PrintErrorThenExit(err, ExitFailure)
 	}
 }
+
+// LoadTestConfig loads the configuration for testing purposes without parsing CLI flags.
+// DO NOT call this function in production code, as it bypasses CLI flag parsing and may lead to unexpected behavior.
+func LoadTestConfig() error {
+	daemonConfig = new(ConfigFile)
+	return config.FromEnv(daemonConfig, config.EnvOptions{Prefix: "ICINGA_NOTIFICATIONS_"})
+}

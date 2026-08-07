@@ -27,19 +27,19 @@ jobs:
           - mariadb:latest
 
     env:
-      NOTIFICATIONS_TESTS_DB_TYPE: mysql
-      NOTIFICATIONS_TESTS_DB: notifications
-      NOTIFICATIONS_TESTS_DB_USER: root
-      NOTIFICATIONS_TESTS_DB_PASSWORD: notifications
-      NOTIFICATIONS_TESTS_DB_HOST: 127.0.0.1
-      NOTIFICATIONS_TESTS_DB_PORT: 3306
+      ICINGA_NOTIFICATIONS_DATABASE_TYPE: mysql
+      ICINGA_NOTIFICATIONS_DATABASE_DATABASE: notifications
+      ICINGA_NOTIFICATIONS_DATABASE_USER: root
+      ICINGA_NOTIFICATIONS_DATABASE_PASSWORD: notifications
+      ICINGA_NOTIFICATIONS_DATABASE_HOST: 127.0.0.1
+      ICINGA_NOTIFICATIONS_DATABASE_PORT: 3306
 
     services:
       mysql:
         image: ${{ matrix.image }}
         env:
-          MYSQL_ROOT_PASSWORD: ${{ env.NOTIFICATIONS_TESTS_DB_PASSWORD }}
-          MYSQL_DATABASE: ${{ env.NOTIFICATIONS_TESTS_DB }}
+          MYSQL_ROOT_PASSWORD: ${{ env.ICINGA_NOTIFICATIONS_DATABASE_PASSWORD }}
+          MYSQL_DATABASE: ${{ env.ICINGA_NOTIFICATIONS_DATABASE_DATABASE }}
         # Wait until MySQL becomes ready
         options: >-
           --health-cmd "${{ (startsWith(matrix.image, 'mysql:') || startsWith(matrix.image, 'mariadb:10')) && 'mysqladmin ping' || 'healthcheck.sh --connect --innodb_initialized' }}"
@@ -60,8 +60,8 @@ jobs:
 
       - name: Importing Schema
         run: >
-          mysql -h127.0.0.1 -u$NOTIFICATIONS_TESTS_DB_USER -p$NOTIFICATIONS_TESTS_DB_PASSWORD
-          $NOTIFICATIONS_TESTS_DB < ${{ github.workspace }}/schema/mysql/schema.sql
+          mysql -h127.0.0.1 -u$ICINGA_NOTIFICATIONS_DATABASE_USER -p$ICINGA_NOTIFICATIONS_DATABASE_PASSWORD
+          $ICINGA_NOTIFICATIONS_DATABASE_DATABASE < ${{ github.workspace }}/schema/mysql/schema.sql
 
       - name: Download dependencies
         run: go get -v -t -d ./...
@@ -80,19 +80,19 @@ jobs:
         version: ["9.6", "10", "11", "12", "13", "14", "15", "latest"]
 
     env:
-      NOTIFICATIONS_TESTS_DB_TYPE: pgsql
-      NOTIFICATIONS_TESTS_DB: notifications
-      NOTIFICATIONS_TESTS_DB_USER: postgres
-      NOTIFICATIONS_TESTS_DB_PASSWORD: notifications
-      NOTIFICATIONS_TESTS_DB_HOST: 127.0.0.1
-      NOTIFICATIONS_TESTS_DB_PORT: 5432
+      ICINGA_NOTIFICATIONS_DATABASE_TYPE: pgsql
+      ICINGA_NOTIFICATIONS_DATABASE_DATABASE: notifications
+      ICINGA_NOTIFICATIONS_DATABASE_USER: postgres
+      ICINGA_NOTIFICATIONS_DATABASE_PASSWORD: notifications
+      ICINGA_NOTIFICATIONS_DATABASE_HOST: 127.0.0.1
+      ICINGA_NOTIFICATIONS_DATABASE_PORT: 5432
 
     services:
       postgres:
         image: postgres:${{ matrix.version }}
         env:
-          POSTGRES_PASSWORD: ${{ env.NOTIFICATIONS_TESTS_DB_PASSWORD }}
-          POSTGRES_DB: ${{ env.NOTIFICATIONS_TESTS_DB }}
+          POSTGRES_PASSWORD: ${{ env.ICINGA_NOTIFICATIONS_DATABASE_PASSWORD }}
+          POSTGRES_DB: ${{ env.ICINGA_NOTIFICATIONS_DATABASE_DATABASE }}
         # Wait until postgres becomes ready
         options: >-
           --health-cmd pg_isready
@@ -113,9 +113,9 @@ jobs:
 
       - name: Importing Schema
         env:
-          PGPASSWORD: ${{ env.NOTIFICATIONS_TESTS_DB_PASSWORD }}
+          PGPASSWORD: ${{ env.ICINGA_NOTIFICATIONS_DATABASE_PASSWORD }}
         run: |
-          psql -U postgres -w -h 127.0.0.1 -d ${{ env.NOTIFICATIONS_TESTS_DB }} < ${{ github.workspace }}/schema/pgsql/schema.sql
+          psql -U postgres -w -h 127.0.0.1 -d ${{ env.ICINGA_NOTIFICATIONS_DATABASE_DATABASE }} < ${{ github.workspace }}/schema/pgsql/schema.sql
 
       - name: Download dependencies
         run: go get -v -t -d ./...
