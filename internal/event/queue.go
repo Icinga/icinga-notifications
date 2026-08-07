@@ -84,8 +84,33 @@ func (q *Queue) toEvent() (*Event, error) {
 	}
 
 	ev.Time = q.EventTime.Time()
+	ev.ID = q.ID
 
 	return &ev, nil
+}
+
+// EnsureID returns this event's content hash (see Event.ID), computing and caching it first if it hasn't been set
+// yet, which is the case for events that never went through the event queue, e.g. escalation-reevaluation timers.
+func (e *Event) EnsureID() (types.Binary, error) {
+	if len(e.ID) == 0 {
+		id, err := hashEvent(e)
+		if err != nil {
+			return nil, err
+		}
+		e.ID = id
+	}
+
+	return e.ID, nil
+}
+
+// hashEvent returns the SHA256 hash of the given event's JSON representation.
+func hashEvent(e *Event) (types.Binary, error) {
+	h := sha256.New()
+	if err := json.NewEncoder(h).Encode(e); err != nil {
+		return nil, fmt.Errorf("cannot JSON encode event.Event: %w", err)
+	}
+
+	return h.Sum(nil), nil
 }
 
 // Enqueue enqueues an event.Event into the event queue.
@@ -101,8 +126,10 @@ func Enqueue(ctx context.Context, db *database.DB, ev *Event, objectID types.Bin
 		return fmt.Errorf("cannot JSON encode event.Event: %w", err)
 	}
 
+	ev.ID = idHash.Sum(nil)
+
 	q := &Queue{
-		ID:         idHash.Sum(nil),
+		ID:         ev.ID,
 		LastUpdate: types.UnixMilli(time.Now()),
 		Json:       jsonBuff.String(),
 		EventTime:  types.UnixMilli(ev.Time),

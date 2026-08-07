@@ -11,6 +11,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
+	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )
@@ -61,9 +62,9 @@ func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, stat
 // AddRecipient adds recipient from the given *rule.Escalation to this incident.
 // Syncs also all the recipients with the database and returns an error on db failure.
 func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation) error {
-	newRole := RoleRecipient
+	newRole := utils.RoleRecipient
 	if i.HasManager() {
-		newRole = RoleSubscriber
+		newRole = utils.RoleSubscriber
 	}
 
 	for _, escalationRecipient := range escalation.Recipients {
@@ -131,17 +132,32 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 //
 // This function will just insert NotificationStateSuppressed incident histories and return an empty slice if
 // the incident is muted, otherwise a slice of pending *NotificationEntry(ies) that can be used to update
-// the corresponding histories after the actual notifications have been sent out.
+// the corresponding histories after the actual notifications have been sent out. The given reason denotes
+// the incident event that triggered the notifications and is carried over to the returned entries.
+//
+// A contact+channel pair selected by multiple origins yields a single pending entry for the first origin,
+// plus one NotificationStateSuperfluous entry per additional origin. Superfluous entries are only recorded
+// in the notification history, they do not get an incident_history row and are never delivered.
 //
 // Note: handleUnmute clears i.MuteReason before this function runs, and handleMute sets it after, so a single
 // i.IsMuted() check captures the correct transitional state for mute/unmute and steady-state events alike.
 func (i *Incident) generateNotifications(
-	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
+	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels, reason HistoryEventType,
 ) ([]*NotificationEntry, error) {
+	// EnsureID is a no-op for events that already went through the event queue; it computes the content hash for
+	// events that didn't, e.g. escalation-reevaluation timers (see ReevaluateEscalations).
+	eventID, err := ev.EnsureID()
+	if err != nil {
+		return nil, fmt.Errorf("cannot compute event id: %w", err)
+	}
+	if reason == IncidentSeverityChanged || reason == Opened {
+		i.LastSeverityChangeEventID = eventID
+	}
+
 	var notifications []*NotificationEntry
 	suppress := i.IsMuted()
 	for contact, channels := range contactChannels {
-		for chID := range channels {
+		for chID, origins := range channels {
 			hr := &HistoryRow{
 				IncidentID:        i.Id,
 				Key:               recipient.ToKey(contact),
@@ -163,13 +179,59 @@ func (i *Incident) generateNotifications(
 				return nil, err
 			}
 
-			if !suppress {
-				notifications = append(notifications, &NotificationEntry{
-					HistoryRowID: hr.ID,
-					ContactID:    contact.ID,
-					State:        NotificationStatePending,
-					ChannelID:    chID,
-				})
+			if suppress {
+				continue
+			}
+
+			var notificationHistoryID int64
+			for idx, origin := range origins {
+				if idx == 0 {
+					historyEntry := &NotificationHistoryEntry{
+						EventID:          eventID,
+						ContactID:        contact.ID,
+						ChannelID:        chID,
+						RuleID:           types.MakeInt(origin.RuleID, types.TransformZeroIntToNull),
+						RuleEscalationID: types.MakeInt(origin.RuleEscalationID, types.TransformZeroIntToNull),
+						ContactgroupID:   types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
+						ScheduleID:       types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
+						IncidentID:       types.MakeInt(i.Id, types.TransformZeroIntToNull),
+						Role:             origin.Role,
+						Message:          types.MakeString(ev.Message, types.TransformEmptyStringToNull),
+						Reason:           reason,
+						State:            NotificationStatePending,
+						TriggeredAt:      types.UnixMilli(time.Now()),
+					}
+					if err := historyEntry.Sync(ctx, i.db, tx); err != nil {
+						i.logger.Errorw("Failed to insert notification history",
+							zap.String("contact", contact.FullName),
+							zap.Bool("incident_muted", i.IsMuted()),
+							zap.Error(err))
+						return nil, err
+					}
+					notifications = append(notifications, &NotificationEntry{
+						HistoryRowID:             hr.ID,
+						ContactID:                contact.ID,
+						ChannelID:                chID,
+						State:                    NotificationStatePending,
+						NotificationHistoryRowID: historyEntry.ID,
+					})
+					notificationHistoryID = historyEntry.ID
+				} else {
+					skippedHistoryEntry := &NotificationSkippedHistoryEntry{
+						NotificationID:   notificationHistoryID,
+						RuleID:           origin.RuleID,
+						RuleEscalationID: origin.RuleEscalationID,
+						ContactgroupID:   types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
+						ScheduleID:       types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
+					}
+					if err := skippedHistoryEntry.Sync(ctx, i.db, tx); err != nil {
+						i.logger.Errorw("Failed to insert notification skipped history",
+							zap.String("contact", contact.FullName),
+							zap.Bool("incident_muted", i.IsMuted()),
+							zap.Error(err))
+						return nil, err
+					}
+				}
 			}
 		}
 	}

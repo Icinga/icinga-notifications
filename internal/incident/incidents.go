@@ -26,7 +26,7 @@ func ReevaluateEscalations(
 	runtimeConfig *config.RuntimeConfig,
 ) error {
 	query := `
-		SELECT "id", "object_id" FROM "incident"
+		SELECT "id", "object_id", "last_severity_change_event_id" FROM "incident"
 		WHERE "recovered_at" IS NULL AND "next_escalation_check_at" IS NOT NULL AND "next_escalation_check_at" <= ?
 		ORDER BY "next_escalation_check_at"`
 
@@ -34,6 +34,7 @@ func ReevaluateEscalations(
 	var errs []error
 	for pair := range pairCh {
 		err := pair.Incident.RetriggerEscalations(ctx, pair.Object, &event.Event{
+			ID:    pair.Incident.LastSeverityChangeEventID,
 			Time:  time.Now(),
 			Event: baseEv.Event{Incident: types.MakeBool(true)},
 		})

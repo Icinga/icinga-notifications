@@ -9,6 +9,7 @@ import (
 	"time"
 
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/pool"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/theory/jsonpath"
@@ -24,6 +25,15 @@ import (
 type Event struct {
 	Time     time.Time `json:"-"`
 	SourceId int64     `json:"source_id"`
+
+	// ID is the SHA256 hash of this event's JSON representation, identifying its content.
+	//
+	// It is not part of the JSON representation itself (it would otherwise feed back into its own hash) and is
+	// populated either when the event is read back off the event queue (see Queue.toEvent) or lazily via EnsureID
+	// for events that never went through the queue, such as escalation-reevaluation timers. It is a content
+	// identity, not a foreign key: event_queue rows are pruned within minutes of being processed, while ID may
+	// end up persisted long-term (e.g. notification_history.event_id).
+	ID types.Binary `json:"-"`
 
 	baseEv.Event `json:",inline"`
 

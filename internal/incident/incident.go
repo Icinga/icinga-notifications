@@ -44,7 +44,8 @@ type Incident struct {
 	//   - If the incident is between 1h and 2h old, this field contains the incident start time plus two hours.
 	//   - If the incident is already older than 2h, no future escalations can be reached solely based on the incident
 	//     aging, so the field is left nil.
-	NextEscalationCheckAt types.UnixMilli `db:"next_escalation_check_at"`
+	NextEscalationCheckAt     types.UnixMilli `db:"next_escalation_check_at"`
+	LastSeverityChangeEventID types.Binary    `db:"last_severity_change_event_id"`
 
 	EscalationState map[escalationID]*EscalationState `db:"-"`
 	Rules           map[ruleID]struct{}               `db:"-"`
@@ -102,7 +103,7 @@ func (i *Incident) HasManager() bool {
 			i.logger.Debugw("Incident refers unknown recipient key, might got deleted", zap.Inline(recipientKey))
 			continue
 		}
-		if state.Role == RoleManager {
+		if state.Role == utils.RoleManager {
 			return true
 		}
 	}
@@ -114,12 +115,12 @@ func (i *Incident) HasManager() bool {
 //
 // For a managed incident, only managers and subscribers should be notified, for unmanaged incidents,
 // regular recipients are notified as well.
-func (i *Incident) IsNotifiable(role ContactRole) bool {
+func (i *Incident) IsNotifiable(role utils.ContactRole) bool {
 	if !i.HasManager() {
 		return true
 	}
 
-	return role > RoleRecipient
+	return role > utils.RoleRecipient
 }
 
 // ProcessEvent processes the given event for the current incident in an own transaction.
@@ -145,6 +146,10 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	i.logger = i.logger.With(zap.String("object", obj.DisplayName()))
 
 	triggerNotifications := true
+	// notificationReason denotes the incident event the generated notifications are attributed to.
+	// Precedence: Opened > Muted/Unmuted > EscalationTriggered > IncidentSeverityChanged > Notified.
+	notificationReason := Notified
+
 	isNew := i.IsNew()
 	if isNew {
 		if !ev.OpenOrEscalate() {
@@ -162,6 +167,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 
 		i.logger = i.logger.With(zap.String("incident", i.String()))
+		notificationReason = Opened
 	} else {
 		i.logger = i.logger.With(zap.String("incident", i.String()))
 		if sevChanged, err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
@@ -169,6 +175,18 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		} else {
 			// In case the severity didn't change, we need to check whether we can trigger notifications nonetheless.
 			triggerNotifications = sevChanged || ev.NotifyRecipients() || (ev.Muted.Valid && ev.IsMuted() != i.IsMuted())
+
+			if sevChanged {
+				notificationReason = IncidentSeverityChanged
+			}
+			// The mute state must be evaluated here, before handleUnmute below clears i.MuteReason.
+			if ev.Muted.Valid && ev.IsMuted() != i.IsMuted() {
+				if ev.IsMuted() {
+					notificationReason = Muted
+				} else {
+					notificationReason = Unmuted
+				}
+			}
 		}
 	}
 
@@ -211,7 +229,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 
 		if triggerNotifications {
-			notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
+			notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time), notificationReason)
 			if err != nil {
 				return err
 			}
@@ -294,7 +312,7 @@ func (i *Incident) RetriggerEscalations(ctx context.Context, o *object.Object, e
 				channels.LoadFromEscalationRecipients(escalation, ev.Time, i.isRecipientNotifiable)
 			}
 
-			notifications, err = i.generateNotifications(ctx, tx, ev, channels)
+			notifications, err = i.generateNotifications(ctx, tx, ev, channels, EscalationTriggered)
 			if err != nil {
 				return fmt.Errorf("cannot generate notifications for reevaluated escalations: %w", err)
 			}
@@ -393,6 +411,14 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 	i.StartedAt = types.UnixMilli(ev.Time)
 	i.Severity = ev.Severity
 	i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
+
+	if eventID, err := ev.EnsureID(); err != nil {
+		i.logger.Errorw("Cannot fetch event id from incident", zap.Error(err))
+		return err
+	} else {
+		i.LastSeverityChangeEventID = eventID
+	}
+
 	if err := i.Sync(ctx, tx); err != nil {
 		i.logger.Errorw("Cannot insert incident to the database", zap.Error(err))
 		return err
@@ -649,6 +675,15 @@ func (i *Incident) notifyContacts(
 		}
 
 		notification.SentAt = types.UnixMilli(time.Now())
+		if err := UpdateNotificationHistoryState(
+			ctx, i.db, notification.NotificationHistoryRowID, notification.State, notification.SentAt,
+		); err != nil {
+			i.logger.Errorw(
+				"Failed to update contact notified incident history", zap.String("contact", contactName),
+				zap.Error(err),
+			)
+		}
+
 		stmt, _ := i.db.BuildUpdateStmt(notification)
 		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
 			i.logger.Errorw(
@@ -716,8 +751,11 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 
 				for _, contact := range contacts {
 					if contactChs[contact] == nil {
-						contactChs[contact] = make(map[int64]bool)
-						contactChs[contact][contact.DefaultChannelID] = true
+						// The zero value origin denotes a recipient without rule involvement.
+						contactChs[contact] = make(map[int64][]rule.ChannelOrigin)
+						contactChs[contact][contact.DefaultChannelID] = []rule.ChannelOrigin{{
+							Role: state.Role,
+						}}
 					}
 				}
 			} else {
@@ -820,7 +858,7 @@ func (e *EscalationState) TableName() string {
 }
 
 type RecipientState struct {
-	Role ContactRole
+	Role utils.ContactRole
 }
 
 var (
