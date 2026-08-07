@@ -6,6 +6,9 @@ on:
       - main
   pull_request: {}
 
+env:
+  ICINGA_NOTIFICATIONS_CHANNELS_DIR: ${{ github.workspace }}/channels
+
 jobs:
   mysql:
     runs-on: ubuntu-latest
@@ -66,6 +69,11 @@ jobs:
       - name: Download dependencies
         run: go get -v -t -d ./...
 
+      - name: Build Channels
+        run: |
+          mkdir -p ${{ github.workspace }}/channels
+          go build -o ${{ github.workspace }}/channels './cmd/channels/...'
+
       - name: Run tests
         timeout-minutes: 10
         run: go test -v -timeout 5m ./...
@@ -119,6 +127,11 @@ jobs:
 
       - name: Download dependencies
         run: go get -v -t -d ./...
+
+      - name: Build Channels
+        run: |
+          mkdir -p ${{ github.workspace }}/channels
+          go build -o ${{ github.workspace }}/channels './cmd/channels/...'
 
       - name: Run tests
         timeout-minutes: 10
