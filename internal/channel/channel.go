@@ -133,12 +133,14 @@ func (c *Channel) pluginControlLoop(currentConfig newConfig) {
 			if current != nil && currentConfig.ctype == newConf.ctype {
 				c.Logger.Infow("Reloading channel plugin config on the fly", zap.Int("pid", current.cmd.Process.Pid))
 				if err := current.SetConfig(c.pluginCtx, newConf.config); err != nil {
-					c.Logger.Warnw("Failed to reload plugin config, restarting the plugin", zap.Error(err))
 					// If we got a JSON-RPC error, then it's because the plugin rejected the new config for some
 					// reason, so we can just keep the plugin running with the old config. Otherwise, the plugin is
 					// probably already gone, so call stopReset() to clean up and prepare for a new plugin instance.
 					if _, ok := errors.AsType[*jsonrpc.Error](err); !ok {
+						c.Logger.Warnw("Failed to reload plugin config, restarting the plugin", zap.Error(err))
 						stopReset()
+					} else {
+						c.Logger.Warnw("Failed to reload plugin config, continuing with the old config", zap.Error(err))
 					}
 				}
 			} else {
