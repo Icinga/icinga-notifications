@@ -119,11 +119,16 @@ func TestIncidents(t *testing.T) {
 
 			// Close all remaining incidents to clean up the database for the next test run.
 			pairCh, errCh = Yield(t.Context(), db, logs, runtimeConfig)
+			var incidentPairs []Pair
 			for pair := range pairCh {
+				incidentPairs = append(incidentPairs, pair)
+			}
+			assert.NoError(t, <-errCh)
+
+			for _, pair := range incidentPairs {
 				require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 					withIncident(), withClose(), withTags(pair.Object.Tags))))
 			}
-			assert.NoError(t, <-errCh)
 
 			incidentsLen = 0
 			pairCh, errCh = Yield(t.Context(), db, logs, runtimeConfig)
