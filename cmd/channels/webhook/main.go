@@ -8,6 +8,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal"
 	"io"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -142,7 +143,7 @@ func (ch *Webhook) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
-	var urlBuff, reqBodyBuff bytes.Buffer
+	var urlBuff, reqBodyBuff, respBuffer bytes.Buffer
 	if err := ch.tmplUrl.Execute(&urlBuff, req); err != nil {
 		return fmt.Errorf("cannot execute URL template: %w", err)
 	}
@@ -158,10 +159,22 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
 	if err != nil {
 		return err
 	}
-	_, _ = io.Copy(io.Discard, httpResp.Body)
-	_ = httpResp.Body.Close()
+
+	defer func() {
+		_, _ = io.Copy(io.Discard, httpResp.Body)
+		_ = httpResp.Body.Close()
+	}()
+
+	// Limit response to 1 MiB as it will be logged in case of an unexpected status code.
+	limitedRespReader := io.LimitReader(httpResp.Body, 1024*1024)
+	if _, err := io.Copy(&respBuffer, limitedRespReader); err != nil {
+		return fmt.Errorf("cannot read response: %w", err)
+	}
 
 	if !slices.Contains(ch.respStatusCodes, httpResp.StatusCode) {
+		_, _ = fmt.Fprintf(os.Stderr, "received unexpected HTTP response code %d with body %q\n",
+			httpResp.StatusCode, respBuffer.String())
+
 		return fmt.Errorf("unaccepted HTTP response status code %d not in %v",
 			httpResp.StatusCode, ch.respStatusCodes)
 	}
