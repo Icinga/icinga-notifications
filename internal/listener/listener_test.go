@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/user"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,64 @@ import (
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/crypto/bcrypt"
 )
+
+func TestListener(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ProcessEvent", func(t *testing.T) {
+		t.Parallel()
+
+		l := makeTestListener(t, true, false)
+		src := l.runtimeConfig.Sources[1]
+		username := src.ListenerUsername.String
+
+		t.Run("Invalid Method", func(t *testing.T) {
+			t.Parallel()
+
+			req := withPeerUsername(httptest.NewRequest(http.MethodGet, "/", nil), username)
+			rw := httptest.NewRecorder()
+
+			l.ProcessEvent(rw, req)
+
+			assert.Equal(t, http.StatusMethodNotAllowed, rw.Code)
+			assert.Equal(t, "POST required\n", rw.Body.String())
+		})
+
+		t.Run("Invalid JSON", func(t *testing.T) {
+			t.Parallel()
+
+			req := withPeerUsername(httptest.NewRequest(http.MethodPost, "/", nil), username)
+			rw := httptest.NewRecorder()
+
+			l.ProcessEvent(rw, req)
+
+			assert.Equal(t, http.StatusBadRequest, rw.Code)
+			assert.Equal(t, "cannot parse JSON body: EOF\n", rw.Body.String())
+
+			body := `{"severity": "crit", "message": "test message"`
+			req = withPeerUsername(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)), username)
+			rw = httptest.NewRecorder()
+
+			l.ProcessEvent(rw, req)
+
+			assert.Equal(t, http.StatusBadRequest, rw.Code)
+			assert.Equal(t, "cannot parse JSON body: unexpected EOF\n", rw.Body.String())
+		})
+
+		t.Run("Unknown Fields", func(t *testing.T) {
+			t.Parallel()
+
+			body := `{"severity": "crit","unknown_field": "value"}`
+			req := withPeerUsername(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)), username)
+			rw := httptest.NewRecorder()
+
+			l.ProcessEvent(rw, req)
+
+			assert.Equal(t, http.StatusBadRequest, rw.Code)
+			assert.Contains(t, rw.Body.String(), `cannot parse JSON body: json: unknown field "unknown_field"`)
+		})
+	})
+}
 
 func makeTestListener(t *testing.T, useSocket bool, withCNSrc bool) *Listener {
 	var src *config.Source
