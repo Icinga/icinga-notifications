@@ -61,58 +61,29 @@ func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, stat
 	return err
 }
 
-// AddRecipient adds recipient from the given *rule.Escalation to this incident.
-// Syncs also all the recipients with the database and returns an error on db failure.
-func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation) error {
-	newRole := recipient.RoleRecipient
-	if i.HasManager() {
-		newRole = recipient.RoleSubscriber
-	}
-
+// AddEscalationRecipients adds the recipients of the given *rule.Escalation to the incident's recipients list.
+//
+// Each recipient is added to the incident's recipients list with the role RoleRecipient, and a new ContactRow
+// is inserted into the incident_contact table. If a recipient already exists in the incident's recipients list,
+// it is skipped and no new ContactRow is inserted for that recipient.
+func (i *Incident) AddEscalationRecipients(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation) error {
 	for _, escalationRecipient := range escalation.Recipients {
 		r := escalationRecipient.Recipient
-		cr := &ContactRow{IncidentID: i.Id, Role: newRole, ChangedAt: types.UnixMilli(time.Now())}
-
 		recipientKey := recipient.ToKey(r)
-		cr.Key = recipientKey
-
-		state, ok := i.Recipients[recipientKey]
-		if !ok {
-			i.Recipients[recipientKey] = &RecipientState{Role: newRole}
-		} else {
-			if state.Role < newRole {
-				oldRole := state.Role
-				state.Role = newRole
-
-				i.logger.Infof("Contact %q role changed from %s to %s", r, state.Role.String(), newRole.String())
-
-				hr := &HistoryRow{
-					IncidentID:       i.Id,
-					Key:              cr.Key,
-					Time:             types.UnixMilli(time.Now()),
-					Type:             RecipientRoleChanged,
-					NewRecipientRole: newRole,
-					OldRecipientRole: oldRole,
-				}
-
-				if err := hr.Sync(ctx, i.db, tx); err != nil {
-					i.logger.Errorw(
-						"Failed to insert recipient role changed incident history", zap.Object("escalation", escalation),
-						zap.String("recipients", r.String()), zap.Error(err),
-					)
-					return err
-				}
-			}
-			cr.Role = state.Role
+		if _, exists := i.Recipients[recipientKey]; exists {
+			continue
 		}
+		i.Recipients[recipientKey] = RecipientState{Role: recipient.RoleRecipient, IsNew: true}
+		cr := &ContactRow{IncidentID: i.Id, Key: recipientKey, Role: recipient.RoleRecipient, ChangedAt: types.UnixMilli(time.Now())}
 
 		stmt, _ := i.db.BuildUpsertStmt(cr, "id")
 		_, err := tx.NamedExecContext(ctx, stmt, cr)
 		if err != nil {
 			i.logger.Errorw(
-				"Failed to upsert incident recipient", zap.Object("escalation", escalation),
-				zap.String("recipient", r.String()), zap.Error(err),
-			)
+				"Failed to add escalation recipient to incident",
+				zap.Object("escalation", escalation),
+				zap.String("recipient", r.String()),
+				zap.Error(err))
 			return err
 		}
 	}
