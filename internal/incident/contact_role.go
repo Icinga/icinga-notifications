@@ -64,6 +64,6 @@ func (c ContactRole) Value() (driver.Value, error) {
 	return c.String(), nil
 }
 
-func (c *ContactRole) String() string {
-	return contactRoleToName[*c]
+func (c ContactRole) String() string {
+	return contactRoleToName[c]
 }

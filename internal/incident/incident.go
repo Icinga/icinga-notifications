@@ -48,7 +48,7 @@ type Incident struct {
 
 	EscalationState map[escalationID]*EscalationState `db:"-"`
 	Rules           map[ruleID]struct{}               `db:"-"`
-	Recipients      map[recipient.Key]*RecipientState `db:"-"`
+	Recipients      map[recipient.Key]RecipientState  `db:"-"`
 
 	db            *database.DB
 	logger        *zap.SugaredLogger
@@ -62,7 +62,7 @@ func (i *Incident) initializeFields(db *database.DB, runtimeConfig *config.Runti
 	i.runtimeConfig = runtimeConfig
 	i.EscalationState = map[escalationID]*EscalationState{}
 	i.Rules = map[ruleID]struct{}{}
-	i.Recipients = map[recipient.Key]*RecipientState{}
+	i.Recipients = map[recipient.Key]RecipientState{}
 }
 
 // Object fetches the object.Object this incident belongs to from the database.
@@ -110,16 +110,16 @@ func (i *Incident) HasManager() bool {
 	return false
 }
 
-// IsNotifiable returns whether contacts in the given role should be notified about this incident.
+// IsNotifiable returns whether the given recipient state is eligible to be notified for this incident.
 //
-// For a managed incident, only managers and subscribers should be notified, for unmanaged incidents,
-// regular recipients are notified as well.
-func (i *Incident) IsNotifiable(role ContactRole) bool {
+// For a managed incident, only managers and subscribers should be notified, unless the recipient is new
+// and has not yet been notified. For an unmanaged incident, all recipients are eligible to be notified.
+func (i *Incident) IsNotifiable(rs RecipientState) bool {
 	if !i.HasManager() {
 		return true
 	}
 
-	return role > RoleRecipient
+	return rs.IsNew || rs.Role > RoleRecipient
 }
 
 // ProcessEvent processes the given event for the current incident in an own transaction.
@@ -607,7 +607,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, escalati
 			return err
 		}
 
-		if err := i.AddRecipient(ctx, tx, escalation); err != nil {
+		if err := i.AddEscalationRecipients(ctx, tx, escalation); err != nil {
 			return err
 		}
 	}
@@ -707,7 +707,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 			continue
 		}
 
-		if i.IsNotifiable(state.Role) {
+		if i.IsNotifiable(state) {
 			contacts := r.GetContactsAt(t)
 			if len(contacts) > 0 {
 				i.logger.Debugw("Expanded recipient to contacts",
@@ -784,9 +784,9 @@ func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
 		return err
 	}
 
-	i.Recipients = make(map[recipient.Key]*RecipientState)
+	i.Recipients = make(map[recipient.Key]RecipientState)
 	err = utils.ForEachRow(ctx, i.db, tx, "incident_id", []int64{i.Id}, func(cr *ContactRow) {
-		i.Recipients[cr.Key] = &RecipientState{Role: cr.Role}
+		i.Recipients[cr.Key] = RecipientState{Role: cr.Role}
 	})
 	if err != nil {
 		i.logger.Errorw("Failed to restore incident recipients from the database", zap.Error(err))
@@ -796,16 +796,17 @@ func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
 	return nil
 }
 
-// isRecipientNotifiable checks whether the given recipient should be notified about the current incident.
-// If the specified recipient has not yet been notified of this incident, it always returns false.
-// Otherwise, the recipient role is forwarded to IsNotifiable and may or may not return true.
+// isRecipientNotifiable checks whether the given recipient key is eligible to be notified for this incident.
+//
+// If the specified recipient is not part of the incident, this returns false. Otherwise, it checks whether
+// the recipient state is eligible to be notified via the [Incident.IsNotifiable] method.
 func (i *Incident) isRecipientNotifiable(key recipient.Key) bool {
-	state := i.Recipients[key]
-	if state == nil {
+	state, exists := i.Recipients[key]
+	if !exists {
 		return false
 	}
 
-	return i.IsNotifiable(state.Role)
+	return i.IsNotifiable(state)
 }
 
 type EscalationState struct {
@@ -821,6 +822,12 @@ func (e *EscalationState) TableName() string {
 
 type RecipientState struct {
 	Role ContactRole
+
+	// IsNew defines whether the associated recipient was added to the incident during the current transaction.
+	//
+	// Every recipient loaded from the database aren't new, so IsNew is false. For all other recipients
+	// added in Incident.AddRecipient due to the ongoing event, IsNew is set true.
+	IsNew bool
 }
 
 var (
