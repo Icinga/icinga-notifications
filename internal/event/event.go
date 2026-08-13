@@ -1,6 +1,8 @@
 package event
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -8,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/pool"
 	"github.com/icinga/icinga-notifications/internal/utils"
 	"github.com/theory/jsonpath"
@@ -32,6 +36,43 @@ type Event struct {
 	// This is used to avoid evaluating the same JSONPath expression multiple times during rule evaluation of an event,
 	// as the same filter column can be used in multiple conditions of a rule or even multiple event rules.
 	evaluatedRelations map[string]jsonpath.NodeList
+}
+
+// CreateEvent creates a new Event from the given source ID and base event.Event.
+// It ensures that the event has a valid ID, generating one if necessary.
+func CreateEvent(sourceId int64, baseEvent baseEv.Event) (Event, error) {
+	event := Event{
+		Time:     time.Now(),
+		SourceId: sourceId,
+		Event:    baseEvent,
+	}
+	if err := event.EnsureID(); err != nil {
+		return Event{}, fmt.Errorf("cannot ensure event ID: %w", err)
+	}
+	return event, nil
+}
+
+// EnsureID ensures that the event.Event has a valid ID. If it does not, a new UUID is generated
+// based on the SHA256 hash of the event.Event JSON representation and assigned to the ID field.
+func (e *Event) EnsureID() error {
+	if e.ID != (types.UUID{}) {
+		return nil
+	}
+
+	idHash := sha256.New()
+	if err := json.NewEncoder(idHash).Encode(e); err != nil {
+		return fmt.Errorf("cannot JSON encode event.Event: %w", err)
+	}
+
+	id, err := uuid.FromBytes(idHash.Sum(nil)[:16])
+	if err != nil {
+		return fmt.Errorf("cannot construct UUID from event.Event hash: %w", err)
+	}
+
+	e.ID = types.UUID{UUID: id}
+
+	return nil
+
 }
 
 // CompleteURL returns the complete URL for this event by combining the Icinga Web 2 URL with the event's own url field.

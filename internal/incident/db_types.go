@@ -5,6 +5,7 @@ import (
 
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/jmoiron/sqlx"
@@ -15,8 +16,8 @@ type ContactRow struct {
 	ID            int64 `db:"id"`
 	IncidentID    int64 `db:"incident_id"`
 	recipient.Key `db:",inline"`
-	Role          ContactRole     `db:"role"`
-	ChangedAt     types.UnixMilli `db:"changed_at"`
+	Role          recipient.ContactRole `db:"role"`
+	ChangedAt     types.UnixMilli       `db:"changed_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.
@@ -27,8 +28,8 @@ func (c *ContactRow) TableName() string {
 // Upsert implements the contracts.Upserter interface.
 func (c *ContactRow) Upsert() interface{} {
 	return &struct {
-		Role      ContactRole     `db:"role"`
-		ChangedAt types.UnixMilli `db:"changed_at"`
+		Role      recipient.ContactRole `db:"role"`
+		ChangedAt types.UnixMilli       `db:"changed_at"`
 	}{}
 }
 
@@ -62,17 +63,18 @@ type HistoryRow struct {
 	IncidentID        int64     `db:"incident_id"`
 	RuleEscalationID  types.Int `db:"rule_escalation_id"`
 	recipient.Key     `db:",inline"`
-	RuleID            types.Int         `db:"rule_id"`
-	Time              types.UnixMilli   `db:"time"`
-	Type              HistoryEventType  `db:"type"`
-	ChannelID         types.Int         `db:"channel_id"`
-	NewSeverity       event.Severity    `db:"new_severity"`
-	OldSeverity       event.Severity    `db:"old_severity"`
-	NewRecipientRole  ContactRole       `db:"new_recipient_role"`
-	OldRecipientRole  ContactRole       `db:"old_recipient_role"`
-	Message           types.String      `db:"message"`
-	NotificationState NotificationState `db:"notification_state"`
-	SentAt            types.UnixMilli   `db:"sent_at"`
+	RuleID            types.Int                `db:"rule_id"`
+	Time              types.UnixMilli          `db:"time"`
+	Type              HistoryEventType         `db:"type"`
+	ChannelID         types.Int                `db:"channel_id"`
+	NewSeverity       event.Severity           `db:"new_severity"`
+	OldSeverity       event.Severity           `db:"old_severity"`
+	NewRecipientRole  recipient.ContactRole    `db:"new_recipient_role"`
+	OldRecipientRole  recipient.ContactRole    `db:"old_recipient_role"`
+	Message           types.String             `db:"message"`
+	NotificationState source.NotificationState `db:"notification_state"`
+	SentAt            types.UnixMilli          `db:"sent_at"`
+	EventID           types.NullableUUID       `db:"event_id"`
 }
 
 // TableName implements the contracts.TableNamer interface.
@@ -100,11 +102,11 @@ func (h *HistoryRow) Sync(ctx context.Context, db *database.DB, tx *sqlx.Tx) err
 // to them of this type. The cached entries are then used to actually notify the contacts and mark the pending
 // notification entries as either NotificationStateSent or NotificationStateFailed.
 type NotificationEntry struct {
-	HistoryRowID int64             `db:"id"`
-	ContactID    int64             `db:"-"`
-	ChannelID    int64             `db:"-"`
-	State        NotificationState `db:"notification_state"`
-	SentAt       types.UnixMilli   `db:"sent_at"`
+	HistoryRowID int64                    `db:"id"`
+	ContactID    int64                    `db:"-"`
+	ChannelID    int64                    `db:"-"`
+	State        source.NotificationState `db:"notification_state"`
+	SentAt       types.UnixMilli          `db:"sent_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.

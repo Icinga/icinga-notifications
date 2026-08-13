@@ -1,4 +1,4 @@
-package incident
+package recipient
 
 import (
 	"database/sql/driver"
