@@ -162,13 +162,6 @@ func (i *Incident) generateNotifications(
 				hr.NotificationState = source.NotificationStateSuppressed
 			}
 
-			if len(origins) > 0 {
-				//origin := origins[0]
-				//hr.RuleEscalationID = types.MakeInt(origin.RuleEscalationID, types.TransformZeroIntToNull)
-				//hr.GroupID = types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull)
-				//hr.ScheduleID = types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull)
-			}
-
 			if err := hr.Sync(ctx, i.db, tx); err != nil {
 				i.logger.Errorw("Failed to insert incident notification history",
 					zap.String("contact", contact.FullName),
