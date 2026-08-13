@@ -416,7 +416,10 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var innerEv baseEv.Event
-	if err := json.NewDecoder(r.Body).Decode(&innerEv); err != nil {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+
+	if err := dec.Decode(&innerEv); err != nil {
 		l.abort(w, http.StatusBadRequest, nil, "cannot parse JSON body: %v", err)
 		return
 	}
