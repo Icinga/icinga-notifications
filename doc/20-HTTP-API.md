@@ -232,6 +232,70 @@ while the incident for the `database` host and `load` service failed to be modif
 {"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"error":"failed to modify incident, see server logs for details"}
 ```
 
+## Notification History
+
+The `/notification-history` Icinga Notifications HTTP API endpoint allows sources to retrieve a stream of
+notification attempts recorded for its objects, i.e. every time Icinga Notifications tried to notify a contact
+through a channel. Entries can be retrieved by sending a `GET` request to the endpoint. The endpoint requires a
+`since` query parameter to specify the earliest point in time to retrieve entries for.
+
+Authentication follows the same transport-specific rules as for event submission: TCP requires HTTP Basic Auth
+with username and password, while a Unix socket identifies the caller by their OS user.
+
+### Getting Notification History
+
+In order to retrieve notification history entries, send a `GET` request to the `/notification-history` endpoint
+with a `since` query parameter set to a Unix timestamp in milliseconds. Only entries whose `triggered_at` is
+greater than or equal to this value, and that belong to the requesting source, are returned. This endpoint will
+include the attributes listed below in the response for each entry:
+
+| Attribute         | Description                                                                                    |
+|-------------------|--------------------------------------------------------------------------------------------------|
+| event_id          | The hex-encoded ID of the event that triggered the notification.                                 |
+| triggered_at      | The Unix timestamp in milliseconds at which the notification attempt was made.                   |
+| contact_name      | The full name of the contact the notification was sent to.                                       |
+| contactgroup_name | The name of the contact group the contact was resolved from, if any.                             |
+| schedule_name     | The name of the on-call schedule the contact was resolved from, if any.                          |
+| channel_name      | The name of the channel used to deliver the notification.                                        |
+| incident_id       | The ID of the incident the notification belongs to, if any.                                      |
+| message           | The message that was sent to the contact, if any.                                                |
+| state             | The state of the notification attempt, either `sent` or `failed`.                                |
+| error             | An optional attribute that may be present if an error occurred while retrieving the entry.       |
+
+The following example shows how to retrieve all notification history entries recorded since
+2026-01-01T00:00:00Z (`1767225600000`):
+
+```
+$ curl -v \
+    -u 'example:insecureinsecure' \
+    'http://localhost:5680/notification-history?since=1767225600000'
+```
+```
+...
+{"event_id":"3fa85f645717456bb3fc2c963f66afa6","triggered_at":1767225654000,"contact_name":"Jane Doe","contactgroup_name":"","schedule_name":"On-Call","channel_name":"email","incident_id":42,"message":"Something went somewhere very wrong.","state":"sent"}
+```
+
+Each line is a single, compact JSON object; the example below shows the same object pretty-printed for readability:
+
+```json
+{
+  "event_id": "3fa85f645717456bb3fc2c963f66afa6",
+  "triggered_at": 1767225654000,
+  "contact_name": "Jane Doe",
+  "contactgroup_name": "",
+  "schedule_name": "On-Call",
+  "channel_name": "email",
+  "incident_id": 42,
+  "message": "Something went somewhere very wrong.",
+  "state": "sent"
+}
+```
+
+Like the `/incidents` endpoint, Icinga Notifications streams the response as a series of JSON objects, one per
+line, in [JSON Lines/NDJSON](https://jsonlines.org/) format. The general HTTP status code of the response will
+always be `202 Accepted` in the successful case, even if the response contains no entries at all. If an error
+occurs after streaming has already started, a final JSON object with the `error` attribute set is sent instead.
+
 ## API Filtering
 
 Some of the Icinga Notifications API endpoints require to explicitly specify which objects the request should be
