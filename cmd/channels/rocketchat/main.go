@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -131,16 +132,22 @@ func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 	request.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 10 * time.Second}
+	//nolint:bodyclose // False positive, drainAndClose is called in the defer statement below.
 	resp, err := client.Do(request) // #nosec G704 -- no SSRF, trusted user input
 	if err != nil {
 		return fmt.Errorf("error while sending http request to rocketchat server: %w", err)
 	}
-
-	defer func() { _ = resp.Body.Close() }()
+	defer drainAndClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(resp.Status)
 	}
 
 	return nil
+}
+
+// drainAndClose reads and discards the remaining data from the provided io.ReadCloser and then closes it.
+func drainAndClose(r io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, r)
+	_ = r.Close()
 }
