@@ -466,23 +466,27 @@ CREATE TABLE incident_history (
 
 CREATE INDEX idx_incident_history_time_type ON incident_history(time, type) COMMENT 'Incident History ordered by time/type';
 
-CREATE TABLE event_queue (
-    id binary(32) NOT NULL, -- SHA256 of JSON representation.
+CREATE TABLE job_queue (
+    id binary(32) NOT NULL, -- SHA256 of JSON representation of the envelope.
     last_update bigint NOT NULL,
-
-    json longtext NOT NULL,
-    event_time bigint NOT NULL,
-    object_id binary(32) NOT NULL, -- No foreign key, object might not exist at this point.
-
-    user_agent varchar(255) NOT NULL, -- From submitting client; allows migrations after upgrades.
     state smallint NOT NULL DEFAULT 0, -- pending (0), processing (1), done (2), or error (64).
+    envelope longtext NOT NULL,
 
-    CONSTRAINT pk_event_queue PRIMARY KEY (id)
+    CONSTRAINT pk_job_queue PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-CREATE INDEX idx_event_queue_last_update ON event_queue (last_update);
-CREATE INDEX idx_event_queue_last_update_state ON event_queue (last_update, state);
-CREATE INDEX idx_event_queue_state_object_id ON event_queue (state, object_id);
+-- These indices are used to speed up the cleanup queries by last_update and state.
+CREATE INDEX idx_job_queue_last_update ON job_queue (last_update);
+CREATE INDEX idx_job_queue_last_update_state ON job_queue (last_update, state);
+
+CREATE TABLE job_processing_lock (
+    object_id binary(32) NOT NULL, -- No foreign key, object might not exist at this point.
+    job_queue_id binary(32) NOT NULL, -- references job_queue.id
+
+    CONSTRAINT pk_job_processing_lock PRIMARY KEY (object_id),
+    CONSTRAINT fk_job_processing_lock_job_queue FOREIGN KEY (job_queue_id) REFERENCES job_queue(id),
+    CONSTRAINT uk_job_processing_lock_job_queue_id UNIQUE (job_queue_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE browser_session (
     php_session_id varchar(256) NOT NULL,
