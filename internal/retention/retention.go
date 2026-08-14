@@ -136,13 +136,16 @@ var dbPruners = []Pruner{
 			{Table: "incident_rule_escalation_state", PKorFK: "incident_id"},
 		},
 	},
-	// Extra pruners for the event_queue.
+	// Extra pruners for the job_queue.
 	&ResetPruner{
 		TimeBoundPruner: TimeBoundPruner{
 			// Events being processed too long - implies crashed daemon.
 			prunerCommon: prunerCommon{
-				Table:  "event_queue",
+				Table:  "job_queue",
 				PKorFK: "id",
+			},
+			Referrers: []ReferencingRowPruner{
+				{Table: "job_processing_lock", PKorFK: "job_queue_id"},
 			},
 			TimeColumn:                "last_update",
 			ExtraCondition:            fmt.Sprintf("state = %d", event.QueueStateProcessing),
@@ -153,7 +156,7 @@ var dbPruners = []Pruner{
 	&TimeBoundPruner{
 		// Successfully processed events.
 		prunerCommon: prunerCommon{
-			Table:  "event_queue",
+			Table:  "job_queue",
 			PKorFK: "id",
 		},
 		TimeColumn:                "last_update",
@@ -163,7 +166,7 @@ var dbPruners = []Pruner{
 	&TimeBoundPruner{
 		// Events in the error state.
 		prunerCommon: prunerCommon{
-			Table:  "event_queue",
+			Table:  "job_queue",
 			PKorFK: "id",
 		},
 		TimeColumn:                "last_update",
