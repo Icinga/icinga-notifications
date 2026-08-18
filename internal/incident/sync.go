@@ -98,6 +98,60 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 	return err
 }
 
+// addRecipient adds a recipient to the incident's recipients list and upserts a corresponding ContactRow in the database.
+//
+// If the recipient already exists in the incident's recipients list, their role is updated to the new role and a
+// history entry is created to record the change. If the recipient does not exist, they are added to the list with
+// the specified role and a new ContactRow is inserted.
+func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Recipient, role ContactRole) error {
+	recipientKey := recipient.ToKey(r)
+	state, exists := i.Recipients[recipientKey]
+	if exists && state.Role == role {
+		return nil // The recipient already has the desired role, so no changes are needed.
+	}
+
+	if !exists {
+		i.Recipients[recipientKey] = RecipientState{Role: role, IsNew: true}
+	} else {
+		if err := i.recordRecipientRoleChange(ctx, tx, r, state.Role, role); err != nil {
+			return err
+		}
+		state.Role = role
+		i.Recipients[recipientKey] = state
+	}
+
+	cr := &ContactRow{IncidentID: i.Id, Key: recipientKey, Role: role, ChangedAt: types.UnixMilli(time.Now())}
+	stmt, _ := i.db.BuildUpsertStmt(cr, "id")
+	if _, err := tx.NamedExecContext(ctx, stmt, cr); err != nil {
+		return fmt.Errorf("failed to upsert contact: %w", err)
+	}
+	return nil
+}
+
+// recordRecipientRoleChange records a recipient role change in the incident's history table.
+func (i *Incident) recordRecipientRoleChange(ctx context.Context, tx *sqlx.Tx, r recipient.Recipient, oldR, newR ContactRole) error {
+	i.logger.Infof("Changing contact %q role from %s to %s", r, oldR.String(), newR.String())
+
+	hr := &HistoryRow{
+		IncidentID:       i.Id,
+		Key:              recipient.ToKey(r),
+		Time:             types.UnixMilli(time.Now()),
+		Type:             RecipientRoleChanged,
+		NewRecipientRole: newR,
+		OldRecipientRole: oldR,
+	}
+
+	if err := hr.Sync(ctx, i.db, tx); err != nil {
+		i.logger.Errorw("Failed to insert incident recipient role change history",
+			zap.Stringer("contact", r),
+			zap.String("old_role", oldR.String()),
+			zap.String("new_role", newR.String()),
+			zap.Error(err))
+		return err
+	}
+	return nil
+}
+
 // generateNotifications generates incident notification histories of the given recipients.
 //
 // This function will just insert NotificationStateSuppressed incident histories and return an empty slice if

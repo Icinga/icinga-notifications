@@ -4,17 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
+	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
+	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/testutils"
 	"github.com/jmoiron/sqlx"
@@ -260,6 +264,127 @@ func TestIncidents(t *testing.T) {
 		require.Nil(t, i)
 	})
 
+	t.Run("QuickAction", func(t *testing.T) {
+		t.Parallel()
+
+		// filter is used to deleted only tuples created by this test case for the tables listed below in the cleanup.
+		filter := map[string]string{"available_channel_type": "type = 'qa-dummy'"}
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			tablesToCleanup := []string{
+				"incident_history",
+				"incident_contact",
+				"incident",
+				"contact",
+				"channel",
+				"available_channel_type",
+			}
+			for _, table := range tablesToCleanup {
+				_, err := db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE %s`, table, filter[table]))
+				require.NoErrorf(t, err, "failed to clean up table %s", table)
+			}
+		})
+
+		actInsertStmt := `INSERT INTO available_channel_type (type, name, version, author, config_attrs) VALUES (?, ?, ?, ?, ?)`
+		_, err := db.ExecContext(t.Context(), db.Rebind(actInsertStmt), "qa-dummy", "quick action", "1.0", "Incident QA", `{}`)
+		require.NoError(t, err)
+
+		ch := &channel.Channel{
+			Name:         "qa-dummy",
+			Type:         "qa-dummy",
+			Config:       `{}`,
+			ExternalUuid: types.UUID{UUID: uuid.New()},
+
+			Logger: logs.GetChildLogger("channel").SugaredLogger,
+		}
+		ch.Deleted = types.MakeBool(false)
+		ch.ChangedAt = types.UnixMilli(time.Now())
+
+		channelID, err := database.InsertObtainID(t.Context(), db, database.BuildInsertStmtWithout(db, ch, "id"), ch)
+		require.NoError(t, err)
+		filter["channel"] = fmt.Sprintf("id=%d", channelID)
+		filter["contact"] = fmt.Sprintf("default_channel_id=%d", channelID)
+
+		reloadRelated := func(t *testing.T, i *Incident) *Incident {
+			reloaded := reloadIncident(t, db, i)
+			err := db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
+				return reloaded.restoreRelatedState(ctx, tx)
+			})
+			require.NoError(t, err)
+			return reloaded
+		}
+
+		qaRuntimeConfig := config.NewRuntimeConfig(logs, db)
+		ev := makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityWarning), withMsg("Something went wrong!"))
+		i := makeIncident(db, logs, qaRuntimeConfig, t, ev)
+		filter["incident"] = fmt.Sprintf("id=%d", i.ID())
+		filter["incident_history"] = fmt.Sprintf("incident_id=%d", i.ID())
+		filter["incident_contact"] = fmt.Sprintf("incident_id=%d", i.ID())
+
+		for _, action := range []event.Action{event.ActionSubscribe, event.ActionManage} {
+			var contact *recipient.Contact
+			if action == event.ActionManage {
+				contact = makeContact(t, db, "Thomas A. Anderson", "Neo", channelID)
+			} else {
+				contact = makeContact(t, db, "Agent Smith", "smith", channelID)
+			}
+
+			qa := &event.QuickAction{
+				Kind:       action,
+				ContactID:  contact.ID,
+				ObjectTags: ev.Tags,
+				SourceID:   source.ID, // TODO(yh): this must be dropped before merging!.
+			}
+
+			// Recipient is not yet known to the runtime config, so nothing should happen here.
+			require.NoError(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+			i = reloadRelated(t, i)
+			assert.Len(t, i.Recipients, 0)
+
+			require.NoError(t, qaRuntimeConfig.UpdateFromDatabase(t.Context())) // publish recipient to the runtime config.
+			require.NotNil(t, qaRuntimeConfig.GetRecipient(recipient.ToKey(contact)))
+
+			require.NoError(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+			i = reloadRelated(t, i)
+			assert.Len(t, i.Recipients, 1)
+			if action == event.ActionManage {
+				assert.True(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(contact)].Role, RoleManager)
+
+				qa.Kind = event.ActionUnmanage
+			} else {
+				assert.False(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(contact)].Role, RoleSubscriber)
+
+				qa.Kind = event.ActionUnsubscribe
+			}
+
+			// Now, unsubscribe/unmanage the recipient from that very same incident.
+			require.NoError(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+			i = reloadRelated(t, i)
+			if action == event.ActionManage { // Managers get first demoted to subscribers.
+				assert.False(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(contact)].Role, RoleSubscriber)
+
+				// Cannot unmanage an incident that doesn't have a manager.
+				require.Error(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+				assert.Equal(t, i.Recipients[recipient.ToKey(contact)].Role, RoleSubscriber)
+
+				qa.Kind = event.ActionUnsubscribe
+				require.NoError(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+				i = reloadRelated(t, i)
+			}
+			assert.Len(t, i.Recipients, 0)
+
+			// Unsubscribing an already unsubscribed contact makes no sense, so it should fail.
+			require.Error(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+			assert.Len(t, i.Recipients, 0)
+			i = reloadRelated(t, i)
+		}
+	})
+
 	t.Run("Time-Based Escalation", func(t *testing.T) {
 		t.Parallel()
 
@@ -445,6 +570,23 @@ func mustIncidentObject(t *testing.T, i *Incident) *object.Object {
 	obj, err := i.Object(t.Context())
 	require.NoError(t, err)
 	return obj
+}
+
+// makeContact generates a fully initialized contact based on the provided args, sync it to the database and returns it.
+func makeContact(t *testing.T, db *database.DB, fullName, username string, channelID int64) *recipient.Contact {
+	contact := &recipient.Contact{
+		FullName:         fullName,
+		Username:         types.MakeString(username),
+		DefaultChannelID: channelID,
+		ExternalUuid:     types.UUID{UUID: uuid.New()},
+	}
+	contact.Deleted = types.MakeBool(false)
+	contact.ChangedAt = types.UnixMilli(time.Now())
+
+	contactID, err := database.InsertObtainID(t.Context(), db, database.BuildInsertStmtWithout(db, contact, "id"), contact)
+	require.NoError(t, err)
+	contact.ID = contactID
+	return contact
 }
 
 // makeEvent returns a fully initialized event based on the given parameters.

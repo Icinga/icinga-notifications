@@ -143,6 +143,9 @@ func run() int {
 				}
 				return err
 			},
+			QuickAction: func(ctx context.Context, qa *event.QuickAction) error {
+				return incident.Process(ctx, db, logs, runtimeConfig, qa)
+			},
 		}
 
 		if err := event.ProcessQueue(ctx, db, logger, cbs); err != nil && !errors.Is(err, context.Canceled) {
