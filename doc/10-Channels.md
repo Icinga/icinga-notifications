@@ -120,9 +120,14 @@ Examples:
 
 Currently, Icinga Notifications provides the following methods for channel plugins to call:
 
-| Method       | Description                                             |
-|--------------|---------------------------------------------------------|
-| channel::Log | Logs a message to Icinga Notifications' logging system. |
+| Method               | Description                                                         |
+|----------------------|---------------------------------------------------------------------|
+| channel::Log         | Logs a message to Icinga Notifications' logging system.             |
+| channel::UpsertState | Upserts a channel plugin state in Icinga Notifications' database.   |
+| channel::DeleteState | Deletes a channel plugin state from Icinga Notifications' database. |
+
+Channel plugins can make use of these methods by sending their own JSON-RPC requests to Icinga Notifications.
+Each of these methods is described in detail below, including the expected request and response formats.
 
 #### Log
 
@@ -164,6 +169,103 @@ This request will result in a log message in Icinga Notifications' logging syste
 
 Icinga Notifications will also log the channel's `id` and `name`, as well as the process ID of the channel plugin
 process, which can be useful for debugging purposes.
+
+#### UpsertState
+
+The `channel::UpsertState` method allows channel plugins to [upsert their state](#channel-state) in
+Icinga Notifications' database. The request's `params` field must be an array of JSON objects, where each object
+is a [`State`](https://pkg.go.dev/github.com/icinga/icinga-go-library/notifications/plugin#State) entry with the
+fields described in the [Channel State](#channel-state) section. The request's `id` field must be set, as
+Icinga Notifications will respond with a success or error message to each individual request. An example request for
+upserting a channel plugin state is shown below:
+
+```json
+{
+  "id": 101,
+  "jsonrpc": "2.0",
+  "method": "channel::UpsertState",
+  "params": [
+    {
+      "state_key": "john@doe.com.#12345",
+      "value": "{\"last_message_id\": \"<bb7364a5-8f24-4b6a-a2d8-4658f42cd5cd-sender@example.com>\"}"
+    },
+    {
+      "state_key": "john.doe@example.com.#12346",
+      "value": "{\"last_message_id\": \"<2e9dd0b2-9555-4627-871e-c8696e742486-sender@example.com>\"}"
+    }
+  ]
+}
+```
+
+This is an example request of the `email` channel plugin, which upserts two state entries for two different email
+addresses, so that the next time a notification about the same incident is sent to the same email address, the channel
+plugin can use the `last_message_id` to set the `In-Reply-To` and `References` headers in the email, so that
+the email client can group the emails together in a thread. Such a state is not necessary for all channel plugins, but
+can be useful for some, such as email or chat channels that support threading of messages or other forms of stateful
+communication. Icinga Notifications will respond with the following JSON-RPC response to the above request:
+
+```json
+{
+  "id": 101,
+  "jsonrpc": "2.0",
+  "result": null
+}
+```
+
+And here is an example of an error response, if the channel plugin tries to upsert a state with a key that is too long:
+
+```json
+{
+  "id": 102,
+  "jsonrpc":"2.0",
+  "error": {
+    "code": -32602,
+    "message": "invalid state key, must be non-empty and at most 255 chars, \"xxxxxxx<...>\" given"
+  }
+}
+```
+
+#### DeleteState
+
+Similar to the `channel::UpsertState` method, the `channel::DeleteState` method allows channel plugins to delete
+their state from Icinga Notifications' database. The request format is quite similar to the [`channel::UpsertState`](#upsertstate)
+method except that the state entries are allowed to have only the `state_key` field set, as the `value` field is not
+needed for deletion. This means that the `value` field is optional and can be omitted entirely, as shown in the example
+request below:
+
+```json
+{
+  "id": 103,
+  "jsonrpc": "2.0",
+  "method": "channel::DeleteState",
+  "params": [
+    {
+      "state_key": "john@doe.com.#12345"
+    },
+    {
+      "state_key": "john.doe@example.com.#12346"
+    }
+  ]
+}
+```
+
+Icinga Notifications will then delete the state entries matching the provided keys and the channel plugin ID the request
+was received from, and respond with the following JSON-RPC response:
+
+```json
+{
+  "id": 103,
+  "jsonrpc": "2.0",
+  "result": null
+}
+```
+
+That way, the channel plugin can clean up its state when it is no longer needed, for example, when an incident is
+resolved and the channel plugin no longer needs to keep track of the last message sent for that incident.
+Since Icinga Notifications will always include the channel plugin ID as an additional filter when deleting state
+entries, the channel plugin does not need to worry about accidentally deleting state entries from other channel plugins
+that may have the same state key, as the combination of the channel plugin ID and the state key is guaranteed to be
+unique in the database.
 
 ### RPC Methods
 
@@ -376,6 +478,38 @@ Notifications will not restart the process on every configuration change, unless
 if the channel plugin config changes at runtime, Icinga Notifications will call `SetConfig` again with the new config
 except when the channel plugin type has changed to a different one, in which case the old channel plugin process will
 be stopped and a new one will be started.
+
+### Channel State
+
+Channel plugins can store their state in Icinga Notifications' database using the [`channel::UpsertState`](#upsertstate)
+method. This allows channel plugins to persist their state across restarts, which can be useful for scenarios where the
+channel plugin needs to maintain information about previously sent notifications or other relevant data. The state is
+stored as key-value pairs in combination with the channel plugin's database unique identifier known only to Icinga
+Notifications. Each key-value pairs is represented by the
+[`State` type](https://pkg.go.dev/github.com/icinga/icinga-go-library/notifications/plugin#State) and contains
+the following fields:
+
+| Field     | Type   | Description                                                 |
+|-----------|--------|-------------------------------------------------------------|
+| state_key | String | **Required.** The key of a specific state to upsert.        |
+| value     | String | **Required.** The value corresponding to the key to upsert. |
+
+The state key must be unique for each channel plugin, meaning that two different channel plugins can have the same
+state key, but a single channel plugin cannot have two different values for the same state key. It must also be at
+least 1 character and at most 255 characters long. Likewise, the state value must be at least 1 character and at most
+4096 characters long. Any state key or value that does not meet these requirements will result in an error response
+from Icinga Notifications.
+
+Every time Icinga Notifications calls the `SendNotification` method, it will also pass the channel plugin's
+current state as part of the [`NotificationRequest`](https://pkg.go.dev/github.com/icinga/icinga-go-library/notifications/plugin#NotificationRequest).
+So, the channel plugin doesn't need to call any additional methods to retrieve its state, as it is already provided
+with each request. This simplifies the state management in a HA setup, as both channel plugin processes will share the
+same state, and also mutate it in a consistent manner. If the channel plugin needs to insert a new state or update an
+existing one, it can call the [`channel::UpsertState`](#upsertstate) method with the new key-value pair. Otherwise, if
+the channel plugin no longer needs a specific state, it should call the [`channel::DeleteState`](#deletestate) method
+with a list of state keys to delete. If the plugin does not delete its orphaned state, it will remain in the database
+until the channel plugin is deleted via Icinga Notifications Web. Therefore, it is recommended to delete any state that
+is no longer needed to avoid cluttering the database with unused data.
 
 ## Writing Channel Plugins
 

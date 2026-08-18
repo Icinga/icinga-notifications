@@ -2,9 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/mail"
 	"sync"
@@ -12,6 +17,8 @@ import (
 	"github.com/emersion/go-sasl"
 	"github.com/emersion/go-smtp"
 	"github.com/google/uuid"
+	"github.com/icinga/icinga-go-library/notifications"
+	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal"
@@ -38,6 +45,31 @@ type Email struct {
 	Encryption string `json:"encryption"`
 
 	mu sync.Mutex // Protects access to the above fields.
+
+	// rpcCtx and rpcEp are used to make RPC calls back to Icinga Notifications.
+	rpcCtx context.Context
+	rpcEp  *jsonrpc.Endpoint
+}
+
+// state represents the state of the Email channel, including the last message ID sent to a recipient.
+//
+// It is used to track the state of notifications sent to a specific recipient and incident combination.
+type state struct {
+	LastMessageID string `json:"last_message_id"`
+}
+
+func (s state) String() string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// ReceiveEndpoint implements the [plugin.RPCEndpointReceiver] interface.
+func (ch *Email) ReceiveEndpoint(ctx context.Context, ep *jsonrpc.Endpoint) {
+	ch.rpcCtx = ctx
+	ch.rpcEp = ep
 }
 
 func (ch *Email) GetInfo() *plugin.Info {
@@ -156,29 +188,61 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
-	var to []mail.Address
+	var to *mail.Address
 	for _, address := range req.Contact.Addresses {
 		if address.Type == "email" {
-			to = append(to, mail.Address{Name: req.Contact.FullName, Address: address.Address})
+			to = &mail.Address{Name: req.Contact.FullName, Address: address.Address}
+			break
 		}
 	}
 
-	if len(to) == 0 {
+	if to == nil {
 		return fmt.Errorf("contact user %s does not have an e-mail address", req.Contact.FullName)
 	}
 
 	var msg bytes.Buffer
 	plugin.FormatMessage(&msg, req)
 
+	compositeKey := makeStateKey(to, req.Incident)
+
 	ch.mu.Lock()
+	messageID := fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail)
 	b := enmime.Builder().
-		ToAddrs(to).
+		ToAddrs([]mail.Address{*to}).
 		From(ch.SenderName, ch.SenderMail).
 		Subject(plugin.FormatSubject(req)).
-		Header("Message-Id", fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail))
+		Header("Message-Id", messageID)
 	ch.mu.Unlock()
 
-	return b.Text(msg.Bytes()).Send(ch)
+	for _, ss := range req.States {
+		if ss.Key != compositeKey {
+			continue
+		}
+		var s state
+		if err := json.Unmarshal([]byte(ss.Value), &s); err != nil {
+			return err
+		}
+		b = b.Header("In-Reply-To", s.LastMessageID).Header("References", s.LastMessageID)
+	}
+
+	if err := b.Text(msg.Bytes()).Send(ch); err != nil {
+		return err
+	}
+
+	if req.Incident != nil && req.Incident.IsRecovered {
+		if err := ch.rpcEp.Call(ch.rpcCtx, notifications.MethodDeleteState, []plugin.State{{Key: compositeKey}}, nil); err != nil {
+			slog.ErrorContext(ch.rpcCtx, "Failed to delete channel state", "error", err)
+		}
+	} else if req.Incident != nil {
+		ss := []plugin.State{
+			{Key: compositeKey, Value: state{LastMessageID: messageID}.String()},
+		}
+		if err := ch.rpcEp.Call(ch.rpcCtx, notifications.MethodUpsertState, ss, nil); err != nil {
+			slog.ErrorContext(ch.rpcCtx, "Failed to upsert channel state", "error", err)
+		}
+	}
+
+	return nil
 }
 
 // Send implements the enmime.Sender interface.
@@ -221,4 +285,19 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	}
 
 	return client.Quit()
+}
+
+// makeStateKey composes a unique key for the channel state based on the recipient's email address and the incident ID.
+func makeStateKey(to *mail.Address, i *plugin.Incident) string {
+	if i == nil {
+		return ""
+	}
+	h := sha256.New()
+	if err := binary.Write(h, binary.BigEndian, i.Id); err != nil {
+		return ""
+	}
+	if err := binary.Write(h, binary.BigEndian, []byte(to.Address)); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
