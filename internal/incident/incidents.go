@@ -46,17 +46,6 @@ func ReevaluateEscalations(
 	return stderrors.Join(errs...)
 }
 
-// ProcessEvent from an event.Event.
-//
-// It might return [ErrOpenIncidentWithoutSeverity] if the event is trying to open an incident without a severity or
-// [ErrSeverityChangeWithoutIncidentFlag] if the event is trying to change the severity of an incident without the
-// incident flag set. In both cases, the listener should map these errors to a 400 Bad Request response to the source.
-func ProcessEvent(ctx context.Context, db *database.DB, l *logging.Logging, rc *config.RuntimeConfig, ev *event.Event) error {
-	i := new(Incident)
-	i.initializeFields(db, rc, l.GetChildLogger("incident").SugaredLogger)
-	return i.ProcessEvent(ctx, ev)
-}
-
 // Process processes an [event.Event] or [event.QuickAction] and updates the incident state accordingly.
 //
 // If [event.Event] is provided, it might return [ErrOpenIncidentWithoutSeverity] if the event is trying to open
