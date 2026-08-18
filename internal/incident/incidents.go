@@ -84,7 +84,8 @@ func YieldForSource(
 	query := `
 		SELECT "incident".* FROM "incident"
 		JOIN "object" ON "incident"."object_id" = "object"."id"
-		WHERE "incident"."recovered_at" IS NULL AND "object"."source_id" = ?`
+		JOIN "object_source" ON "object"."id" = "object_source"."object_id" AND "object_source"."source_id" = ?
+		WHERE "incident"."recovered_at" IS NULL`
 	return yield(ctx, db, l.GetChildLogger("incident"), rc, false, query, srcID)
 }
 

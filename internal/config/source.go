@@ -3,7 +3,8 @@ package config
 import (
 	"crypto/subtle"
 	"fmt"
-	"slices"
+	"iter"
+	"maps"
 	"sync"
 
 	"github.com/icinga/icinga-go-library/types"
@@ -30,7 +31,7 @@ type Source struct {
 	// Each of these IDs corresponds to a rule in the [ConfigSet.Rules] map and is used to quickly access
 	// the rules for a specific source without iterating over all rules. It is not stored in the database,
 	// but is updated when applying pending rules in [RuntimeConfig.applyPendingRules].
-	ruleIDs []int64
+	ruleIDs map[int64]struct{}
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
@@ -81,16 +82,19 @@ func (source *Source) PasswordCompare(password []byte) error {
 }
 
 // RuleIDs returns the list of rule IDs belonging to this source.
-func (source *Source) RuleIDs() []int64 { return source.ruleIDs }
+func (source *Source) RuleIDs() iter.Seq[int64] { return maps.Keys(source.ruleIDs) }
 
 // appendRuleID adds a rule ID to the list of rule IDs belonging to this source.
 func (source *Source) appendRuleID(ruleID int64) {
-	source.ruleIDs = append(source.ruleIDs, ruleID)
+	if source.ruleIDs == nil {
+		source.ruleIDs = make(map[int64]struct{})
+	}
+	source.ruleIDs[ruleID] = struct{}{}
 }
 
 // deleteRuleID removes a rule ID from the list of rule IDs belonging to this source.
 func (source *Source) deleteRuleID(ruleID int64) {
-	source.ruleIDs = slices.DeleteFunc(source.ruleIDs, func(id int64) bool { return id == ruleID })
+	delete(source.ruleIDs, ruleID)
 }
 
 // applyPendingSources synchronizes changed sources.
@@ -102,7 +106,7 @@ func (r *RuntimeConfig) applyPendingSources() {
 			// When the event rules are loaded before the sources, the rule IDs are not yet added to the
 			// per-source rules cache. We need to add them here to make sure the cache is correct.
 			for _, rule := range r.Rules {
-				if rule.SourceID == newElement.ID {
+				if rule.SourceType == newElement.Type {
 					newElement.appendRuleID(rule.ID)
 				}
 			}
