@@ -1,11 +1,9 @@
 package object
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -88,25 +86,6 @@ func (o *Object) DisplayName() string {
 		panic(err)
 	}
 	return string(j)
-}
-
-func (o *Object) String() string {
-	var b bytes.Buffer
-	_, _ = fmt.Fprintf(&b, "Object:\n")
-	_, _ = fmt.Fprintf(&b, "  ID: %s\n", hex.EncodeToString(o.ID[:]))
-	for tag, value := range o.Tags {
-		_, _ = fmt.Fprintf(&b, "    %q", tag)
-		if value != "" {
-			_, _ = fmt.Fprintf(&b, " = %q", value)
-		}
-		_, _ = fmt.Fprintf(&b, "\n")
-	}
-
-	_, _ = fmt.Fprintf(&b, "    Source %d:\n", o.SourceID)
-	_, _ = fmt.Fprintf(&b, "    Name: %q\n", o.Name)
-	_, _ = fmt.Fprintf(&b, "    URL: %q\n", o.URL.String)
-
-	return b.String()
 }
 
 // ID generates a stable identifier based on a source ID and tags.
