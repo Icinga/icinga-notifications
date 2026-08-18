@@ -19,6 +19,9 @@ const (
 	// EnvelopeFmtEvent indicates that the payload is a JSON representation of an event.Event.
 	EnvelopeFmtEvent // event
 
+	// EnvelopeFmtQA indicates that the payload is a JSON representation of an event.QuickAction.
+	EnvelopeFmtQA // quick_action
+
 	envelopeFmtMax // internal
 )
 
@@ -29,6 +32,11 @@ const (
 	// Nodes with newer envelope versions are guaranteed to be compatible with older versions, but nodes with older
 	// envelope versions may not be able to process events from newer versions.
 	EnvelopeEventVersion = 1
+
+	// EnvelopeQAVersion defines the version of the quick action envelope format supported by this node.
+	//
+	// The comments for EnvelopeEventVersion apply here as well.
+	EnvelopeQAVersion = 1
 )
 
 // Envelope stores metadata about the payload it embodies, such as its version and format.

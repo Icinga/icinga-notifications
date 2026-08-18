@@ -74,6 +74,9 @@ func TestIncidents(t *testing.T) {
 	contact.ChangedAt = types.UnixMilli(time.Now())
 	contact.Deleted = types.MakeBool(false)
 
+	incidentManager := makeContact(t, db, "Thomas A. Anderson", "neo", ch.ID)
+	incidentSubscriber := makeContact(t, db, "Agent Smith", "smith", ch.ID)
+
 	basicRule := &rule.Rule{Name: "escalation test rule", SourceType: source.Type}
 	basicRule.ChangedAt = source.ChangedAt
 	basicRule.Deleted = source.Deleted
@@ -311,6 +314,77 @@ func TestIncidents(t *testing.T) {
 		require.Nil(t, i)
 	})
 
+	t.Run("QuickAction", func(t *testing.T) {
+		t.Parallel()
+
+		reloadRelated := func(t *testing.T, i *Incident) *Incident {
+			reloaded := reloadIncident(t, db, i)
+			err := db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
+				return reloaded.restoreRelatedState(ctx, tx)
+			})
+			require.NoError(t, err)
+			return reloaded
+		}
+
+		ev := makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityWarning), withMsg("Something went wrong!"))
+		i := makeIncident(db, logs, runtimeConfig, t, ev)
+
+		for _, action := range []event.Action{event.ActionSubscribe, event.ActionManage} {
+			qa := &event.QuickAction{Kind: action, ContactID: makeContact(t, db, "Unknown", "unknown"+action.String(), ch.ID).ID, ObjectTags: ev.Tags}
+
+			// Recipient is not yet known to the runtime config, so nothing should happen here.
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+			i = reloadRelated(t, i)
+			assert.Len(t, i.Recipients, 1)
+			assert.Equal(t, i.Recipients[recipient.ToKey(&contact)].Role, recipient.RoleRecipient)
+			assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleNone)
+			assert.Equal(t, i.Recipients[recipient.ToKey(incidentSubscriber)].Role, recipient.RoleNone)
+
+			if action == event.ActionManage {
+				qa.ContactID = incidentManager.ID
+			} else {
+				qa.ContactID = incidentSubscriber.ID
+			}
+
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+			i = reloadRelated(t, i)
+			assert.Len(t, i.Recipients, 2)
+			if action == event.ActionManage {
+				assert.True(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleManager)
+
+				qa.Kind = event.ActionUnmanage
+			} else {
+				assert.False(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentSubscriber)].Role, recipient.RoleSubscriber)
+
+				qa.Kind = event.ActionUnsubscribe
+			}
+
+			// Now, unsubscribe/unmanage the recipient from that very same incident.
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+			i = reloadRelated(t, i)
+			if action == event.ActionManage { // Managers get first demoted to subscribers.
+				assert.False(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleSubscriber)
+
+				// Cannot unmanage an incident that doesn't have a manager.
+				require.Error(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleSubscriber)
+
+				qa.Kind = event.ActionUnsubscribe
+				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+				i = reloadRelated(t, i)
+			}
+			assert.Len(t, i.Recipients, 1)
+
+			// Unsubscribing an already unsubscribed contact makes no sense, so it should fail.
+			require.Error(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+			assert.Len(t, i.Recipients, 1)
+			i = reloadRelated(t, i)
+		}
+	})
+
 	t.Run("Time-Based Escalation", func(t *testing.T) {
 		t.Parallel()
 
@@ -535,6 +609,23 @@ func mustIncidentObject(t *testing.T, i *Incident) *object.Object {
 	obj, err := i.Object(t.Context())
 	require.NoError(t, err)
 	return obj
+}
+
+// makeContact generates a fully initialized contact based on the provided args, sync it to the database and returns it.
+func makeContact(t *testing.T, db *database.DB, fullName, username string, channelID int64) *recipient.Contact {
+	contact := &recipient.Contact{
+		FullName:         fullName,
+		Username:         types.MakeString(username),
+		DefaultChannelID: channelID,
+		ExternalUUID:     types.MakeUUID(uuid.New()),
+	}
+	contact.Deleted = types.MakeBool(false)
+	contact.ChangedAt = types.UnixMilli(time.Now())
+
+	contactID, err := database.InsertObtainID(t.Context(), db, database.BuildInsertStmtWithout(db, contact, "id"), contact)
+	require.NoError(t, err)
+	contact.ID = contactID
+	return contact
 }
 
 // makeEvent returns a fully initialized event based on the given parameters.
