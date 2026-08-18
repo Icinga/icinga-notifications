@@ -464,7 +464,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	err := event.Enqueue(ctx, l.db, &ev, object.ID(ev.SourceId, ev.Tags))
+	err := event.Enqueue(ctx, l.db, &ev, object.ID(ev.Tags))
 	if err != nil {
 		l.logger.Errorw("Failed to enqueue event into event queue",
 			zap.String("source", src.Name),

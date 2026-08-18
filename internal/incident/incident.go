@@ -131,7 +131,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	i.ObjectID = object.ID(ev.SourceId, ev.Tags)
+	i.ObjectID = object.ID(ev.Tags)
 	if err := i.RestoreState(ctx, tx, true); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		i.logger.Errorw("Failed to restore incident row from the database", zap.Error(err))
 		return fmt.Errorf("cannot restore incident state: %w", err)
@@ -478,6 +478,13 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 			r, ok := i.runtimeConfig.Rules[id]
 			if !ok {
 				i.logger.Errorw("BUG: source references unknown event rule", zap.Object("source", src))
+				continue
+			}
+
+			if r.SourceType != src.Type {
+				i.logger.Errorw("BUG: source references event rule with mismatching source type",
+					zap.Object("source", src),
+					zap.Object("rule", r))
 				continue
 			}
 

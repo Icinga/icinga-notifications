@@ -3,6 +3,7 @@ package rule
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
@@ -10,7 +11,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"go.uber.org/zap/zapcore"
-	"time"
 )
 
 type Rule struct {
@@ -19,9 +19,9 @@ type Rule struct {
 	Name             string                 `db:"name"`
 	TimePeriod       *timeperiod.TimePeriod `db:"-"`
 	TimePeriodID     types.Int              `db:"timeperiod_id"`
-	SourceID         int64                  `db:"source_id"`
 	ObjectFilter     filter.Filter          `db:"-"`
 	ObjectFilterExpr types.String           `db:"object_filter"`
+	SourceType       string                 `db:"source_type"`
 	Escalations      map[int64]*Escalation  `db:"-"`
 
 	// FilterColumns is a set of all filter columns used in the rule's ObjectFilter.
@@ -67,7 +67,7 @@ func (r *Rule) IncrementalInitAndValidate() error {
 func (r *Rule) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("id", r.ID)
 	encoder.AddString("name", r.Name)
-	encoder.AddInt64("source_id", r.SourceID)
+	encoder.AddString("source_type", r.SourceType)
 
 	if r.TimePeriodID.Valid && r.TimePeriodID.Int64 != 0 {
 		encoder.AddInt64("timeperiod_id", r.TimePeriodID.Int64)
