@@ -9,6 +9,7 @@ import (
 
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -102,7 +103,7 @@ func (i *Incident) HasManager() bool {
 			i.logger.Debugw("Incident refers unknown recipient key, might got deleted", zap.Inline(recipientKey))
 			continue
 		}
-		if state.Role == RoleManager {
+		if state.Role == recipient.RoleManager {
 			return true
 		}
 	}
@@ -114,12 +115,12 @@ func (i *Incident) HasManager() bool {
 //
 // For a managed incident, only managers and subscribers should be notified, for unmanaged incidents,
 // regular recipients are notified as well.
-func (i *Incident) IsNotifiable(role ContactRole) bool {
+func (i *Incident) IsNotifiable(role recipient.ContactRole) bool {
 	if !i.HasManager() {
 		return true
 	}
 
-	return role > RoleRecipient
+	return role > recipient.RoleRecipient
 }
 
 // ProcessEvent processes the given event for the current incident in an own transaction.
@@ -376,6 +377,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 			NewSeverity: ev.Severity,
 			OldSeverity: i.Severity,
 			Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
+			EventID:     types.MakeNullableUUID(ev.ID, types.TransformNilUUIDToNull),
 		}
 
 		if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -406,6 +408,7 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 		Time:        types.UnixMilli(ev.Time),
 		NewSeverity: i.Severity,
 		Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
+		EventID:     types.MakeNullableUUID(ev.ID, types.TransformNilUUIDToNull),
 	}
 
 	if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -435,6 +438,7 @@ func (i *Incident) handleUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.Even
 		Time:       types.UnixMilli(time.Now()),
 		Type:       Unmuted,
 		Message:    types.MakeString(ev.MutedReason, types.TransformEmptyStringToNull),
+		EventID:    types.MakeNullableUUID(ev.ID, types.TransformNilUUIDToNull),
 	}
 	return hr.Sync(ctx, i.db, tx)
 }
@@ -457,6 +461,7 @@ func (i *Incident) handleMute(ctx context.Context, tx *sqlx.Tx, ev *event.Event)
 		Time:       types.UnixMilli(time.Now()),
 		Type:       Muted,
 		Message:    i.MuteReason,
+		EventID:    types.MakeNullableUUID(ev.ID, types.TransformNilUUIDToNull),
 	}
 	return hr.Sync(ctx, i.db, tx)
 }
@@ -643,12 +648,31 @@ func (i *Incident) notifyContacts(
 
 		err := i.notifyContact(obj, contact, ev, ch)
 		if err != nil {
-			notification.State = NotificationStateFailed
+			notification.State = source.NotificationStateFailed
 		} else {
-			notification.State = NotificationStateSent
+			notification.State = source.NotificationStateSent
 		}
 
 		notification.SentAt = types.UnixMilli(time.Now())
+
+		notificationHistoryUpdateRow := &NotificationHistoryUpdate{
+			IncidentHistoryID: notification.HistoryRowID,
+			State:             notification.State,
+			TriggeredAt:       notification.SentAt,
+		}
+		stmtNotificationHistory, _ := i.db.BuildUpdateStmt(notificationHistoryUpdateRow)
+		if result, err := i.db.NamedExecContext(ctx, stmtNotificationHistory, notificationHistoryUpdateRow); err != nil {
+			i.logger.Errorw(
+				"Failed to update state and time of notification history", zap.String("contact", contactName),
+				zap.Error(err),
+			)
+		} else if rowsAffected, _ := result.RowsAffected(); rowsAffected == 0 {
+			i.logger.Debugw(
+				"Failed to update state and time of notification history, no rows affected",
+				zap.String("contact", contactName),
+			)
+		}
+
 		stmt, _ := i.db.BuildUpdateStmt(notification)
 		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
 			i.logger.Errorw(
@@ -716,8 +740,11 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 
 				for _, contact := range contacts {
 					if contactChs[contact] == nil {
-						contactChs[contact] = make(map[int64]bool)
-						contactChs[contact][contact.DefaultChannelID] = true
+						// The zero value origin denotes a recipient without rule involvement.
+						contactChs[contact] = make(map[int64][]rule.ChannelOrigin)
+						contactChs[contact][contact.DefaultChannelID] = []rule.ChannelOrigin{{
+							Role: state.Role,
+						}}
 					}
 				}
 			} else {
@@ -820,7 +847,7 @@ func (e *EscalationState) TableName() string {
 }
 
 type RecipientState struct {
-	Role ContactRole
+	Role recipient.ContactRole
 }
 
 var (

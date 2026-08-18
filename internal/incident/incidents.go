@@ -33,11 +33,25 @@ func ReevaluateEscalations(
 	pairCh, errCh := yield(ctx, db, logger, runtimeConfig, false, query, types.UnixMilli(time.Now()))
 	var errs []error
 	for pair := range pairCh {
-		err := pair.Incident.RetriggerEscalations(ctx, pair.Object, &event.Event{
-			Time:  time.Now(),
-			Event: baseEv.Event{Incident: types.MakeBool(true)},
-		})
+		eventIDQuery := `
+			SELECT "event_id" FROM "incident_history"
+			WHERE event_id IS NOT NULL AND incident_id = ?
+			ORDER BY "time" DESC LIMIT 1`
+
+		var eventID types.UUID
+
+		if err := db.GetContext(ctx, &eventID, db.Rebind(eventIDQuery), pair.Incident.Id); err != nil {
+			errs = append(errs, fmt.Errorf("cannot fetch last event ID for incident %s: %w", pair.Incident, err))
+			continue
+		}
+
+		ev, err := event.CreateEvent(pair.Object.SourceID, baseEv.Event{ID: eventID, Incident: types.MakeBool(true)})
 		if err != nil {
+			errs = append(errs, fmt.Errorf("cannot recreate event for incident %s: %w", pair.Incident, err))
+			continue
+		}
+
+		if err := pair.Incident.RetriggerEscalations(ctx, pair.Object, &ev); err != nil {
 			errs = append(errs, fmt.Errorf("cannot reevaluate incident %s escalations: %w", pair.Incident, err))
 		}
 	}

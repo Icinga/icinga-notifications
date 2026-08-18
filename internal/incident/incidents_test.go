@@ -469,6 +469,7 @@ func makeEvent(t *testing.T, sourceID int64, opts ...eventOption) *event.Event {
 		ev.MutedReason = "You're gonna have a bad time!"
 	}
 	require.NoError(t, ev.Validate(), "failed to validate event")
+	require.NoError(t, ev.EnsureID(), "failed to generate event ID")
 	return ev
 }
 
