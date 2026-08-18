@@ -12,7 +12,7 @@ require (
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/okzk/sdnotify v0.0.0-20180710141335-d9becc38acbd
 	github.com/pkg/errors v0.9.1
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.0
 	github.com/teambition/rrule-go v1.8.2
 	github.com/theory/jsonpath v0.12.0
 	go.uber.org/zap v1.28.0
@@ -25,7 +25,6 @@ require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/caarlos0/env/v11 v11.4.1 // indirect
 	github.com/cention-sany/utf7 v0.0.0-20170124080048-26cad61bd60a // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-sql-driver/mysql v1.10.0 // indirect
@@ -38,7 +37,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.15 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.4 // indirect
 	github.com/sourcegraph/jsonrpc2 v0.2.2 // indirect
 	github.com/ssgreg/journald v1.0.0 // indirect
