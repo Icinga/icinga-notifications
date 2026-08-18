@@ -1,19 +1,22 @@
 package recipient
 
 import (
-	"database/sql"
+	"time"
+
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"go.uber.org/zap/zapcore"
-	"time"
 )
 
 type Contact struct {
 	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
 
-	FullName         string         `db:"full_name"`
-	Username         sql.NullString `db:"username"`
-	DefaultChannelID int64          `db:"default_channel_id"`
-	Addresses        []*Address     `db:"-"`
+	FullName         string       `db:"full_name"`
+	Username         types.String `db:"username"`
+	DefaultChannelID int64        `db:"default_channel_id"`
+	ExternalUuid     types.UUID   `db:"external_uuid"`
+
+	Addresses []*Address `db:"-"`
 }
 
 func (c *Contact) String() string {

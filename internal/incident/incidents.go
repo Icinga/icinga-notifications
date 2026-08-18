@@ -14,7 +14,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/jmoiron/sqlx"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 )
 
@@ -47,18 +46,23 @@ func ReevaluateEscalations(
 	return stderrors.Join(errs...)
 }
 
-// ErrOpenIncidentWithoutSeverity is returned when an event tries to open a new incident without a severity.
-var ErrOpenIncidentWithoutSeverity = errors.New("cannot open or escalate an incident without a severity")
-
-// ProcessEvent from an event.Event.
+// Process processes an [event.Event] or [event.QuickAction] and updates the incident state accordingly.
 //
-// It might return [ErrOpenIncidentWithoutSeverity] if the event is trying to open an incident without a severity or
-// [ErrSeverityChangeWithoutIncidentFlag] if the event is trying to change the severity of an incident without the
-// incident flag set. In both cases, the listener should map these errors to a 400 Bad Request response to the source.
-func ProcessEvent(ctx context.Context, db *database.DB, l *logging.Logging, rc *config.RuntimeConfig, ev *event.Event) error {
+// If [event.Event] is provided, it might return [ErrOpenIncidentWithoutSeverity] if the event is trying to open
+// an incident without a severity or [ErrSeverityChangeWithoutIncidentFlag] if the event is trying to change the
+// severity of an incident without the incident flag set. In both cases, the listener should map these errors to
+// a 400 Bad Request response to the source.
+func Process[T event.Event | event.QuickAction](ctx context.Context, db *database.DB, l *logging.Logging, rc *config.RuntimeConfig, req *T) error {
 	i := new(Incident)
 	i.initializeFields(db, rc, l.GetChildLogger("incident").SugaredLogger)
-	return i.ProcessEvent(ctx, ev)
+	switch evOrQA := any(req).(type) {
+	case *event.Event:
+		return i.ProcessEvent(ctx, evOrQA)
+	case *event.QuickAction:
+		return i.DoQuickAction(ctx, evOrQA)
+	}
+
+	panic("unreachable")
 }
 
 // Pair is a struct that holds an incident and its related object used for yielding incidents and objects together.

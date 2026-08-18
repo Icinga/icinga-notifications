@@ -10,12 +10,13 @@ func _() {
 	var x [1]struct{}
 	_ = x[EnvelopeFmtNone-0]
 	_ = x[EnvelopeFmtEvent-1]
-	_ = x[envelopeFmtMax-2]
+	_ = x[EnvelopeFmtQA-2]
+	_ = x[envelopeFmtMax-3]
 }
 
-const _EnvelopeFmt_name = "noneeventinternal"
+const _EnvelopeFmt_name = "noneeventquick_actioninternal"
 
-var _EnvelopeFmt_index = [...]uint8{0, 4, 9, 17}
+var _EnvelopeFmt_index = [...]uint8{0, 4, 9, 21, 29}
 
 func (i EnvelopeFmt) String() string {
 	idx := int(i) - 0

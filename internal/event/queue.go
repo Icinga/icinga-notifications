@@ -87,12 +87,18 @@ type (
 		//
 		// The callback must honor the provided context and return an error if the processing failed.
 		ProcessEvent func(context.Context, *Event) error
+
+		// QuickAction is the callback function type used by [ProcessQueue] to process a quick action.
+		//
+		// The callback is invoked with a context limited to one minute, and it must honor this context.
+		QuickAction func(context.Context, *QuickAction) error
 	}
 
 	// job pairs a Queue entry with its corresponding event.Event for processing.
 	job struct {
 		Q  *Queue
 		Ev *Event
+		QA *QuickAction
 	}
 
 	// jobProcessingLock describes a lock for a job queue entry that is currently being processed.
@@ -133,6 +139,27 @@ func (q *Queue) toEvent() (*Event, error) {
 	ev.Time = q.Envelope.Time.Time()
 
 	return &ev, nil
+}
+
+// toQuickAction converts the Queue entry into an event.QuickAction.
+func (q *Queue) toQuickAction() (*QuickAction, error) {
+	if q.Envelope.Format != EnvelopeFmtQA {
+		return nil, fmt.Errorf("cannot convert envelope of format %q to event.QuickAction", q.Envelope.Format)
+	}
+
+	if q.Envelope.Version > EnvelopeQAVersion {
+		return nil, fmt.Errorf("%w: %d is too new, supported version is <=%d",
+			errEnvelopeVersionToNew, q.Envelope.Version, EnvelopeQAVersion)
+	}
+
+	// NOTE: There might be breaking changes with future updates to the event.QuickAction struct, so apply any necessary
+	// migration steps here for older envelope versions before deserializing the payload into an event.QuickAction.
+
+	qa := new(QuickAction)
+	if err := json.NewDecoder(bytes.NewReader(q.Envelope.Payload)).Decode(qa); err != nil {
+		return nil, fmt.Errorf("cannot JSON decode quick action entry: %w", err)
+	}
+	return qa, nil
 }
 
 // Enqueue enqueues an event.Event into the job queue.
@@ -279,11 +306,14 @@ func startClaiming(
 						var (
 							err error
 							ev  *Event
+							qa  *QuickAction
 						)
 
 						switch q.Envelope.Format {
 						case EnvelopeFmtEvent:
 							ev, err = q.toEvent()
+						case EnvelopeFmtQA:
+							qa, err = q.toQuickAction()
 						default:
 							err = errors.New("unknown envelope format")
 						}
@@ -302,7 +332,7 @@ func startClaiming(
 							continue
 						}
 
-						j := job{Q: &q, Ev: ev}
+						j := job{Q: &q, Ev: ev, QA: qa}
 						switch err := tryClaim(ctx, db, j, casStmt, lockStmt, cbs); {
 						case err == nil:
 							// If the ctx is canceled while sending the claimed job, we'll inevitably leave the
@@ -379,8 +409,16 @@ func startClaiming(
 // Returns errClaimLost if the object is already locked by another node, or if a concurrent one claimed this
 // exact entry first.
 func tryClaim(ctx context.Context, db *database.DB, j job, casStmt, lockStmt string, cbs QueueCallbacks) error {
+	var tags map[string]string
+	var sourceID int64
+	if j.Q.Envelope.Format == EnvelopeFmtEvent {
+		tags, sourceID = j.Ev.Tags, j.Ev.SourceId
+	} else {
+		tags = j.QA.ObjectTags
+	}
+
 	return db.ExecTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, func(ctx context.Context, tx *sqlx.Tx) error {
-		queueLock := &jobProcessingLock{QueueID: j.Q.ID, ObjectID: cbs.GenObjectID(j.Ev.SourceId, j.Ev.Tags)}
+		queueLock := &jobProcessingLock{QueueID: j.Q.ID, ObjectID: cbs.GenObjectID(sourceID, tags)}
 		res, err := tx.NamedExecContext(ctx, lockStmt, queueLock)
 		if err != nil {
 			return database.CantPerformQuery(err, lockStmt)
@@ -429,7 +467,7 @@ func processAndFinalize(
 	callbackCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	q, ev := j.Q, j.Ev
+	q, ev, qa := j.Q, j.Ev, j.QA
 	switch q.Envelope.Format {
 	case EnvelopeFmtEvent:
 		if err := cbs.ProcessEvent(callbackCtx, ev); err != nil {
@@ -437,6 +475,15 @@ func processAndFinalize(
 			q.State = QueueStateError
 		} else {
 			logger.Debugw("Successfully processed event", zap.Stringer("id", q.ID))
+			q.State = QueueStateDone
+		}
+
+	case EnvelopeFmtQA:
+		if err := cbs.QuickAction(callbackCtx, qa); err != nil {
+			logger.Errorw("Failed to process quick action", zap.Stringer("id", q.ID), zap.Error(err))
+			q.State = QueueStateError
+		} else {
+			logger.Debugw("Successfully processed quick action", zap.Stringer("id", q.ID))
 			q.State = QueueStateDone
 		}
 

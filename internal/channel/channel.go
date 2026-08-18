@@ -8,6 +8,7 @@ import (
 
 	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
@@ -23,6 +24,8 @@ type Channel struct {
 	Name   string `db:"name"`
 	Type   string `db:"type"`
 	Config string `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
+
+	ExternalUuid types.UUID `db:"external_uuid"` // Required for unittests to be able to insert channels.
 
 	Logger *zap.SugaredLogger `db:"-"`
 

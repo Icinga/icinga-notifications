@@ -4,17 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
+	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
+	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/testutils"
 	"github.com/jmoiron/sqlx"
@@ -86,7 +90,7 @@ func TestIncidents(t *testing.T) {
 			for pair := range pairCh {
 				// Mark some of the existing incidents as recovered.
 				if pair.Incident.Id%20 == 0 { // 1000 / 20 => 50 existing incidents will be marked as recovered!
-					require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+					require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 						withIncident(), withClose(), withTags(pair.Object.Tags))))
 					require.NotZero(t, reloadIncident(t, db, pair.Incident).RecoveredAt)
 					delete(testData, pair.Object.ID.String())
@@ -103,7 +107,7 @@ func TestIncidents(t *testing.T) {
 			assert.Equal(t, len(testData), incidentsLen, "only the recovered incidents should be gone")
 
 			for j := 1; j <= db.Options.MaxPlaceholdersPerStatement/2; j++ {
-				require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 					withIncident(), withClose(), withSeverity(baseEv.SeverityAlert))))
 
 				if j%2 == 0 {
@@ -119,7 +123,7 @@ func TestIncidents(t *testing.T) {
 			// Close all remaining incidents to clean up the database for the next test run.
 			pairCh, errCh = Yield(t.Context(), db, logs, runtimeConfig)
 			for pair := range pairCh {
-				require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 					withIncident(), withClose(), withTags(pair.Object.Tags))))
 			}
 			assert.NoError(t, <-errCh)
@@ -143,12 +147,12 @@ func TestIncidents(t *testing.T) {
 		assert.Zero(t, i.RecoveredAt)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
 
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withSeverity(baseEv.SeverityEmerg), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
 
-		err := ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		err := Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withMuted(false), withSeverity(baseEv.SeverityNotice), withTags(mustIncidentObject(t, i).Tags)))
 		require.ErrorIs(t, err, ErrSeverityChangeWithoutIncidentFlag)
 		i = reloadIncident(t, db, i)
@@ -164,7 +168,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
 
 		// Attempting to open an incident without a severity should fail.
-		err := ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID, withIncident()))
+		err := Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID, withIncident()))
 		require.ErrorIs(t, err, ErrOpenIncidentWithoutSeverity)
 
 		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
@@ -173,7 +177,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
 		assert.Equal(t, "Incident opened!", i.Message.String)
 
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(),
 			withSeverity(baseEv.SeverityEmerg),
 			withMsg("Incident updated!"),
@@ -183,7 +187,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, "Incident updated!", i.Message.String)
 
 		// We shouldn't be able to update the incident message without the incident flag set.
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig,
 			makeEvent(t, source.ID, withMuted(false), withMsg("YOLO!"), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, "Incident updated!", i.Message.String)
@@ -202,7 +206,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityInfo, i.Severity)
 
 		// Closing incident with a new severity will update the severity and mark it as recovered.
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withClose(), withSeverity(baseEv.SeverityEmerg), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.NotZero(t, i.RecoveredAt)
@@ -213,7 +217,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityWarning, i.Severity)
 
 		// Closing incident without providing a severity will keep the existing severity and mark it as recovered.
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withClose(), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.NotZero(t, i.RecoveredAt)
@@ -234,7 +238,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, "You're gonna have a bad time!", i.MuteReason.String)
 
 		// Unmute it with the incident flag still set...
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withMuted(false), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
@@ -248,7 +252,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, "You're gonna have a bad time!", i.MuteReason.String)
 
 		// Unmute it without the incident flag set...
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withMuted(false), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
@@ -258,6 +262,127 @@ func TestIncidents(t *testing.T) {
 		// Muted flag without the incident flag has no effect on non-existing incidents.
 		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withMuted(true)))
 		require.Nil(t, i)
+	})
+
+	t.Run("QuickAction", func(t *testing.T) {
+		t.Parallel()
+
+		// filter is used to deleted only tuples created by this test case for the tables listed below in the cleanup.
+		filter := map[string]string{"available_channel_type": "type = 'qa-dummy'"}
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			tablesToCleanup := []string{
+				"incident_history",
+				"incident_contact",
+				"incident",
+				"contact",
+				"channel",
+				"available_channel_type",
+			}
+			for _, table := range tablesToCleanup {
+				_, err := db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE %s`, table, filter[table]))
+				require.NoErrorf(t, err, "failed to clean up table %s", table)
+			}
+		})
+
+		actInsertStmt := `INSERT INTO available_channel_type (type, name, version, author, config_attrs) VALUES (?, ?, ?, ?, ?)`
+		_, err := db.ExecContext(t.Context(), db.Rebind(actInsertStmt), "qa-dummy", "quick action", "1.0", "Incident QA", `{}`)
+		require.NoError(t, err)
+
+		ch := &channel.Channel{
+			Name:         "qa-dummy",
+			Type:         "qa-dummy",
+			Config:       `{}`,
+			ExternalUuid: types.UUID{UUID: uuid.New()},
+
+			Logger: logs.GetChildLogger("channel").SugaredLogger,
+		}
+		ch.Deleted = types.MakeBool(false)
+		ch.ChangedAt = types.UnixMilli(time.Now())
+
+		channelID, err := database.InsertObtainID(t.Context(), db, database.BuildInsertStmtWithout(db, ch, "id"), ch)
+		require.NoError(t, err)
+		filter["channel"] = fmt.Sprintf("id=%d", channelID)
+		filter["contact"] = fmt.Sprintf("default_channel_id=%d", channelID)
+
+		reloadRelated := func(t *testing.T, i *Incident) *Incident {
+			reloaded := reloadIncident(t, db, i)
+			err := db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
+				return reloaded.restoreRelatedState(ctx, tx)
+			})
+			require.NoError(t, err)
+			return reloaded
+		}
+
+		qaRuntimeConfig := config.NewRuntimeConfig(logs, db)
+		ev := makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityWarning), withMsg("Something went wrong!"))
+		i := makeIncident(db, logs, qaRuntimeConfig, t, ev)
+		filter["incident"] = fmt.Sprintf("id=%d", i.ID())
+		filter["incident_history"] = fmt.Sprintf("incident_id=%d", i.ID())
+		filter["incident_contact"] = fmt.Sprintf("incident_id=%d", i.ID())
+
+		for _, action := range []event.Action{event.ActionSubscribe, event.ActionManage} {
+			var contact *recipient.Contact
+			if action == event.ActionManage {
+				contact = makeContact(t, db, "Thomas A. Anderson", "Neo", channelID)
+			} else {
+				contact = makeContact(t, db, "Agent Smith", "smith", channelID)
+			}
+
+			qa := &event.QuickAction{
+				Kind:       action,
+				ContactID:  contact.ID,
+				ObjectTags: ev.Tags,
+				SourceID:   source.ID, // TODO(yh): this must be dropped before merging!.
+			}
+
+			// Recipient is not yet known to the runtime config, so nothing should happen here.
+			require.NoError(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+			i = reloadRelated(t, i)
+			assert.Len(t, i.Recipients, 0)
+
+			require.NoError(t, qaRuntimeConfig.UpdateFromDatabase(t.Context())) // publish recipient to the runtime config.
+			require.NotNil(t, qaRuntimeConfig.GetRecipient(recipient.ToKey(contact)))
+
+			require.NoError(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+			i = reloadRelated(t, i)
+			assert.Len(t, i.Recipients, 1)
+			if action == event.ActionManage {
+				assert.True(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(contact)].Role, RoleManager)
+
+				qa.Kind = event.ActionUnmanage
+			} else {
+				assert.False(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(contact)].Role, RoleSubscriber)
+
+				qa.Kind = event.ActionUnsubscribe
+			}
+
+			// Now, unsubscribe/unmanage the recipient from that very same incident.
+			require.NoError(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+			i = reloadRelated(t, i)
+			if action == event.ActionManage { // Managers get first demoted to subscribers.
+				assert.False(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(contact)].Role, RoleSubscriber)
+
+				// Cannot unmanage an incident that doesn't have a manager.
+				require.Error(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+				assert.Equal(t, i.Recipients[recipient.ToKey(contact)].Role, RoleSubscriber)
+
+				qa.Kind = event.ActionUnsubscribe
+				require.NoError(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+				i = reloadRelated(t, i)
+			}
+			assert.Len(t, i.Recipients, 0)
+
+			// Unsubscribing an already unsubscribed contact makes no sense, so it should fail.
+			require.Error(t, Process(t.Context(), db, logs, qaRuntimeConfig, qa))
+			assert.Len(t, i.Recipients, 0)
+			i = reloadRelated(t, i)
+		}
 	})
 
 	t.Run("Time-Based Escalation", func(t *testing.T) {
@@ -404,7 +529,7 @@ func cleanupDB(ctx context.Context, db *database.DB, t *testing.T) {
 //
 // The incident is guaranteed to be fully initialized and ready for assertions but might be nil if it's immediately closed.
 func makeIncident(db *database.DB, logs *logging.Logging, runtimeConfig *config.RuntimeConfig, t *testing.T, ev *event.Event) *Incident {
-	require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, ev))
+	require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, ev))
 	i := new(Incident)
 	i.ObjectID = object.ID(ev.SourceId, ev.Tags)
 	i.initializeFields(db, runtimeConfig, logs.GetChildLogger("incident").SugaredLogger)
@@ -445,6 +570,23 @@ func mustIncidentObject(t *testing.T, i *Incident) *object.Object {
 	obj, err := i.Object(t.Context())
 	require.NoError(t, err)
 	return obj
+}
+
+// makeContact generates a fully initialized contact based on the provided args, sync it to the database and returns it.
+func makeContact(t *testing.T, db *database.DB, fullName, username string, channelID int64) *recipient.Contact {
+	contact := &recipient.Contact{
+		FullName:         fullName,
+		Username:         types.MakeString(username),
+		DefaultChannelID: channelID,
+		ExternalUuid:     types.UUID{UUID: uuid.New()},
+	}
+	contact.Deleted = types.MakeBool(false)
+	contact.ChangedAt = types.UnixMilli(time.Now())
+
+	contactID, err := database.InsertObtainID(t.Context(), db, database.BuildInsertStmtWithout(db, contact, "id"), contact)
+	require.NoError(t, err)
+	contact.ID = contactID
+	return contact
 }
 
 // makeEvent returns a fully initialized event based on the given parameters.
