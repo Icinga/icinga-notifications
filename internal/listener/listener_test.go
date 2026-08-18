@@ -15,10 +15,9 @@ import (
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
+	"github.com/icinga/icinga-notifications/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -100,11 +99,7 @@ func makeTestListener(t *testing.T, useSocket bool, withCNSrc bool) *Listener {
 		}
 	}
 
-	logs := logging.NewLoggingWithFactory("testing", zapcore.DebugLevel, time.Second, func(level zap.AtomicLevel) zapcore.Core {
-		return zaptest.NewLogger(t, zaptest.Level(level.Level())).Core()
-	})
-
-	rc := config.NewRuntimeConfig(logs, nil)
+	rc := config.NewRuntimeConfig(testutils.GetTestLogging(t), nil)
 	rc.Sources = map[int64]*config.Source{1: src}
 
 	if withCNSrc {
