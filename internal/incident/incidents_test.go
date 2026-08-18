@@ -90,7 +90,7 @@ func TestIncidents(t *testing.T) {
 			for pair := range pairCh {
 				// Mark some of the existing incidents as recovered.
 				if pair.Incident.Id%20 == 0 { // 1000 / 20 => 50 existing incidents will be marked as recovered!
-					require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+					require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 						withIncident(), withClose(), withTags(pair.Object.Tags))))
 					require.NotZero(t, reloadIncident(t, db, pair.Incident).RecoveredAt)
 					delete(testData, pair.Object.ID.String())
@@ -107,7 +107,7 @@ func TestIncidents(t *testing.T) {
 			assert.Equal(t, len(testData), incidentsLen, "only the recovered incidents should be gone")
 
 			for j := 1; j <= db.Options.MaxPlaceholdersPerStatement/2; j++ {
-				require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 					withIncident(), withClose(), withSeverity(baseEv.SeverityAlert))))
 
 				if j%2 == 0 {
@@ -123,7 +123,7 @@ func TestIncidents(t *testing.T) {
 			// Close all remaining incidents to clean up the database for the next test run.
 			pairCh, errCh = Yield(t.Context(), db, logs, runtimeConfig)
 			for pair := range pairCh {
-				require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 					withIncident(), withClose(), withTags(pair.Object.Tags))))
 			}
 			assert.NoError(t, <-errCh)
@@ -147,12 +147,12 @@ func TestIncidents(t *testing.T) {
 		assert.Zero(t, i.RecoveredAt)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
 
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withSeverity(baseEv.SeverityEmerg), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
 
-		err := ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		err := Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withMuted(false), withSeverity(baseEv.SeverityNotice), withTags(mustIncidentObject(t, i).Tags)))
 		require.ErrorIs(t, err, ErrSeverityChangeWithoutIncidentFlag)
 		i = reloadIncident(t, db, i)
@@ -168,7 +168,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
 
 		// Attempting to open an incident without a severity should fail.
-		err := ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID, withIncident()))
+		err := Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID, withIncident()))
 		require.ErrorIs(t, err, ErrOpenIncidentWithoutSeverity)
 
 		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
@@ -177,7 +177,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
 		assert.Equal(t, "Incident opened!", i.Message.String)
 
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(),
 			withSeverity(baseEv.SeverityEmerg),
 			withMsg("Incident updated!"),
@@ -187,7 +187,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, "Incident updated!", i.Message.String)
 
 		// We shouldn't be able to update the incident message without the incident flag set.
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig,
 			makeEvent(t, source.ID, withMuted(false), withMsg("YOLO!"), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, "Incident updated!", i.Message.String)
@@ -206,7 +206,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityInfo, i.Severity)
 
 		// Closing incident with a new severity will update the severity and mark it as recovered.
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withClose(), withSeverity(baseEv.SeverityEmerg), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.NotZero(t, i.RecoveredAt)
@@ -217,7 +217,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityWarning, i.Severity)
 
 		// Closing incident without providing a severity will keep the existing severity and mark it as recovered.
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withClose(), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.NotZero(t, i.RecoveredAt)
@@ -238,7 +238,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, "You're gonna have a bad time!", i.MuteReason.String)
 
 		// Unmute it with the incident flag still set...
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withMuted(false), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
@@ -252,7 +252,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, "You're gonna have a bad time!", i.MuteReason.String)
 
 		// Unmute it without the incident flag set...
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withMuted(false), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
@@ -529,7 +529,7 @@ func cleanupDB(ctx context.Context, db *database.DB, t *testing.T) {
 //
 // The incident is guaranteed to be fully initialized and ready for assertions but might be nil if it's immediately closed.
 func makeIncident(db *database.DB, logs *logging.Logging, runtimeConfig *config.RuntimeConfig, t *testing.T, ev *event.Event) *Incident {
-	require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, ev))
+	require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, ev))
 	i := new(Incident)
 	i.ObjectID = object.ID(ev.SourceId, ev.Tags)
 	i.initializeFields(db, runtimeConfig, logs.GetChildLogger("incident").SugaredLogger)
