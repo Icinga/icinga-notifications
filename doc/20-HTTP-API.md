@@ -117,11 +117,11 @@ pass `--cacert ca.crt --cert client.crt --key client.key` to curl and omit `-u`:
 
 ## Incidents
 
-The `/incidents` Icinga Notifications HTTP API endpoint allows sources to query and modify a list of open incidents
-belonging to its objects. Incidents can be retrieved by sending a `GET` request to the endpoint, and can be modified
-by sending a `POST` request with the desired changes. The endpoint requires a `filter` query parameter to specify which
-incidents the source wants to retrieve or modify. Please refer to the [API Filtering](#api-filtering) section for more
-details on how to construct the filter.
+The `/incidents` Icinga Notifications HTTP API endpoint allows sources to query and modify a list of open incidents.
+Incidents can be retrieved by sending a `GET` request to the endpoint, and can be modified by sending a `POST` request
+with the desired changes. The endpoint requires a `filter` query parameter to specify which incidents the source wants
+to retrieve or modify. Please refer to the [API Filtering](#api-filtering) section for more details on how to construct
+the filter.
 
 Authentication follows the same transport-specific rules as for event submission: TCP requires HTTP
 Basic Auth with username and password, while a Unix socket identifies the caller by their OS user.

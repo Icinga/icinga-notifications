@@ -464,7 +464,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	err := event.Enqueue(ctx, l.db, &ev, object.ID(ev.SourceId, ev.Tags))
+	err := event.Enqueue(ctx, l.db, &ev, object.ID(ev.Tags))
 	if err != nil {
 		l.logger.Errorw("Failed to enqueue event into event queue",
 			zap.String("source", src.Name),
@@ -554,7 +554,7 @@ func (l *Listener) IncidentsHandler(w http.ResponseWriter, r *http.Request) {
 
 // getIncidentsHandler handles GET requests to the /incidents endpoint.
 //
-// It retrieves the current incidents for the authenticated source, applies any filters provided in the query
+// It retrieves all the current open incidents, applies any filters provided in the query
 // parameters, and streams the filtered incidents back to the client in NDJSON format.
 //
 // The filters are evaluated against the object tags of each incident, and only incidents that match the filters
@@ -576,7 +576,7 @@ func (l *Listener) getIncidentsHandler(w http.ResponseWriter, r *http.Request, s
 		}),
 	}
 
-	pairCh, errCh := incident.YieldForSource(r.Context(), l.db, l.logs, l.runtimeConfig, src.ID)
+	pairCh, errCh := incident.YieldLight(r.Context(), l.db, l.logs, l.runtimeConfig)
 	if err := StreamJsonResults(r.Context(), w, pairCh, errCh, opts...); err != nil {
 		l.logger.Debugw("Error streaming get incidents response", zap.String("source", src.Name), zap.Error(err))
 	}
@@ -584,10 +584,10 @@ func (l *Listener) getIncidentsHandler(w http.ResponseWriter, r *http.Request, s
 
 // modifyIncidentsHandler handles POST requests to the /incidents endpoint.
 //
-// It retrieves the current incidents for the authenticated source, applies any filters provided in the query params,
-// and modifies the filtered incidents based on the JSON body of the request. The JSON body can contain a "message"
-// field to update the incident message and a "close" field to close the incident. If there is an error parsing the
-// filters or evaluating them against the incidents, it responds with an appropriate HTTP status code and error message.
+// It retrieves all the current open incidents, applies any filters provided in the query params, and modifies the
+// filtered incidents based on the JSON body of the request. The JSON body can contain a "message" field to update
+// the incident message and a "close" field to close the incident. If there is an error parsing the filters or
+// evaluating them against the incidents, it responds with an appropriate HTTP status code and error message.
 func (l *Listener) modifyIncidentsHandler(w http.ResponseWriter, r *http.Request, src *config.Source, filter any, errF OnErrFunc) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -649,7 +649,7 @@ func (l *Listener) modifyIncidentsHandler(w http.ResponseWriter, r *http.Request
 		}),
 	}
 
-	pairCh, errCh := incident.YieldForSource(r.Context(), l.db, l.logs, l.runtimeConfig, src.ID)
+	pairCh, errCh := incident.YieldLight(r.Context(), l.db, l.logs, l.runtimeConfig)
 	if err := StreamJsonResults(r.Context(), w, pairCh, errCh, opts...); err != nil {
 		l.logger.Debugw("Error streaming modify incidents response", zap.String("source", src.Name), zap.Error(err))
 	}

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
@@ -88,6 +89,16 @@ func (r *RuntimeConfig) debugVerify() error {
 			if err != nil {
 				return fmt.Errorf("RuntimeConfig.Rules[%d]: %w", id, err)
 			}
+		}
+	}
+
+	if r.Sources == nil {
+		return errors.New("RuntimeConfig.Sources is nil")
+	}
+
+	for id, source := range r.Sources {
+		if err := r.debugVerifySource(id, source); err != nil {
+			return fmt.Errorf("RuntimeConfig.Sources[%d]: %w", id, err)
 		}
 	}
 
@@ -252,6 +263,18 @@ func (r *RuntimeConfig) debugVerifyRule(id int64, rule *rule.Rule) error {
 		return fmt.Errorf("rule has an ObjectFilterExpr but ObjectFilter is nil")
 	}
 
+	var foundSource bool
+	for _, src := range r.Sources {
+		if src.Type == rule.SourceType {
+			foundSource = true
+			break
+		}
+	}
+
+	if !foundSource {
+		return fmt.Errorf("rule.SourceType %q does not match any known source", rule.SourceType)
+	}
+
 	for escalationID, escalation := range rule.Escalations {
 		if escalation == nil {
 			return fmt.Errorf("rule.Escalations[%d] is nil", escalationID)
@@ -317,6 +340,27 @@ func (r *RuntimeConfig) debugVerifyRule(id int64, rule *rule.Rule) error {
 			default:
 				return fmt.Errorf("rule.Escalations[%d].Recipients[%d].Recipient has invalid type %T", escalationID, i, rec)
 			}
+		}
+	}
+
+	return nil
+}
+
+func (r *RuntimeConfig) debugVerifySource(id int64, source *Source) error {
+	if source.ID != id {
+		return fmt.Errorf("source has ID %d but is referenced as %d", source.ID, id)
+	}
+
+	if other := r.Sources[id]; other != source {
+		return fmt.Errorf("source %p is inconsistent with RuntimeConfig.Sources[%d] = %p", source, id, other)
+	}
+
+	for ruleID := range source.ruleIDs {
+		if rul, ok := r.Rules[ruleID]; !ok {
+			return fmt.Errorf("source.ruleIDs[%d] references non-existent rule", ruleID)
+		} else if rul.SourceType != source.Type {
+			return fmt.Errorf("source.ruleIDs[%d] references rule %q with SourceType %q, but source has type %q",
+				ruleID, rul.Name, rul.SourceType, source.Type)
 		}
 	}
 

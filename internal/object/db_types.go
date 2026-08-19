@@ -21,3 +21,11 @@ func (o *Object) Upsert() interface{} {
 		URL  types.String `db:"url"`
 	}{}
 }
+
+// Source represents the association between an object and a source.
+type Source struct {
+	ObjectID types.Binary `db:"object_id"`
+	SourceID int64        `db:"source_id"`
+}
+
+func (*Source) TableName() string { return "object_source" }

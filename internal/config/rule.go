@@ -2,8 +2,9 @@ package config
 
 import (
 	"fmt"
-	"github.com/icinga/icinga-notifications/internal/rule"
 	"slices"
+
+	"github.com/icinga/icinga-notifications/internal/rule"
 )
 
 // GetRulesFilterColumnsForSource returns a set of all filter columns used in the rules of the given source.
@@ -43,10 +44,10 @@ func (r *RuntimeConfig) applyPendingRules() {
 			}
 
 			newElement.Escalations = make(map[int64]*rule.Escalation)
-			// If the source this rule belongs to is already known, add this rule to the source's rule list.
-			// Otherwise, the rule will be added to that list when its source is being loaded.
-			if src, ok := r.Sources[newElement.SourceID]; ok {
-				src.appendRuleID(newElement.ID)
+			for _, src := range r.Sources {
+				if src.Type == newElement.SourceType {
+					src.appendRuleID(newElement.ID)
+				}
 			}
 			return nil
 		},
@@ -65,14 +66,16 @@ func (r *RuntimeConfig) applyPendingRules() {
 				curElement.TimePeriod = nil
 			}
 
-			if curElement.SourceID != update.SourceID {
-				if src, ok := r.Sources[curElement.SourceID]; ok {
-					src.deleteRuleID(curElement.ID)
+			if curElement.SourceType != update.SourceType {
+				for _, src := range r.Sources {
+					if src.Type == curElement.SourceType {
+						src.deleteRuleID(curElement.ID)
+					}
+					if src.Type == update.SourceType {
+						src.appendRuleID(update.ID)
+					}
 				}
-				if src, ok := r.Sources[update.SourceID]; ok {
-					src.appendRuleID(curElement.ID)
-				}
-				curElement.SourceID = update.SourceID
+				curElement.SourceType = update.SourceType
 			}
 
 			// ObjectFilter{,Expr} are being initialized by config.IncrementalConfigurableInitAndValidatable.
@@ -83,10 +86,11 @@ func (r *RuntimeConfig) applyPendingRules() {
 			return nil
 		},
 		func(delElement *rule.Rule) error {
-			// If the source this rule belongs to is already known, remove this rule from the source's rule list.
-			// Otherwise, there's nothing more to do!
-			if src, ok := r.Sources[delElement.SourceID]; ok {
-				src.deleteRuleID(delElement.ID)
+			// Detach the rule from all sources that reference it, so that they don't try to use it anymore.
+			for _, src := range r.Sources {
+				if src.Type == delElement.SourceType {
+					src.deleteRuleID(delElement.ID)
+				}
 			}
 			return nil
 		},
