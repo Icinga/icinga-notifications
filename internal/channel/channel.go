@@ -8,6 +8,7 @@ import (
 
 	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
@@ -20,9 +21,10 @@ import (
 type Channel struct {
 	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
 
-	Name   string `db:"name"`
-	Type   string `db:"type"`
-	Config string `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
+	ExternalUUID types.UUID `db:"external_uuid"`
+	Name         string     `db:"name"`
+	Type         string     `db:"type"`
+	Config       string     `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
 
 	Logger *zap.SugaredLogger `db:"-"`
 
