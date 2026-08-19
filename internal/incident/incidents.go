@@ -73,20 +73,12 @@ func Yield(ctx context.Context, db *database.DB, l *logging.Logging, rc *config.
 	return yield(ctx, db, logger, rc, true, `SELECT * FROM "incident" WHERE "recovered_at" IS NULL`)
 }
 
-// YieldForSource returns a channel of [Pair] for all active incidents of the given source (see yield docstring).
-func YieldForSource(
-	ctx context.Context,
-	db *database.DB,
-	l *logging.Logging,
-	rc *config.RuntimeConfig,
-	srcID int64,
-) (<-chan Pair, <-chan error) {
-	query := `
-		SELECT "incident".* FROM "incident"
-		JOIN "object" ON "incident"."object_id" = "object"."id"
-		JOIN "object_source" ON "object"."id" = "object_source"."object_id" AND "object_source"."source_id" = ?
-		WHERE "incident"."recovered_at" IS NULL`
-	return yield(ctx, db, l.GetChildLogger("incident"), rc, false, query, srcID)
+// YieldLight is exactly like [Yield] but without restoring all the incident's related state.
+//
+// This is useful for operations that don't require the full incident state, such as listing incidents.
+func YieldLight(ctx context.Context, db *database.DB, l *logging.Logging, rc *config.RuntimeConfig) (<-chan Pair, <-chan error) {
+	logger := l.GetChildLogger("incident")
+	return yield(ctx, db, logger, rc, false, `SELECT * FROM "incident" WHERE "recovered_at" IS NULL`)
 }
 
 // yield is a helper function that runs the given query in a separate goroutine and sends each incident-object
