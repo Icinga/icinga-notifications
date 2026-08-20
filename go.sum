@@ -40,6 +40,8 @@ github.com/gorilla/websocket v1.4.1 h1:q7AeDBpnBk8AogcD4DSag/Ukw/KV+YhzLj2bP5HvK
 github.com/gorilla/websocket v1.4.1/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/icinga/icinga-go-library v0.9.1-0.20260804140635-142f198227ad h1:B3zoXQRpbBAJj8oIqPSceFNGOnl7i4tCa102/HO5mI8=
 github.com/icinga/icinga-go-library v0.9.1-0.20260804140635-142f198227ad/go.mod h1:icv+mQEVwfe5EvRceGXbiw1ahosInQ0V3uQa+rLe9UM=
+github.com/icinga/icinga-go-library v0.9.1-0.20260819141527-47e544709446 h1:AmuyCg8Ux7/EZ5gpuNsDUll2rRmg/a5WThsCKMq1KOA=
+github.com/icinga/icinga-go-library v0.9.1-0.20260819141527-47e544709446/go.mod h1:mWLP55f+q8UVDwYVTUXRTivliWhNLuYMe+APXLczlfg=
 github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056 h1:iCHtR9CQyktQ5+f3dMVZfwD2KWJUgm7M0gdL9NGr8KA=
 github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056/go.mod h1:CVKlgaMiht+LXvHG173ujK6JUhZXKb2u/BQtjPDIvyk=
 github.com/jessevdk/go-flags v1.6.1 h1:Cvu5U8UGrLay1rZfv/zP7iLpSHGUZ/Ou68T0iX1bBK4=
