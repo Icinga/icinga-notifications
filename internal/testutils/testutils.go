@@ -4,16 +4,19 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"github.com/creasty/defaults"
-	"github.com/icinga/icinga-go-library/database"
-	"github.com/icinga/icinga-go-library/logging"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zaptest"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/creasty/defaults"
+	"github.com/google/uuid"
+	"github.com/icinga/icinga-go-library/database"
+	"github.com/icinga/icinga-go-library/logging"
+	"github.com/icinga/icinga-go-library/types"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap/zaptest"
 )
 
 // GetTestDB retrieves the database config from env variables, opens a new database and returns it.
@@ -65,4 +68,12 @@ func MakeRandomString(t *testing.T) string {
 	require.NoError(t, err, "failed to generate random string")
 
 	return fmt.Sprintf("%x", buf)
+}
+
+// MakeRandomUUID returns a random UUID string.
+func MakeRandomUUID(t *testing.T) types.UUID {
+	u, err := uuid.NewRandom()
+	require.NoError(t, err, "failed to generate random UUID")
+
+	return types.MakeUUID(u)
 }
