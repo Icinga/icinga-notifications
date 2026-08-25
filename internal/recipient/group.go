@@ -1,16 +1,19 @@
 package recipient
 
 import (
+	"time"
+
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"go.uber.org/zap/zapcore"
-	"time"
 )
 
 type Group struct {
 	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
 
-	Name    string     `db:"name"`
-	Members []*Contact `db:"-"`
+	ExternalUUID types.UUID `db:"external_uuid"`
+	Name         string     `db:"name"`
+	Members      []*Contact `db:"-"`
 }
 
 func (g *Group) GetContactsAt(t time.Time) []*Contact {

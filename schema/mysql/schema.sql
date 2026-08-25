@@ -36,7 +36,7 @@ CREATE TABLE available_channel_type (
 
 CREATE TABLE channel (
     id bigint NOT NULL AUTO_INCREMENT,
-    external_uuid char(36), -- used for external references, lower case
+    external_uuid binary(16), -- used for external references
     name text NOT NULL COLLATE utf8mb4_unicode_ci,
     type varchar(255) NOT NULL, -- 'email', 'sms', ...
     config mediumtext, -- JSON with channel-specific attributes
@@ -56,7 +56,7 @@ CREATE INDEX idx_channel_changed_at ON channel(changed_at);
 
 CREATE TABLE contact (
     id bigint NOT NULL AUTO_INCREMENT,
-    external_uuid char(36), -- used for external references, lower case
+    external_uuid binary(16), -- used for external references
     full_name text NOT NULL COLLATE utf8mb4_unicode_ci,
     username varchar(254) COLLATE utf8mb4_unicode_ci, -- reference to web user
     default_channel_id bigint NOT NULL,
@@ -93,7 +93,7 @@ CREATE INDEX idx_contact_address_changed_at ON contact_address(changed_at);
 
 CREATE TABLE contactgroup (
     id bigint NOT NULL AUTO_INCREMENT,
-    external_uuid char(36), -- used for external references, lower case
+    external_uuid binary(16), -- used for external references
     name text NOT NULL COLLATE utf8mb4_unicode_ci,
 
     changed_at bigint NOT NULL,
