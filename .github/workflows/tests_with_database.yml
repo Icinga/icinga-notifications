@@ -8,6 +8,7 @@ on:
 
 env:
   ICINGA_NOTIFICATIONS_ICINGAWEB2_URL: https://localhost/icingaweb2
+  ICINGA_NOTIFICATIONS_CHANNELS_DIR: ${{ github.workspace }}/channels
   ICINGA_NOTIFICATIONS_DATABASE_DATABASE: notifications
   ICINGA_NOTIFICATIONS_DATABASE_PASSWORD: notifications
   ICINGA_NOTIFICATIONS_DATABASE_HOST: 127.0.0.1
@@ -69,6 +70,11 @@ jobs:
       - name: Download dependencies
         run: go get -v -t -d ./...
 
+      - name: Build Channels
+        run: |
+          mkdir -p ${{ github.workspace }}/channels
+          go build -o ${{ github.workspace }}/channels './cmd/channels/...'
+
       - name: Run tests
         timeout-minutes: 10
         run: go test -v -timeout 5m ./...
@@ -119,6 +125,11 @@ jobs:
 
       - name: Download dependencies
         run: go get -v -t -d ./...
+
+      - name: Build Channels
+        run: |
+          mkdir -p ${{ github.workspace }}/channels
+          go build -o ${{ github.workspace }}/channels './cmd/channels/...'
 
       - name: Run tests
         timeout-minutes: 10
