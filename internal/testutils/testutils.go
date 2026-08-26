@@ -4,58 +4,50 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"github.com/creasty/defaults"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/icinga/icinga-go-library/config"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
-	"os"
-	"strconv"
-	"strings"
-	"testing"
-	"time"
 )
 
-// GetTestDB retrieves the database config from env variables, opens a new database and returns it.
+// LoadTestConfig loads the configuration from environment variables into the provided config struct for testing purposes.
 //
-// The test suite will be skipped if no environment variable is set, otherwise fails fatally when
-// invalid configurations are specified.
-func GetTestDB(ctx context.Context, t *testing.T) *database.DB {
-	c := &database.Config{}
-	require.NoError(t, defaults.Set(c), "applying config default should not fail")
+// It requires the environment variable "ICINGA_NOTIFICATIONS_DATABASE_TYPE" to be set, otherwise it will
+// skip the test. The function validates the provided configuration struct and populates it with values
+// from the environment variables prefixed with "ICINGA_NOTIFICATIONS_".
+func LoadTestConfig[T config.Validator](t *testing.T, configFile T) {
+	if _, ok := os.LookupEnv("ICINGA_NOTIFICATIONS_DATABASE_TYPE"); !ok {
+		t.Skipf("Environment %q not set, skipping test!", "ICINGA_NOTIFICATIONS_DATABASE_TYPE")
+	}
+	require.NoError(t, config.FromEnv(configFile, config.EnvOptions{Prefix: "ICINGA_NOTIFICATIONS_"}))
+}
 
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB_TYPE"); ok {
-		c.Type = strings.ToLower(v)
-	} else {
-		t.Skipf("Environment %q not set, skipping test!", "NOTIFICATIONS_TESTS_DB_TYPE")
-	}
-
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB"); ok {
-		c.Database = v
-	}
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB_USER"); ok {
-		c.User = v
-	}
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB_PASSWORD"); ok {
-		c.Password = v
-	}
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB_HOST"); ok {
-		c.Host = v
-	}
-	if v, ok := os.LookupEnv("NOTIFICATIONS_TESTS_DB_PORT"); ok {
-		port, err := strconv.Atoi(v)
-		require.NoError(t, err, "invalid port provided")
-
-		c.Port = port
-	}
-
-	require.NoError(t, c.Validate(), "database config validation should not fail")
-
-	db, err := database.NewDbFromConfig(c, logging.NewLogger(zaptest.NewLogger(t).Sugar(), time.Hour), database.RetryConnectorCallbacks{})
+// GetTestDB returns a database.DB instance for testing purposes.
+//
+// It connects to the database using the provided configuration and ensures that the connection is successful.
+// If the connection or ping fails, it will fail the test.
+func GetTestDB(ctx context.Context, t *testing.T, dbConfig *database.Config) *database.DB {
+	db, err := database.NewDbFromConfig(dbConfig, logging.NewLogger(zaptest.NewLogger(t).Sugar(), time.Hour), database.RetryConnectorCallbacks{})
 	require.NoError(t, err, "connecting to database should not fail")
 	require.NoError(t, db.PingContext(ctx), "pinging the database should not fail")
 
 	return db
+}
+
+// GetTestLogging returns a logging.Logging instance for testing purposes.
+//
+// It sets the logging level to Debug and uses a zaptest logger to capture logs during tests.
+func GetTestLogging(t *testing.T) *logging.Logging {
+	return logging.NewLoggingWithFactory("testing", zapcore.DebugLevel, time.Second, func(level zap.AtomicLevel) zapcore.Core {
+		return zaptest.NewLogger(t, zaptest.Level(level.Level())).Core()
+	})
 }
 
 // MakeRandomString returns a 20 byte random hex string.
