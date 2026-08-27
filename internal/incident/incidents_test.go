@@ -272,7 +272,7 @@ func TestIncidents(t *testing.T) {
 		escalationSource.ChangedAt = types.UnixMilli(time.Now())
 		escalationSource.Deleted = types.MakeBool(false)
 
-		escalationRule := &rule.Rule{Name: "escalation test rule"}
+		escalationRule := &rule.Rule{Name: "escalation test rule", SourceType: escalationSource.Type}
 		escalationRule.ChangedAt = escalationSource.ChangedAt
 		escalationRule.Deleted = escalationSource.Deleted
 
@@ -281,7 +281,6 @@ func TestIncidents(t *testing.T) {
 			assert.NoError(t, err)
 			escalationSource.ID = id
 
-			escalationRule.SourceID = id
 			id, err = database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, escalationRule, "id"), escalationRule)
 			assert.NoError(t, err)
 			escalationRule.ID = id
@@ -374,7 +373,7 @@ func cleanupDB(ctx context.Context, db *database.DB, t *testing.T) {
 	switch db.DriverName() {
 	case database.PostgreSQL:
 		// As opposed to MySQL, we can just use truncate to clean up all tables in one go.
-		_, err := db.ExecContext(ctx, `TRUNCATE TABLE source RESTART IDENTITY CASCADE`)
+		_, err := db.ExecContext(ctx, `TRUNCATE TABLE source,object,rule RESTART IDENTITY CASCADE`)
 		require.NoError(t, err)
 	case database.MySQL:
 		// InnoDB doesn't support truncating tables with foreign key constraints, so we need to delete
@@ -387,6 +386,7 @@ func cleanupDB(ctx context.Context, db *database.DB, t *testing.T) {
 			"rule_escalation",
 			"rule",
 			"object_id_tag",
+			"object_source",
 			"object",
 			"source",
 		}
@@ -406,7 +406,7 @@ func cleanupDB(ctx context.Context, db *database.DB, t *testing.T) {
 func makeIncident(db *database.DB, logs *logging.Logging, runtimeConfig *config.RuntimeConfig, t *testing.T, ev *event.Event) *Incident {
 	require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, ev))
 	i := new(Incident)
-	i.ObjectID = object.ID(ev.SourceId, ev.Tags)
+	i.ObjectID = object.ID(ev.Tags)
 	i.initializeFields(db, runtimeConfig, logs.GetChildLogger("incident").SugaredLogger)
 	stmt := db.Rebind(db.BuildSelectStmt(i, i) + ` WHERE "recovered_at" IS NULL AND "object_id" = ?`)
 	err := db.GetContext(t.Context(), i, stmt, i.ObjectID)

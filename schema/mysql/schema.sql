@@ -279,14 +279,12 @@ CREATE TABLE source (
 CREATE INDEX idx_source_changed_at ON source(changed_at);
 
 CREATE TABLE object (
-    id binary(32) NOT NULL, -- SHA256 of identifying tags and the source.id
-    source_id bigint NOT NULL,
+    id binary(32) NOT NULL, -- SHA256 of identifying tags.
     name text NOT NULL,
 
     url text,
 
-    CONSTRAINT pk_object PRIMARY KEY (id),
-    CONSTRAINT fk_object_source FOREIGN KEY (source_id) REFERENCES source(id)
+    CONSTRAINT pk_object PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE object_id_tag (
@@ -298,19 +296,27 @@ CREATE TABLE object_id_tag (
     CONSTRAINT fk_object_id_tag_object FOREIGN KEY (object_id) REFERENCES object(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
+CREATE TABLE object_source (
+    object_id binary(32) NOT NULL,
+    source_id bigint NOT NULL, -- The specific source that the object referenced by object_id is associated with.
+
+    CONSTRAINT pk_object_source PRIMARY KEY (object_id, source_id),
+    CONSTRAINT fk_object_source_object FOREIGN KEY (object_id) REFERENCES object(id),
+    CONSTRAINT fk_object_source_source FOREIGN KEY (source_id) REFERENCES source(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
 CREATE TABLE rule (
     id bigint NOT NULL AUTO_INCREMENT,
     name text NOT NULL COLLATE utf8mb4_unicode_ci,
     timeperiod_id bigint,
-    source_id bigint NOT NULL, -- the source this rule belongs to
     object_filter text,
+    source_type text NOT NULL, -- Which source type this rule is associated with, e.g. 'icinga2', 'custom', ...
 
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
 
     CONSTRAINT pk_rule PRIMARY KEY (id),
-    CONSTRAINT fk_rule_timeperiod FOREIGN KEY (timeperiod_id) REFERENCES timeperiod(id),
-    CONSTRAINT fk_rule_source FOREIGN KEY (source_id) REFERENCES source(id)
+    CONSTRAINT fk_rule_timeperiod FOREIGN KEY (timeperiod_id) REFERENCES timeperiod(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_rule_changed_at ON rule(changed_at);

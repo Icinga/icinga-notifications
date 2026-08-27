@@ -305,15 +305,13 @@ CREATE TABLE source (
 CREATE INDEX idx_source_changed_at ON source(changed_at);
 
 CREATE TABLE object (
-    id bytea NOT NULL, -- SHA256 of identifying tags and the source.id
-    source_id bigint NOT NULL,
+    id bytea NOT NULL, -- SHA256 of identifying tags.
     name text NOT NULL,
 
     url text,
 
     CONSTRAINT pk_object PRIMARY KEY (id),
-    CONSTRAINT ck_object_id_is_sha256 CHECK (length(id) = 256/8),
-    CONSTRAINT fk_object_source FOREIGN KEY (source_id) REFERENCES source(id)
+    CONSTRAINT ck_object_id_is_sha256 CHECK (length(id) = 256/8)
 );
 
 CREATE TABLE object_id_tag (
@@ -328,21 +326,32 @@ CREATE TABLE object_id_tag (
 -- Indexes for object_id_tag to speed up the cleanup queries by object id.
 CREATE INDEX idx_object_id_tag_object_id ON object_id_tag(object_id);
 
+CREATE TABLE object_source (
+    object_id bytea NOT NULL,
+    source_id bigint NOT NULL, -- The specific source that the object referenced by object_id is associated with.
+
+    CONSTRAINT pk_object_source PRIMARY KEY (object_id, source_id),
+    CONSTRAINT fk_object_source_object FOREIGN KEY (object_id) REFERENCES object(id),
+    CONSTRAINT fk_object_source_source FOREIGN KEY (source_id) REFERENCES source(id)
+);
+
+-- Indexes for object_source to speed up the cleanup queries by object id.
+CREATE INDEX idx_object_source_object_id ON object_source(object_id);
+
 CREATE TYPE severity AS ENUM ('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg');
 
 CREATE TABLE rule (
     id bigserial,
     name citext NOT NULL,
     timeperiod_id bigint,
-    source_id bigint NOT NULL, -- the source this rule belongs to
     object_filter text,
+    source_type text NOT NULL, -- Which source type this rule is associated with, e.g. 'icinga2', 'custom', ...
 
     changed_at bigint NOT NULL,
     deleted boolenum NOT NULL DEFAULT 'n',
 
     CONSTRAINT pk_rule PRIMARY KEY (id),
-    CONSTRAINT fk_rule_timeperiod FOREIGN KEY (timeperiod_id) REFERENCES timeperiod(id),
-    CONSTRAINT fk_rule_source FOREIGN KEY (source_id) REFERENCES source(id)
+    CONSTRAINT fk_rule_timeperiod FOREIGN KEY (timeperiod_id) REFERENCES timeperiod(id)
 );
 
 CREATE INDEX idx_rule_changed_at ON rule(changed_at);

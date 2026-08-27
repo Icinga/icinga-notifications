@@ -120,6 +120,7 @@ var dbPruners = []Pruner{
 		Interval:         4 * time.Hour,
 		Referrers: []ReferencingRowPruner{
 			{Table: "object_id_tag", PKorFK: "object_id"},
+			{Table: "object_source", PKorFK: "object_id"},
 		},
 	},
 	&TimeBoundPruner{
