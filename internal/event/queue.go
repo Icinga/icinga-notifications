@@ -18,6 +18,7 @@ import (
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -281,7 +282,13 @@ func ProcessQueue(ctx context.Context, db *database.DB, logger *logging.Logger, 
 				return fmt.Errorf("cannot acquire semaphore for processing job queue entry: %w", err)
 			}
 
-			logger.Debugw("Claimed job queue entry for processing", zap.Stringer("id", j.Q.ID), zap.Object("event", j.Ev))
+			var marshaler zapcore.ObjectMarshaler
+			if j.Ev != nil {
+				marshaler = j.Ev
+			} else {
+				marshaler = j.QA
+			}
+			logger.Debugw("Claimed job queue entry for processing", zap.Stringer("id", j.Q.ID), zap.Object("payload", marshaler))
 
 			go func(j job) {
 				defer sem.Release(1)
@@ -524,7 +531,8 @@ func processAndFinalize(
 				zap.Stringer("kind", qa.Kind), zap.Stringer("id", q.ID), zap.Error(err))
 			q.State = QueueStateError
 		} else {
-			logger.Debugw("Successfully processed quick action", zap.Stringer("id", q.ID))
+			logger.Debugw("Successfully processed quick action",
+				zap.Stringer("kind", qa.Kind), zap.Stringer("id", q.ID))
 			q.State = QueueStateDone
 		}
 
