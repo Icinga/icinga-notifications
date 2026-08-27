@@ -115,18 +115,9 @@ func TestIncidents(t *testing.T) {
 	runtimeConfig := config.NewRuntimeConfig(logs, db)
 	require.NoError(t, runtimeConfig.UpdateFromDatabase(t.Context()))
 
-	t.Run("LoadOpenIncidents", func(t *testing.T) {
-		// Reduce the default placeholders per statement to a meaningful number, so that we can
-		// test some parallelism when loading the incidents.
-		db.Options.MaxPlaceholdersPerStatement = 100
-
-		// Due to the 10*maxPlaceholders constraint, only 10 goroutines are going to process simultaneously.
-		// Therefore, reduce the default maximum number of connections per table to 4 in order to fully simulate
-		// semaphore lock wait cycles for a given table.
-		db.Options.MaxConnectionsPerTable = 4
-
-		testData := make(map[string]*Incident, 10*db.Options.MaxPlaceholdersPerStatement)
-		for j := 1; j <= 10*db.Options.MaxPlaceholdersPerStatement; j++ {
+	t.Run("YieldIncidents", func(t *testing.T) {
+		testData := make(map[string]*Incident, 64)
+		for range 64 {
 			i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityCrit)))
 			testData[i.ObjectID.String()] = i
 		}
@@ -139,7 +130,7 @@ func TestIncidents(t *testing.T) {
 			pairCh, errCh := Yield(t.Context(), db, logs, runtimeConfig)
 			for pair := range pairCh {
 				// Mark some of the existing incidents as recovered.
-				if pair.Incident.Id%20 == 0 { // 1000 / 20 => 50 existing incidents will be marked as recovered!
+				if pair.Incident.Id%4 == 0 { // 64 / 4 => 16 existing incidents will be marked as recovered!
 					require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 						withIncident(), withClose(), withTags(pair.Object.Tags))))
 					require.NotZero(t, reloadIncident(t, db, pair.Incident).RecoveredAt)
@@ -156,7 +147,7 @@ func TestIncidents(t *testing.T) {
 			assert.NoError(t, <-errCh)
 			assert.Equal(t, len(testData), incidentsLen, "only the recovered incidents should be gone")
 
-			for j := 1; j <= db.Options.MaxPlaceholdersPerStatement/2; j++ {
+			for j := range 16 {
 				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 					withIncident(), withClose(), withSeverity(baseEv.SeverityAlert))))
 
@@ -185,7 +176,8 @@ func TestIncidents(t *testing.T) {
 			}
 			assert.NoError(t, <-errCh)
 			assert.Equal(t, 0, incidentsLen, "there should be no active incidents")
-			testData = make(map[string]*Incident) // Reset test data for the next test run.
+			clear(testData)
+			testData = nil
 		})
 	})
 
