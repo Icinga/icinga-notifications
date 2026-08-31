@@ -52,6 +52,9 @@ var (
 
 	// errEnvelopeVersionTooNew is returned when a queue entry's envelope version is newer than the version supported by this node.
 	errEnvelopeVersionTooNew = errors.New("envelope version is too new")
+
+	// errUnknownEnvelopeFmt is returned when a queue entry's envelope format is unknown to this node.
+	errUnknownEnvelopeFmt = errors.New("unknown envelope format")
 )
 
 type (
@@ -306,7 +309,20 @@ func startClaiming(
 						case EnvelopeFmtEvent:
 							ev, err = q.toEvent()
 						default:
-							err = errors.New("unknown envelope format")
+							err = fmt.Errorf("%w: %q", errUnknownEnvelopeFmt, q.Envelope.Format)
+						}
+
+						if errors.Is(err, errEnvelopeVersionTooNew) || errors.Is(err, errUnknownEnvelopeFmt) {
+							logger.Warnw("Cannot process job queue entry due to unsupported envelope format or version, canceling claiming to retry later",
+								zap.Stringer("envelope_format", q.Envelope.Format),
+								zap.Stringer("id", q.ID),
+								zap.Error(err))
+
+							// If the envelope format or version is unsupported, we cannot reliably process any queue
+							// entries anymore, so return a sql.ErrNoRows to retry this with a backoff, hoping until
+							// the next retry that the other node has processed these entries, and we can continue with
+							// the next batch of candidates.
+							return sql.ErrNoRows
 						}
 
 						if err != nil {
