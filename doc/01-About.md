@@ -35,6 +35,7 @@ Icinga Notifications comes with multiple channels out of the box:
 
 * _email_: Email submission via SMTP
 * _rocketchat_: Rocket.Chat
+* _telegram_: [Telegram](10-Channels.md#telegram)
 * _webhook_: Configurable HTTP/HTTPS queries for your backend
 
 Additional custom channels can be developed independently of Icinga Notifications,
