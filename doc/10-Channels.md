@@ -13,6 +13,46 @@ and stores those options in the database.
 Using this information, Icinga Notifications Web allows channels to be configured,
 which are then started, configured, and finally used to send notification events from Icinga Notifications.
 
+## Available Channels
+
+Icinga Notifications comes with multiple channels out of the box:
+
+* _email_: Email submission via SMTP
+* _rocketchat_: Rocket.Chat
+* _telegram_: Telegram
+* _webhook_: Configurable HTTP/HTTPS queries for your backend
+
+Most of them are configured entirely in Icinga Notifications Web.
+The sections below cover those channels that need some preparation on the other side first.
+
+### Telegram
+
+Telegram messages are sent by a bot, which is created and owned by a regular Telegram user account.
+Each contact receives their notifications in their personal chat from this bot.
+
+1. Create a bot by talking to [@BotFather](https://t.me/botfather) and using its `/newbot` command, as described in
+the [Telegram bot documentation](https://core.telegram.org/bots/features#creating-a-new-bot).
+BotFather answers with an authentication token, which is the credential for the bot's whole API access.
+Treat it like a password.
+
+2. Create a new channel of the type _Telegram_ in Icinga Notifications Web and set the _Bot token_ to that token.
+
+3. Let every contact who should be notified open a chat with the bot and send it a message, for example `/start`.
+A bot is not allowed to write messages to someone who has never written to it, so this step can not be skipped.
+
+4. Look up the chat ID of each contact and configure it as their _telegram_ address in Icinga Notifications Web.
+
+The messages from the previous step are queued as updates for the bot and can be read with the
+[`getUpdates`](https://core.telegram.org/bots/api#getupdates) method:
+
+```
+curl -s 'https://api.telegram.org/bot<token>/getUpdates'
+```
+
+In each update, `message.chat.id` is the chat ID to configure.
+
+A group can be notified the same way: add the bot to the group, post a message there, and use the group's chat ID.
+
 ## Technical Channel Description
 
 Channel plugins are independent processes that run continuously, started and supervised by Icinga Notifications.
