@@ -130,9 +130,6 @@ func (tbp *TimeBoundPruner) assembleDelete(driverName string, limit uint64) stri
 // ResetPruner is a specific TimeBoundPruner for updating affected rows instead of deleting them.
 //
 // The UpdateExpression is used in the UPDATE query after "UPDATE __TABLE__ SET " and must be one or many assignments.
-//
-// As the ResetPruner does not delete, it is not allowed to refer other tables. If ResetPruner.Referrers is not empty,
-// the Exec method will panic.
 type ResetPruner struct {
 	TimeBoundPruner
 	UpdateExpression string
@@ -141,17 +138,22 @@ type ResetPruner struct {
 // Exec prunes rows from the specified table that are older than the given time threshold.
 //
 // The ResetPruner understands pruning as a UPDATE query, which should alter the row to not be matched again.
+// If Referrers are defined, it will remove the matching rows atomically in a transaction.
 func (rp *ResetPruner) Exec(ctx context.Context, db *database.DB, l *logging.Logger, olderThan types.UnixMilli, limit uint64) (uint64, error) {
-	if len(rp.Referrers) != 0 {
-		panic("ResetPruner is not allowed to refer other tables")
-	}
-
 	var updated uint64
 	err := retry.WithBackoff(
 		ctx,
 		func(ctx context.Context) (err error) {
-			updated, err = exec(ctx, db, db, rp.assembleUpdate(db.DriverName(), limit), limit, olderThan)
-			return
+			if len(rp.Referrers) == 0 {
+				updated, err = exec(ctx, db, db, rp.assembleUpdate(db.DriverName(), limit), limit, olderThan)
+				return
+			}
+
+			// A tx is required here to ensure that the updates to the main table and its referrers are executed atomically.
+			return db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) (err error) {
+				updated, err = execCascade(ctx, db, tx, rp, limit, olderThan)
+				return
+			})
 		},
 		retry.Retryable,
 		backoff.DefaultBackoff,
@@ -174,6 +176,11 @@ func (rp *ResetPruner) assembleUpdate(driverName string, limit uint64) string {
 	default:
 		panic(fmt.Sprintf("invalid database type %s", driverName))
 	}
+}
+
+// assembleUpdateByPk constructs an update statement for the ResetPruner filtered by primary key.
+func (rp *ResetPruner) assembleUpdateByPk() string {
+	return fmt.Sprintf(`UPDATE %[1]s SET %[2]s WHERE %[3]s IN (?)`, rp.Table, rp.UpdateExpression, rp.PKorFK)
 }
 
 // OrphanRowPruner defines the configuration for pruning rows from a table that are not referenced by any other table.
@@ -352,6 +359,9 @@ func exec(ctx context.Context, db *database.DB, executer database.TxOrDB, query 
 // each [ReferencingRowPruner], and then deletes the rows from the main table by primary key. If the SELECT statement
 // requires any bind arguments (e.g. an "olderThan" threshold), they must be provided via args.
 //
+// Note that when the pruner provides a assembleUpdateByPk() method (e.g. [ResetPruner]), the main table is
+// updated instead of deleted, and the method will return the total number of updated rows from the main table.
+//
 // The method returns the total number of deleted rows from the main table.
 func execCascade[
 	P interface {
@@ -368,7 +378,12 @@ func execCascade[
 	args ...any,
 ) (uint64, error) {
 	selectStmt := pruner.assembleSelect(limit)
-	deleteStmt := pruner.assembleDeleteByPK()
+	var deleteOrUpdateStmt string
+	if updater, ok := any(pruner).(interface{ assembleUpdateByPk() string }); ok {
+		deleteOrUpdateStmt = updater.assembleUpdateByPk()
+	} else {
+		deleteOrUpdateStmt = pruner.assembleDeleteByPK()
+	}
 
 	var total uint64
 	for {
@@ -387,7 +402,7 @@ func execCascade[
 			}
 		}
 
-		if affected, err := exec(ctx, db, executer, deleteStmt, 0, rows...); err != nil {
+		if affected, err := exec(ctx, db, executer, deleteOrUpdateStmt, 0, rows...); err != nil {
 			return 0, err
 		} else {
 			total += affected

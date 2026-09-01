@@ -19,6 +19,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
 	"github.com/icinga/icinga-notifications/internal/listener"
+	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/retention"
 	"github.com/okzk/sdnotify"
 	"go.uber.org/zap"
@@ -128,12 +129,10 @@ func run() int {
 	}
 
 	eg.Go(func() error {
-		logger := logs.GetChildLogger("event-queue")
-		err := event.ProcessQueue(
-			ctx,
-			db,
-			logger,
-			func(ctx context.Context, ev *event.Event) error {
+		logger := logs.GetChildLogger("job-queue")
+		cbs := event.QueueCallbacks{
+			GenObjectID: object.ID,
+			ProcessEvent: func(ctx context.Context, ev *event.Event) error {
 				err := incident.ProcessEvent(ctx, db, logs, runtimeConfig, ev)
 				if errors.Is(err, incident.ErrSeverityChangeWithoutIncidentFlag) ||
 					errors.Is(err, incident.ErrOpenIncidentWithoutSeverity) {
@@ -143,8 +142,10 @@ func run() int {
 					return nil
 				}
 				return err
-			})
-		if err != nil && !errors.Is(err, context.Canceled) {
+			},
+		}
+
+		if err := event.ProcessQueue(ctx, db, logger, cbs); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Errorf("Event queue processor has finished with an error: %+v", err)
 			return err
 		}

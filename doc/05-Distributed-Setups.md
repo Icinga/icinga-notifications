@@ -32,7 +32,7 @@ incoming events will be distributed across them and processed from the shared qu
 The event queue is designed to be an internal API, where no external process is allowed to insert events.
 Thus, it is expected to only contain valid data.
 
-Nevertheless, in the unlikely case that corrupted data crept into the `event_queue` table,
+Nevertheless, in the unlikely case that corrupted data crept into the `job_queue` table,
 Icinga Notifications will log an error and mark the event as failed in the database.
-The log contains a reference to the invalid `event_queue` row including its `id`.
+The log contains a reference to the invalid `job_queue` row including its `id`.
 This allows inspecting the entry in the relational database and eventually fixing or deleting it.
