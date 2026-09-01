@@ -77,8 +77,8 @@ database:
 #  password_file: /run/secerets/icinga_notifications_database_password
 
 # The retention policy used by Icinga Notifications to determine how long no longer relevant historical data
-# is kept in the database before it is eligible for cleanup. Currently, this retention policy only applies to
-# closed incidents and related tables, but in the future it may be extended to other components as well.
+# is kept in the database before it is eligible for cleanup. This retention policy applies to closed incidents,
+# notification history, and related tables.
 retention:
   # Retention period for historical data defined as duration string. This is the duration after which historical data
   # is considered old and eligible for cleanup. By default, Icinga Notifications does not automatically clean up any
@@ -104,6 +104,7 @@ retention:
   # above is used.
 #  options:
 #    incident: 480h
+#    notification_history: 4320h
 
 # Icinga Notifications logs its activities at various severity levels and any errors that occur either
 # on the console or in systemd's journal. The latter is used automatically when running under systemd.

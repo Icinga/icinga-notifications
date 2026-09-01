@@ -58,7 +58,7 @@ For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_LI
 | socket              | **Optional.** Path to a Unix domain socket for local event submission.                                     |
 | socket_mode         | **Optional.** Permission bits for the Unix socket file, as an octal. Defaults to `0660`.                   |
 | socket_group        | **Optional.** OS group to assign to the Unix socket file. Defaults to Icinga Notifications' primary group. |
-| debug_password      | Password expected via HTTP Basic Authentication for debug endpoints.                                       |
+| debug_password      | Password expected via [HTTP Basic Authentication](20-HTTP-API.md#authentication) for debug endpoints.      |
 | debug_password_file | `debug_password` in a file.                                                                                |
 | tls                 | **Optional.** Whether to require TLS for the TCP listener. Defaults to `false`.                            |
 | cert                | **Optional.** Path to TLS server certificate. Required if `tls` is enabled.                                |
@@ -148,8 +148,9 @@ data cleanup for that component.
 
 Also note that Icinga Notifications may still keep cleaning up data of some components that can't be influenced by the
 retention configuration, such as the `object` table and its related tables, which are cleaned up automatically when
-there are no more references to them from the `incident` table. This is necessary to avoid unnecessarily bloating
-the database with orphaned data that is no longer relevant to any incident.
+there are no more references to them from either the `incident` table or the `notification_history` table. This is
+necessary to avoid unnecessarily bloating the database with orphaned data that is no longer relevant to any incident
+or past notification attempt.
 
 ### Retention Components
 
@@ -163,9 +164,10 @@ a [duration string](#duration-string) as value.
 
 Currently, the following components are available:
 
-| Component | Description                                                           |
-|-----------|-----------------------------------------------------------------------|
-| incident  | Incidents and all related data, such as their history, contacts, etc. |
+| Component            | Description                                                             |
+|----------------------|-------------------------------------------------------------------------|
+| incident             | Incidents and all related data, such as their history, contacts, etc.   |
+| notification_history | Recorded notification attempts (sent or failed) and their skipped rows. |
 
 !!! info
 

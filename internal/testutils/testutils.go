@@ -17,15 +17,24 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
-// LoadTestConfig loads the configuration from environment variables into the provided config struct for testing purposes.
+// SkipTestIfDBConfigIsMissing skips the calling test if the required test database environment variable is not set.
 //
-// It requires the environment variable "ICINGA_NOTIFICATIONS_DATABASE_TYPE" to be set, otherwise it will
-// skip the test. The function validates the provided configuration struct and populates it with values
-// from the environment variables prefixed with "ICINGA_NOTIFICATIONS_".
-func LoadTestConfig[T config.Validator](t *testing.T, configFile T) {
+// Call this before daemon.InjectTestConfig, not from inside its callback: InjectTestConfig only ever invokes
+// its callback once per test binary (it guards a package-wide singleton), so if the first test to reach it is
+// the one that skips, every later test calling InjectTestConfig silently gets an empty, never-loaded config
+// instead of being skipped itself. Checking the environment independently in each test, before touching the
+// singleton, ensures every test in the package skips consistently when the database isn't configured.
+func SkipTestIfDBConfigIsMissing(t *testing.T) {
 	if _, ok := os.LookupEnv("ICINGA_NOTIFICATIONS_DATABASE_TYPE"); !ok {
 		t.Skipf("Environment %q not set, skipping test!", "ICINGA_NOTIFICATIONS_DATABASE_TYPE")
 	}
+}
+
+// LoadTestConfig loads the configuration from environment variables into the provided config struct for testing
+// purposes, populating it with values from the environment variables prefixed with "ICINGA_NOTIFICATIONS_".
+//
+// Callers must first ensure the test database is configured, e.g. via SkipTestIfDBConfigIsMissing.
+func LoadTestConfig[T config.Validator](t *testing.T, configFile T) {
 	require.NoError(t, config.FromEnv(configFile, config.EnvOptions{Prefix: "ICINGA_NOTIFICATIONS_"}))
 }
 

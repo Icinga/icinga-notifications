@@ -3,22 +3,19 @@
 Icinga Notifications comes with its own HTTP API, [configurable](03-Configuration.md#http-api-configuration)
 via `listen` and `debug-password`.
 
-## Process Event
+## Authentication
 
-Events can be submitted to Icinga Notifications using the `/process-event` HTTP API endpoint.
+Icinga Notifications identifies the source of an HTTP API request differently depending on the transport used to
+reach the HTTP API:
 
-After creating a source in Icinga Notifications Web,
-the specified credentials can be used via HTTP Basic Authentication to submit a JSON-encoded
-[`Event`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/event/event.go).
-
-Authentication differs by transport:
-
-- **TCP:** HTTP Basic Authentication is used; both the source's username and password must match
-  the configured credentials.
-- **TCP with TLS:** If the request arrives with a TLS client certificate signed by the CA, the source is identified by the
-  certificate's Subject.
-- **Unix socket:** The caller is identified automatically by their OS user. No HTTP Basic Auth or
-  password is involved.
+- **TCP:** HTTP Basic Authentication is used; both the source's username and password must match the configured
+  credentials.
+- **TCP with TLS:** The source is identified by the Subject of a TLS client certificate signed by the CA, instead of
+  HTTP Basic Authentication. To submit this way, pass `--cacert ca.crt --cert client.crt --key client.key` to curl
+  and omit `-u`. If no matching source is found, the request is rejected.
+- **Unix socket:** The caller is identified automatically by their OS user; no HTTP Basic Auth or password is
+  involved. To submit this way, pass `--unix-socket /run/icinga/icinga-notifications.sock` to curl and omit `-u`.
+  curl must be executed as a user which is configured as the `listener_username` of a source.
 
 !!! important
 
@@ -26,10 +23,19 @@ Authentication differs by transport:
     listener_username matches the process's OS username. Restrict socket access using `socket_mode` and
     `socket_group` to limit which OS users can connect.
 
-!!! info
+These rules apply to the [Process Event](#process-event), [Incidents](#incidents), and
+[Notification History](#notification-history) endpoints. The [debug endpoints](#debugging-endpoints) use a separate,
+transport-independent authentication scheme: the `debug-password` must be supplied via HTTP Basic Authentication next
+to an arbitrary username, regardless of transport.
 
-    Before Icinga Notifications version 0.2.0, the username was a fixed string based on the source ID, such as `source-${id}`.
-    When upgrading a setup from an earlier version, these usernames are still valid, but can be changed in Icinga Notifications Web.
+## Process Event
+
+Events can be submitted to Icinga Notifications using the `/process-event` HTTP API endpoint.
+
+After creating a source in Icinga Notifications Web,
+the specified credentials can be used via HTTP Basic Authentication to submit a JSON-encoded
+[`Event`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/event/event.go).
+See [Authentication](#authentication) for how sources are identified across the supported transports.
 
 The `url` field of an event is optional, but if set, it must be an absolute URL such as
 `https://example.com/icingaweb2/icingadb/host?name=example.com`. It is meant to point the notified contact at the
@@ -107,20 +113,6 @@ curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomple
 EOF
 ```
 
-To submit over a Unix socket instead, pass `--unix-socket /run/icinga/icinga-notifications.sock` to curl.
-No credentials are needed; the daemon identifies the caller by their OS user automatically.
-
-!!! info
-
-    curl must be executed as a user which is configured as listener_username of a source.
-
-To submit over TLS using a client certificate instead of HTTP Basic Authentication,
-pass `--cacert ca.crt --cert client.crt --key client.key` to curl and omit `-u`:
-
-!!! info
-
-    The daemon identifies the source by the certificate's Subject. If no matching source is found, the request is rejected.
-
 ## Incidents
 
 The `/incidents` Icinga Notifications HTTP API endpoint allows sources to query and modify a list of open incidents.
@@ -129,8 +121,7 @@ with the desired changes. The endpoint requires a `filter` query parameter to sp
 to retrieve or modify. Please refer to the [API Filtering](#api-filtering) section for more details on how to construct
 the filter.
 
-Authentication follows the same transport-specific rules as for event submission: TCP requires HTTP
-Basic Auth with username and password, while a Unix socket identifies the caller by their OS user.
+See [Authentication](#authentication) for the transport-specific rules that apply here.
 
 ### Getting Incidents
 
@@ -149,7 +140,7 @@ specific Icinga DB environment. The following example shows how to retrieve all 
 `08434a503ec43bb67cd380c5d0b6217a1ebf924b` environment:
 
 ```
-$ curl -u 'example:insecureinsecure' 'http://localhost:5680/incidents?filter=%7B%22environment%22%3A%2208434a503ec43bb67cd380c5d0b6217a1ebf924b%22%7D'
+$ curl -u 'example:insecureinsecure' 'http://localhost:5680/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b"}'
 ...
 {"is_muted":false,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"},"severity":"crit"}
 {"is_muted":true,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"severity":"err"}
@@ -194,18 +185,8 @@ incident in the response:
 The following example shows how to close the incident for the `mailserver` host and `filesystem` service in the
 `08434a503ec43bb67cd380c5d0b6217a1ebf924b` environment:
 
-The URL-encoded filter in the example below corresponds to the following JSON object:
-
-```json
-{
-  "environment": "08434a503ec43bb67cd380c5d0b6217a1ebf924b",
-  "host": "mailserver",
-  "service": "filesystem"
-}
 ```
-
-```
-$ curl -u 'example:insecureinsecure' -X POST 'http://localhost:5680/incidents?filter=%7B%22environment%22%3A%2208434a503ec43bb67cd380c5d0b6217a1ebf924b%22%2C%22host%22%3A%22mailserver%22%2C%22service%22%3A%22filesystem%22%7D' -d '@-' <<EOF
+$ curl -u 'example:insecureinsecure' -X POST 'http://localhost:5680/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"}' -d '@-' <<EOF
 {
   "close": true
 }
@@ -217,7 +198,7 @@ attribute set to the new message. For instance, the following example shows how 
 for the `database` host and `load` service in the `08434a503ec43bb67cd380c5d0b6217a1ebf924b` environment:
 
 ```
-$ curl -u 'example:insecureinsecure' -X POST 'http://localhost:5680/incidents?filter=%7B%22environment%22%3A%2208434a503ec43bb67cd380c5d0b6217a1ebf924b%22%2C%22host%22%3A%22database%22%2C%22service%22%3A%22load%22%7D' -d '@-' <<EOF
+$ curl -u 'example:insecureinsecure' -X POST 'http://localhost:5680/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"}' -d '@-' <<EOF
 {
   "message": "The load on the database server has returned to normal."
 }
@@ -237,6 +218,41 @@ while the incident for the `database` host and `load` service failed to be modif
 {"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"}}
 {"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"error":"failed to modify incident, see server logs for details"}
 ```
+
+## Notification History
+
+See [Authentication](#authentication) for the transport-specific rules that apply here.
+
+In order to retrieve notification history entries, send a `GET` request to the `/notification-history` endpoint
+with the query parameters `filter` described in [API Filtering](#api-filtering) and `since` set to a Unix timestamp in
+milliseconds. Only entries whose `triggered_at` is greater than or equal to this value are returned. This endpoint
+will include the attributes listed below in the response for each entry:
+
+| Attribute         | Description                                                                                |
+|-------------------|--------------------------------------------------------------------------------------------|
+| event_id          | Hex-encoded ID of the event that caused the notification to be triggered.                  |
+| triggered_at      | Unix timestamp in milliseconds at which the notification attempt was made.                 |
+| contact_name      | Full name of the contact the notification was sent to.                                     |
+| contactgroup_name | Name of the contact group the contact was resolved from, if any.                           |
+| schedule_name     | Name of the on-call schedule the contact was resolved from, if any.                        |
+| channel_name      | Name of the channel used to deliver the notification.                                      |
+| event_message     | The message of the event that triggered the notification.                                  |
+| state             | The state of the notification attempt, either `sent` or `failed`.                          |
+| error             | An optional attribute that may be present if an error occurred while retrieving the entry. |
+
+The following example shows how to retrieve all notification history entries recorded since
+2026-01-01T00:00:00Z (`1767225600000`):
+
+```
+$ curl -u 'example:insecureinsecure' 'http://localhost:5680/notification-history?since=1767225600000' -G --data-urlencode 'filter={"host":"test-host"}'
+...
+{"event_id":"abc47021-7c9c-49e1-b23e-f7fa446ff513","triggered_at":1767225654000,"contact_name":"Jane Doe","contactgroup_name":"","schedule_name":"On-Call","channel_name":"email","event_message":"Something went somewhere very wrong.","state":"sent"}
+```
+
+Like the `/incidents` endpoint, Icinga Notifications streams the response as a series of JSON objects with the fields
+described above, one per line, in [JSON Lines/NDJSON](https://jsonlines.org/) format. The general HTTP status code of the response will
+always be `202 Accepted` in the successful case, even if the response contains no entries at all. If an error
+occurs after streaming has already started, a final JSON object with the `error` attribute set is sent instead.
 
 ## API Filtering
 
@@ -334,7 +350,7 @@ the filter `{"host":"mailserver","service":"filesystem"}` should be URL-encoded 
 
 There are multiple endpoints for dumping specific configurations.
 All of them are prefixed by `/debug`.
-To use those, the `debug-password` must be set and supplied via HTTP Basic Authentication next to an arbitrary username.
+To use those, the `debug-password` must be set and supplied via [HTTP Basic Authentication](#authentication) next to an arbitrary username.
 Unlike event submission, the debug endpoints always require the password regardless of the transport; connecting via
 Unix socket does not bypass this check.
 

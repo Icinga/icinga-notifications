@@ -20,7 +20,6 @@ jobs:
       fail-fast: false
       matrix:
         image:
-          - mysql:5.7
           - mysql:8.0
           - mysql:8
           - mysql:latest

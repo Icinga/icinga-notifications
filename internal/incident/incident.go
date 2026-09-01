@@ -9,6 +9,7 @@ import (
 
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -101,7 +102,7 @@ func (i *Incident) HasManager() bool {
 			i.logger.Debugw("Incident refers unknown recipient key, might got deleted", zap.Inline(recipientKey))
 			continue
 		}
-		if state.Role == RoleManager {
+		if state.Role == recipient.RoleManager {
 			return true
 		}
 	}
@@ -113,12 +114,12 @@ func (i *Incident) HasManager() bool {
 //
 // For a managed incident, only managers and subscribers should be notified, for unmanaged incidents,
 // regular recipients are notified as well.
-func (i *Incident) IsNotifiable(role ContactRole) bool {
+func (i *Incident) IsNotifiable(role recipient.Role) bool {
 	if !i.HasManager() {
 		return true
 	}
 
-	return role > RoleRecipient
+	return role > recipient.RoleRecipient
 }
 
 // ProcessEvent processes the given event for the current incident in an own transaction.
@@ -293,6 +294,17 @@ func (i *Incident) RetriggerEscalations(ctx context.Context, o *object.Object, e
 				channels.LoadFromEscalationRecipients(escalation, ev.Time, i.isRecipientNotifiable)
 			}
 
+			eventIDQuery := `
+			SELECT "event_id" FROM "incident_history"
+			WHERE "event_id" IS NOT NULL AND "incident_id" = ?
+			ORDER BY "time" DESC
+			LIMIT 1`
+
+			if err := i.db.GetContext(ctx, &ev.ID, i.db.Rebind(eventIDQuery), i.Id); err != nil {
+				return fmt.Errorf("cannot fetch last event ID for incident %s: %w", i, err)
+			}
+
+			ev.Tags = o.Tags
 			notifications, err = i.generateNotifications(ctx, tx, ev, channels)
 			if err != nil {
 				return fmt.Errorf("cannot generate notifications for reevaluated escalations: %w", err)
@@ -375,6 +387,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 			NewSeverity: ev.Severity,
 			OldSeverity: i.Severity,
 			Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
+			EventID:     ev.ID,
 		}
 
 		if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -405,6 +418,7 @@ func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, 
 		Time:        types.UnixMilli(ev.Time),
 		NewSeverity: i.Severity,
 		Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
+		EventID:     ev.ID,
 	}
 
 	if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -649,18 +663,32 @@ func (i *Incident) notifyContacts(
 
 		err := i.notifyContact(obj, contact, ev, ch)
 		if err != nil {
-			notification.State = NotificationStateFailed
+			notification.State = source.NotificationStateFailed
 		} else {
-			notification.State = NotificationStateSent
+			notification.State = source.NotificationStateSent
 		}
 
 		notification.SentAt = types.UnixMilli(time.Now())
+		notification.HistoryEntry.TriggeredAt = notification.SentAt
+		notification.HistoryEntry.State = notification.State
+
 		stmt, _ := i.db.BuildUpdateStmt(notification)
 		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
 			i.logger.Errorw(
 				"Failed to update contact notified incident history", zap.String("contact", contactName),
 				zap.Error(err),
 			)
+		}
+
+		if err := notification.HistoryEntry.Sync(ctx, i.db); err != nil {
+			i.logger.Errorw("Failed to insert notification history", zap.String("contact", contactName), zap.Error(err))
+		}
+		for _, skippedEntry := range notification.SkippedHistoryEntries {
+			skippedEntry.NotificationID = notification.HistoryEntry.ID
+			stmt := database.BuildInsertStmtWithout(i.db, skippedEntry, "id")
+			if _, err := i.db.NamedExecContext(ctx, stmt, skippedEntry); err != nil {
+				return err
+			}
 		}
 
 		if err := ctx.Err(); err != nil {
@@ -722,8 +750,10 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 
 				for _, contact := range contacts {
 					if contactChs[contact] == nil {
-						contactChs[contact] = make(map[int64]bool)
-						contactChs[contact][contact.DefaultChannelID] = true
+						contactChs[contact] = []rule.ChannelOrigin{{
+							ChannelID: contact.DefaultChannelID,
+							Role:      state.Role,
+						}}
 					}
 				}
 			} else {
@@ -826,7 +856,7 @@ func (e *EscalationState) TableName() string {
 }
 
 type RecipientState struct {
-	Role ContactRole
+	Role recipient.Role
 }
 
 var (
