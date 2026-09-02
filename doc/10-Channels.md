@@ -466,7 +466,6 @@ or if the channel is missing required configuration values.
     },
     "incident": {
       "id": 1437,
-      "url": "http://localhost/icingaweb2/notifications/incident?id=1437",
       "severity": "crit"
     },
     "event": {

@@ -7,7 +7,6 @@ on:
   pull_request: {}
 
 env:
-  ICINGA_NOTIFICATIONS_ICINGAWEB2_URL: https://localhost/icingaweb2
   ICINGA_NOTIFICATIONS_CHANNELS_DIR: ${{ github.workspace }}/channels
   ICINGA_NOTIFICATIONS_DATABASE_DATABASE: notifications
   ICINGA_NOTIFICATIONS_DATABASE_PASSWORD: notifications

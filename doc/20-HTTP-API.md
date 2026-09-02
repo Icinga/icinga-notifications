@@ -31,6 +31,12 @@ Authentication differs by transport:
     Before Icinga Notifications version 0.2.0, the username was a fixed string based on the source ID, such as `source-${id}`.
     When upgrading a setup from an earlier version, these usernames are still valid, but can be changed in Icinga Notifications Web.
 
+The `url` field of an event is optional, but if set, it must be an absolute URL such as
+`https://example.com/icingaweb2/icingadb/host?name=example.com`. It is meant to point the notified contact at the
+object in the web interface of the source that submitted the event. Icinga Notifications does not know where that
+interface lives and therefore cannot complete a relative reference, so events carrying one are rejected with a
+`400 Bad Request` status code.
+
 Events sent to Icinga Notifications are expected to match rules that describe further event escalations.
 These rules can be configured in Icinga Notifications Web and should be designed to match the `relations` of the
 submitted events. When submitting an event without the expected relations to evaluate the rules, Icinga Notifications
