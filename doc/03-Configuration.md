@@ -27,11 +27,6 @@ Only one of these two options can be used.
 For YAML configuration, these options are on the top level, not part of a dictionary.
 For environment variables, each option is prefixed with `ICINGA_NOTIFICATIONS_`.
 
-### Icinga Web 2
-
-The `icingaweb2_url` is expected to point to the base directory of your Icinga Web 2 installation,
-i.e., `https://example.com/icingaweb2/`, to be used for URL creation.
-
 ### Channels Directory
 
 All available Icinga Notifications channels should reside in the `channels_dir` directory.

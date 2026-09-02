@@ -429,7 +429,6 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		SourceId: src.ID,
 		Event:    innerEv,
 	}
-	ev.CompleteURL(daemon.Config().IcingaWeb2UrlParsed)
 
 	if err := ev.Validate(); err != nil {
 		l.abort(w, http.StatusBadRequest, src, "%v", err)

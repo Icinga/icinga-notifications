@@ -3,8 +3,6 @@ package channel
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net/url"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -219,7 +217,7 @@ func (c *Channel) Restart(logger *zap.SugaredLogger) {
 }
 
 // Notify prepares and sends the notification request, returns a non-error on fails, nil on success
-func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, o *object.Object, ev *event.Event, icingaweb2Url *url.URL) error {
+func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, o *object.Object, ev *event.Event) error {
 	p := c.getPlugin()
 	if p == nil {
 		return errors.New("plugin could not be started")
@@ -230,9 +228,6 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, o *ob
 		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
 	}
 
-	incidentUrl := icingaweb2Url.JoinPath("/notifications/incident")
-	incidentUrl.RawQuery = fmt.Sprintf("id=%d", i.ID())
-
 	req := &plugin.NotificationRequest{
 		Contact: contactStruct,
 		Object: &plugin.Object{
@@ -242,7 +237,6 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, o *ob
 		},
 		Incident: &plugin.Incident{
 			Id:       i.ID(),
-			Url:      incidentUrl.String(),
 			Severity: i.IncidentSeverity(),
 		},
 		Event: &plugin.Event{

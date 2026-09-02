@@ -13,7 +13,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/contracts"
-	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -681,7 +680,7 @@ func (i *Incident) notifyContact(
 ) error {
 	i.logger.Infof("Notifying contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type)
 
-	if err := ch.Notify(contact, i, obj, ev, daemon.Config().IcingaWeb2UrlParsed); err != nil {
+	if err := ch.Notify(contact, i, obj, ev); err != nil {
 		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
 		return err
 	}

@@ -2,10 +2,11 @@ package event
 
 import (
 	"encoding/json"
-	"net/url"
 	"testing"
+	"time"
 
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,51 +15,42 @@ import (
 func TestEvent(t *testing.T) {
 	t.Parallel()
 
-	t.Run("CompleteURL", func(t *testing.T) {
+	t.Run("ValidateURL", func(t *testing.T) {
 		t.Parallel()
-
-		baseUrl, err := url.Parse("https://example.com/icingaweb")
-		require.NoError(t, err)
 
 		testCases := []struct {
 			name     string
 			eventURL string
-			expected string
+			isValid  bool
 		}{
-			{
-				name:     "Absolute URL",
-				eventURL: "https://example.org/path/123",
-				expected: "https://example.org/path/123",
-			},
-			{
-				name:     "Relative URL With Leading Slash",
-				eventURL: "/icingadb/host?name=testhost",
-				expected: "https://example.com/icingaweb/icingadb/host?name=testhost",
-			},
-			{
-				name:     "Relative URL Without Leading slash",
-				eventURL: "icingadb/service?host.name=testhost&name=testservice",
-				expected: "https://example.com/icingaweb/icingadb/service?host.name=testhost&name=testservice",
-			},
-			{
-				name:     "Invalid URL",
-				eventURL: "http://[invalid-url",
-				expected: "http://[invalid-url",
-			},
-			{
-				name:     "Empty URL",
-				eventURL: "",
-				expected: "",
-			},
+			{name: "Absolute URL", eventURL: "https://example.org/path/123", isValid: true},
+			{name: "Absolute URL Of Unknown Scheme", eventURL: "icinga://example.org/path/123", isValid: true},
+			{name: "Empty URL", eventURL: "", isValid: true},
+			{name: "Relative URL With Leading Slash", eventURL: "/icingadb/host?name=testhost", isValid: false},
+			{name: "Relative URL Without Leading Slash", eventURL: "icingadb/host?name=testhost", isValid: false},
+			{name: "Protocol Relative URL", eventURL: "//example.org/path/123", isValid: false},
+			{name: "Invalid URL", eventURL: "http://[invalid-url", isValid: false},
 		}
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 
-				ev := &Event{Event: baseEv.Event{URL: tc.eventURL}}
-				ev.CompleteURL(baseUrl)
-				assert.Equal(t, tc.expected, ev.URL)
+				ev := &Event{
+					Time:     time.Now(),
+					SourceId: 1,
+					Event: baseEv.Event{
+						URL:      tc.eventURL,
+						Tags:     map[string]string{"host": "testhost"},
+						Incident: types.MakeBool(true),
+					},
+				}
+
+				if tc.isValid {
+					assert.NoError(t, ev.Validate())
+				} else {
+					assert.Error(t, ev.Validate())
+				}
 			})
 		}
 	})

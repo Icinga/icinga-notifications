@@ -78,8 +78,14 @@ Starting with version v1.0, the Icinga Notifications configuration options have 
 Specifically, the `listen`, `debug-password`, and `debug-password_file` global options have been moved under a new
 `listener` section. If you are upgrading to version v1.0 from an earlier version, you will need to update your existing
 configuration file to reflect this change. Also, the `debug-password`, `debug-password_file`, and `listen` options have
-been renamed to `debug_password`, `debug_password_file`, and `address` respectively. Last but not least, the
-`icingaweb2-url` and `channels-dir` global options have been renamed to `icingaweb2_url` and `channels_dir` as well.
+been renamed to `debug_password`, `debug_password_file`, and `address` respectively. The `channels-dir` global option
+has been renamed to `channels_dir` as well.
+
+The `icingaweb2-url` global option has been dropped without replacement and you will have to remove it from your config.
+Icinga Notifications no longer builds any URLs on its own and can therefore no longer complete an event's relative `url`.
+The field itself stays optional, but if an event carries one, `/process-event` now rejects anything but an absolute URL.
+If you are running a source that submits relative URLs, upgrade it to the version that submits absolute ones before
+upgrading Icinga Notifications.
 
 !!! info
 
@@ -100,9 +106,8 @@ debug-password: "my-debug-password"
 icingaweb2-url: http://localhost/icingaweb2
 channels-dir: /usr/libexec/icinga-notifications/channels
 
-# After (v1.0 and later)
+# After (v1.0 and later), note that icingaweb2-url is gone
 
-icingaweb2_url: http://localhost/icingaweb2
 channels_dir: /usr/libexec/icinga-notifications/channels
 
 listener:
