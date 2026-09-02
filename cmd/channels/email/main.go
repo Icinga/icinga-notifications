@@ -35,6 +35,15 @@ const (
 	EncryptionTLS      = "tls"
 )
 
+const (
+	// AuthMechanismAuto picks the SASL mechanism.
+	AuthMechanismAuto = "auto"
+	// AuthMechanismPlain enforces the SASL PLAIN mechanism.
+	AuthMechanismPlain = "plain"
+	// AuthMechanismLogin enforces the still widely deployed SASL LOGIN mechanism
+	AuthMechanismLogin = "login"
+)
+
 type Email struct {
 	Host       string `json:"host"`
 	Port       string `json:"port"`
@@ -43,6 +52,8 @@ type Email struct {
 	User       string `json:"user"`
 	Password   string `json:"password"` // #nosec G117 -- exported password field
 	Encryption string `json:"encryption"`
+	// AuthMechanism is one of: AuthMechanismAuto, AuthMechanismPlain or AuthMechanismLogin.
+	AuthMechanism string `json:"auth_mechanism"`
 
 	mu sync.Mutex // Protects access to the above fields.
 
@@ -147,6 +158,25 @@ func (ch *Email) GetInfo() *plugin.Info {
 				EncryptionTLS:      "TLS",
 			},
 		},
+		{
+			Name:     "auth_mechanism",
+			Type:     "option",
+			Required: true,
+			Default:  AuthMechanismAuto,
+			Label: map[string]string{
+				"en_US": "SMTP Authentication mechanism",
+				"de_DE": "SMTP Authentifizierungs Mechanism",
+			},
+			Help: map[string]string{
+				"en_US": "Only used when an SMTP user is set. Automatic prefers PLAIN over LOGIN, based on what the SMTP server advertises.",
+				"de_DE": "Wird nur dann verwendet, wenn ein SMTP Benutzer ist gesetzt. Automatisch bevorzugt den PLAIN gegen LOGIN, davon abhängig, was der SMTP Server anbietet.",
+			},
+			Options: map[string]string{
+				AuthMechanismAuto:  "Automatic",
+				AuthMechanismPlain: "PLAIN",
+				AuthMechanismLogin: "LOGIN",
+			},
+		},
 	}
 
 	return &plugin.Info{
@@ -183,6 +213,7 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 	ch.User = tmpEm.User
 	ch.Password = tmpEm.Password
 	ch.Encryption = tmpEm.Encryption
+	ch.AuthMechanism = tmpEm.AuthMechanism
 
 	return nil
 }
@@ -257,6 +288,7 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	encryption := ch.Encryption
 	password := ch.Password
 	username := ch.User
+	authMechanism := ch.AuthMechanism
 	ch.mu.Unlock()
 
 	switch encryption {
@@ -275,7 +307,12 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	defer func() { _ = client.Close() }()
 
 	if password != "" {
-		if err = client.Auth(sasl.NewPlainClient("", username, password)); err != nil {
+		auth, err := saslClient(client, authMechanism, username, password)
+		if err != nil {
+			return err
+		}
+
+		if err := client.Auth(auth); err != nil {
 			return err
 		}
 	}
@@ -285,6 +322,29 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	}
 
 	return client.Quit()
+}
+
+// saslClient returns a sasl.Client for the requested authentication mechanism.
+// For AuthMechanismAuto, the mechanism is selected from those advertised by the SMTP server, preferring PLAIN over the
+// LOGIN mechanism. This requires an already greeted client, which is the case after the first contact.
+func saslClient(client *smtp.Client, mechanism, username, password string) (sasl.Client, error) {
+	switch mechanism {
+	case AuthMechanismAuto:
+		if client.SupportsAuth(sasl.Plain) {
+			return sasl.NewPlainClient("", username, password), nil
+		}
+		if client.SupportsAuth(sasl.Login) {
+			return sasl.NewLoginClient(username, password), nil
+		}
+
+		return nil, fmt.Errorf("SMTP server advertises neither the %s nor the %s authentication mechanism", sasl.Plain, sasl.Login)
+	case AuthMechanismPlain:
+		return sasl.NewPlainClient("", username, password), nil
+	case AuthMechanismLogin:
+		return sasl.NewLoginClient(username, password), nil
+	default:
+		return nil, fmt.Errorf("unsupported SMTP authentication mechanism %q", mechanism)
+	}
 }
 
 // makeStateKey composes a unique key for the channel state based on the recipient's email address and the incident ID.
