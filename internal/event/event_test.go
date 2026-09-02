@@ -3,10 +3,8 @@ package event
 import (
 	"encoding/json"
 	"testing"
-	"time"
 
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
-	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,46 +12,6 @@ import (
 
 func TestEvent(t *testing.T) {
 	t.Parallel()
-
-	t.Run("ValidateURL", func(t *testing.T) {
-		t.Parallel()
-
-		testCases := []struct {
-			name     string
-			eventURL string
-			isValid  bool
-		}{
-			{name: "Absolute URL", eventURL: "https://example.org/path/123", isValid: true},
-			{name: "Absolute URL Of Unknown Scheme", eventURL: "icinga://example.org/path/123", isValid: true},
-			{name: "Empty URL", eventURL: "", isValid: true},
-			{name: "Relative URL With Leading Slash", eventURL: "/icingadb/host?name=testhost", isValid: false},
-			{name: "Relative URL Without Leading Slash", eventURL: "icingadb/host?name=testhost", isValid: false},
-			{name: "Protocol Relative URL", eventURL: "//example.org/path/123", isValid: false},
-			{name: "Invalid URL", eventURL: "http://[invalid-url", isValid: false},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				t.Parallel()
-
-				ev := &Event{
-					Time:     time.Now(),
-					SourceId: 1,
-					Event: baseEv.Event{
-						URL:      tc.eventURL,
-						Tags:     map[string]string{"host": "testhost"},
-						Incident: types.MakeBool(true),
-					},
-				}
-
-				if tc.isValid {
-					assert.NoError(t, ev.Validate())
-				} else {
-					assert.Error(t, ev.Validate())
-				}
-			})
-		}
-	})
 
 	t.Run("ExtractMissingRelations", func(t *testing.T) {
 		t.Parallel()
