@@ -2,7 +2,6 @@ package event
 
 import (
 	"fmt"
-	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -47,20 +46,6 @@ func (e *Event) Validate() error {
 
 	if e.SourceId == 0 {
 		return fmt.Errorf("invalid event: source ID must not be empty")
-	}
-
-	// The daemon doesnt know where the source's web interface lives, so it can not turn a relative
-	// reference into something a notification recipient is able to open. Sources have to send an absolute
-	// URL right away. An empty url is still okay, it just means that this object has no web interface.
-	if e.URL != "" {
-		u, err := url.Parse(e.URL)
-		if err != nil {
-			return fmt.Errorf("invalid event: url is not a valid URL: %w", err)
-		}
-
-		if !u.IsAbs() {
-			return fmt.Errorf("invalid event: url must be an absolute URL, got %q", e.URL)
-		}
 	}
 
 	return nil
