@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/emersion/go-sasl"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
@@ -21,35 +22,35 @@ func TestEmail_SetConfig(t *testing.T) {
 		{
 			name:    "empty-json-obj-use-defaults",
 			jsonMsg: `{}`,
-			want:    &Email{SenderName: "Icinga", AuthMechanism: AuthMechanismAuto},
+			want:    &Email{SenderName: "Icinga", AuthMethod: sasl.Plain},
 		},
 		{
 			name:    "sender-mail-null-equals-defaults",
 			jsonMsg: `{"sender_mail": null}`,
-			want:    &Email{SenderName: "Icinga", AuthMechanism: AuthMechanismAuto},
+			want:    &Email{SenderName: "Icinga", AuthMethod: sasl.Plain},
 		},
 		{
 			name:    "sender-mail-overwrite",
 			jsonMsg: `{"sender_mail": "foo@bar"}`,
-			want:    &Email{SenderName: "Icinga", SenderMail: "foo@bar", AuthMechanism: AuthMechanismAuto},
+			want:    &Email{SenderName: "Icinga", SenderMail: "foo@bar", AuthMethod: sasl.Plain},
 		},
 		{
 			name:    "sender-mail-overwrite-empty",
 			jsonMsg: `{"sender_mail": ""}`,
-			want:    &Email{SenderName: "Icinga", SenderMail: "", AuthMechanism: AuthMechanismAuto},
+			want:    &Email{SenderName: "Icinga", SenderMail: "", AuthMethod: sasl.Plain},
 		},
 		{
 			name:    "full-example-config",
 			jsonMsg: `{"sender_name":"icinga","sender_mail":"icinga@example.com","host":"smtp.example.com","port":"25","encryption":"none"}`,
 			want: &Email{
-				Host:          "smtp.example.com",
-				Port:          "25",
-				SenderName:    "icinga",
-				SenderMail:    "icinga@example.com",
-				User:          "",
-				Password:      "",
-				Encryption:    "none",
-				AuthMechanism: AuthMechanismAuto,
+				Host:       "smtp.example.com",
+				Port:       "25",
+				SenderName: "icinga",
+				SenderMail: "icinga@example.com",
+				User:       "",
+				Password:   "",
+				Encryption: "none",
+				AuthMethod: sasl.Plain,
 			},
 		},
 		{

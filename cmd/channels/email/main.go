@@ -35,15 +35,6 @@ const (
 	EncryptionTLS      = "tls"
 )
 
-const (
-	// AuthMechanismAuto picks the SASL mechanism.
-	AuthMechanismAuto = "auto"
-	// AuthMechanismPlain enforces the SASL PLAIN mechanism.
-	AuthMechanismPlain = "plain"
-	// AuthMechanismLogin enforces the still widely deployed SASL LOGIN mechanism
-	AuthMechanismLogin = "login"
-)
-
 type Email struct {
 	Host       string `json:"host"`
 	Port       string `json:"port"`
@@ -52,8 +43,8 @@ type Email struct {
 	User       string `json:"user"`
 	Password   string `json:"password"` // #nosec G117 -- exported password field
 	Encryption string `json:"encryption"`
-	// AuthMechanism is one of: AuthMechanismAuto, AuthMechanismPlain or AuthMechanismLogin.
-	AuthMechanism string `json:"auth_mechanism"`
+	// AuthMethod is one of sasl.Plain, sasl.Login or sasl.OAuthBearer.
+	AuthMethod string `json:"auth_method"`
 
 	mu sync.Mutex // Protects access to the above fields.
 
@@ -159,22 +150,24 @@ func (ch *Email) GetInfo() *plugin.Info {
 			},
 		},
 		{
-			Name:     "auth_mechanism",
+			Name:     "auth_method",
 			Type:     "option",
 			Required: true,
-			Default:  AuthMechanismAuto,
+			Default:  sasl.Plain,
 			Label: map[string]string{
-				"en_US": "SMTP Authentication mechanism",
-				"de_DE": "SMTP Authentifizierungs Mechanism",
+				"en_US": "SMTP Authentication Method",
+				"de_DE": "SMTP Authentifizierungsmethode",
 			},
 			Help: map[string]string{
-				"en_US": "Only used when an SMTP user is set. Automatic prefers PLAIN over LOGIN, based on what the SMTP server advertises.",
-				"de_DE": "Wird nur dann verwendet, wenn ein SMTP Benutzer ist gesetzt. Automatisch bevorzugt den PLAIN gegen LOGIN, davon abhängig, was der SMTP Server anbietet.",
+				"en_US": "Only used when SMTP credentials are set. It has to be supported by the SMTP server. " +
+					"OAUTHBEARER expects the bearer token in the SMTP password field.",
+				"de_DE": "Wird nur verwendet, wenn SMTP Zugangsdaten gesetzt sind. Die Methode muss vom SMTP Server " +
+					"unterstützt werden. OAUTHBEARER erwartet das Bearer Token im SMTP Passwortfeld.",
 			},
 			Options: map[string]string{
-				AuthMechanismAuto:  "Automatic",
-				AuthMechanismPlain: "PLAIN",
-				AuthMechanismLogin: "LOGIN",
+				sasl.Plain:       "PLAIN",
+				sasl.Login:       "LOGIN",
+				sasl.OAuthBearer: "OAUTHBEARER",
 			},
 		},
 	}
@@ -213,7 +206,7 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 	ch.User = tmpEm.User
 	ch.Password = tmpEm.Password
 	ch.Encryption = tmpEm.Encryption
-	ch.AuthMechanism = tmpEm.AuthMechanism
+	ch.AuthMethod = tmpEm.AuthMethod
 
 	return nil
 }
@@ -288,7 +281,7 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	encryption := ch.Encryption
 	password := ch.Password
 	username := ch.User
-	authMechanism := ch.AuthMechanism
+	authMethod := ch.AuthMethod
 	ch.mu.Unlock()
 
 	switch encryption {
@@ -306,12 +299,11 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	}
 	defer func() { _ = client.Close() }()
 
-	if password != "" {
-		auth, err := saslClient(client, authMechanism, username, password)
-		if err != nil {
-			return err
-		}
-
+	auth, err := saslClient(authMethod, username, password)
+	if err != nil {
+		return err
+	}
+	if auth != nil {
 		if err := client.Auth(auth); err != nil {
 			return err
 		}
@@ -324,26 +316,24 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	return client.Quit()
 }
 
-// saslClient returns a sasl.Client for the requested authentication mechanism.
-// For AuthMechanismAuto, the mechanism is selected from those advertised by the SMTP server, preferring PLAIN over the
-// LOGIN mechanism. This requires an already greeted client, which is the case after the first contact.
-func saslClient(client *smtp.Client, mechanism, username, password string) (sasl.Client, error) {
-	switch mechanism {
-	case AuthMechanismAuto:
-		if client.SupportsAuth(sasl.Plain) {
-			return sasl.NewPlainClient("", username, password), nil
-		}
-		if client.SupportsAuth(sasl.Login) {
-			return sasl.NewLoginClient(username, password), nil
-		}
+// saslClient returns a sasl.Client for the requested authentication method.
+// Both secret carrying methods take the password from the SMTP password field, while
+// sasl.OAuthBearer expects a token in there. If the required secret is missing, no client and no error is
+// returned, as the SMTP server is then contacted without authentication.
+func saslClient(method, username, secret string) (sasl.Client, error) {
+	if secret == "" {
+		return nil, nil
+	}
 
-		return nil, fmt.Errorf("SMTP server advertises neither the %s nor the %s authentication mechanism", sasl.Plain, sasl.Login)
-	case AuthMechanismPlain:
-		return sasl.NewPlainClient("", username, password), nil
-	case AuthMechanismLogin:
-		return sasl.NewLoginClient(username, password), nil
+	switch method {
+	case sasl.Plain:
+		return sasl.NewPlainClient("", username, secret), nil
+	case sasl.Login:
+		return sasl.NewLoginClient(username, secret), nil
+	case sasl.OAuthBearer:
+		return sasl.NewOAuthBearerClient(&sasl.OAuthBearerOptions{Username: username, Token: secret}), nil
 	default:
-		return nil, fmt.Errorf("unsupported SMTP authentication mechanism %q", mechanism)
+		return nil, fmt.Errorf("unsupported SMTP authentication method %q", method)
 	}
 }
 
