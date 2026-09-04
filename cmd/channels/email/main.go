@@ -43,6 +43,8 @@ type Email struct {
 	User       string `json:"user"`
 	Password   string `json:"password"` // #nosec G117 -- exported password field
 	Encryption string `json:"encryption"`
+	// AuthMethod is one of sasl.Plain, sasl.Login or sasl.OAuthBearer.
+	AuthMethod string `json:"auth_method"`
 
 	mu sync.Mutex // Protects access to the above fields.
 
@@ -147,6 +149,27 @@ func (ch *Email) GetInfo() *plugin.Info {
 				EncryptionTLS:      "TLS",
 			},
 		},
+		{
+			Name:     "auth_method",
+			Type:     "option",
+			Required: true,
+			Default:  sasl.Plain,
+			Label: map[string]string{
+				"en_US": "SMTP Authentication Method",
+				"de_DE": "SMTP Authentifizierungsmethode",
+			},
+			Help: map[string]string{
+				"en_US": "Only used when SMTP credentials are set. It has to be supported by the SMTP server. " +
+					"OAUTHBEARER expects the bearer token in the SMTP password field.",
+				"de_DE": "Wird nur verwendet, wenn SMTP Zugangsdaten gesetzt sind. Die Methode muss vom SMTP Server " +
+					"unterstützt werden. OAUTHBEARER erwartet das Bearer Token im SMTP Passwortfeld.",
+			},
+			Options: map[string]string{
+				sasl.Plain:       "PLAIN",
+				sasl.Login:       "LOGIN",
+				sasl.OAuthBearer: "OAUTHBEARER",
+			},
+		},
 	}
 
 	return &plugin.Info{
@@ -183,6 +206,7 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 	ch.User = tmpEm.User
 	ch.Password = tmpEm.Password
 	ch.Encryption = tmpEm.Encryption
+	ch.AuthMethod = tmpEm.AuthMethod
 
 	return nil
 }
@@ -257,6 +281,7 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	encryption := ch.Encryption
 	password := ch.Password
 	username := ch.User
+	authMethod := ch.AuthMethod
 	ch.mu.Unlock()
 
 	switch encryption {
@@ -274,8 +299,12 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	}
 	defer func() { _ = client.Close() }()
 
-	if password != "" {
-		if err = client.Auth(sasl.NewPlainClient("", username, password)); err != nil {
+	auth, err := saslClient(authMethod, username, password)
+	if err != nil {
+		return err
+	}
+	if auth != nil {
+		if err := client.Auth(auth); err != nil {
 			return err
 		}
 	}
@@ -285,6 +314,27 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	}
 
 	return client.Quit()
+}
+
+// saslClient returns a sasl.Client for the requested authentication method.
+// Both secret carrying methods take the password from the SMTP password field, while
+// sasl.OAuthBearer expects a token in there. If the required secret is missing, no client and no error is
+// returned, as the SMTP server is then contacted without authentication.
+func saslClient(method, username, secret string) (sasl.Client, error) {
+	if secret == "" {
+		return nil, nil
+	}
+
+	switch method {
+	case sasl.Plain:
+		return sasl.NewPlainClient("", username, secret), nil
+	case sasl.Login:
+		return sasl.NewLoginClient(username, secret), nil
+	case sasl.OAuthBearer:
+		return sasl.NewOAuthBearerClient(&sasl.OAuthBearerOptions{Username: username, Token: secret}), nil
+	default:
+		return nil, fmt.Errorf("unsupported SMTP authentication method %q", method)
+	}
 }
 
 // makeStateKey composes a unique key for the channel state based on the recipient's email address and the incident ID.
