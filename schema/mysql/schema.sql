@@ -434,6 +434,7 @@ CREATE TABLE incident_rule_escalation_state (
 CREATE TABLE incident_history (
     id bigint NOT NULL AUTO_INCREMENT,
     incident_id bigint NOT NULL,
+    event_id binary(16), -- used for external references
     rule_escalation_id bigint,
     contact_id bigint,
     contactgroup_id bigint,
@@ -465,9 +466,44 @@ CREATE TABLE incident_history (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_incident_history_time_type ON incident_history(time, type) COMMENT 'Incident History ordered by time/type';
+-- This will be used by the query in the [Incident.RetriggerEscalations] method in icinga-notifications.
+CREATE INDEX idx_incident_history_event_id_incident_id ON incident_history(event_id, incident_id);
+
+CREATE TABLE notification_history (
+    id bigint NOT NULL AUTO_INCREMENT,
+    object_id binary(32) NOT NULL,
+    event_id binary(16) NOT NULL,
+    contact_id bigint NOT NULL,
+    contactgroup_id bigint,
+    schedule_id bigint,
+    channel_id bigint NOT NULL,
+    incident_id bigint,
+    event_message text NOT NULL,
+    state enum('sent', 'failed'),
+    triggered_at bigint NOT NULL,
+
+    CONSTRAINT pk_notification_history PRIMARY KEY (id),
+    CONSTRAINT ck_notification_history_state_notnull CHECK (state IS NOT NULL),
+    CONSTRAINT fk_notification_history_object_id FOREIGN KEY (object_id) REFERENCES object(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE INDEX idx_notification_history_triggered_at ON notification_history(triggered_at);
+CREATE INDEX idx_notification_history_state_triggered_at ON notification_history(state, triggered_at);
+
+CREATE TABLE skipped_notification_history (
+    id bigint NOT NULL AUTO_INCREMENT,
+    notification_history_id bigint NOT NULL, -- The actual notification due to which the notification was skipped.
+    rule_id bigint NOT NULL,
+    rule_escalation_id bigint NOT NULL,
+    contactgroup_id bigint,
+    schedule_id bigint,
+
+    CONSTRAINT pk_skipped_notification_history PRIMARY KEY (id),
+    CONSTRAINT fk_skipped_notification_history_notification_history FOREIGN KEY (notification_history_id) REFERENCES notification_history(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE TABLE job_queue (
-    id binary(32) NOT NULL, -- SHA256 of JSON representation of the envelope.
+    id binary(16) NOT NULL, -- used for event deduplication
     last_update bigint NOT NULL,
     state smallint NOT NULL DEFAULT 0, -- pending (0), processing (1), done (2), or error (64).
     envelope longtext NOT NULL,
@@ -481,7 +517,7 @@ CREATE INDEX idx_job_queue_last_update_state ON job_queue (last_update, state);
 
 CREATE TABLE job_processing_lock (
     object_id binary(32) NOT NULL, -- No foreign key, object might not exist at this point.
-    job_queue_id binary(32) NOT NULL, -- references job_queue.id
+    job_queue_id binary(16) NOT NULL, -- references job_queue.id
 
     CONSTRAINT pk_job_processing_lock PRIMARY KEY (object_id),
     CONSTRAINT fk_job_processing_lock_job_queue FOREIGN KEY (job_queue_id) REFERENCES job_queue(id),

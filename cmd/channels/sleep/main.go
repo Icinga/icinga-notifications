@@ -29,6 +29,7 @@ type (
 		SpamStderr       bool   `json:"spam_stderr"`
 		UseInvalidStateK bool   `json:"use_invalid_state_key"`
 		UseInvalidStateV bool   `json:"use_invalid_state_value"`
+		Success          bool   `json:"success"`
 
 		duration time.Duration
 		mu       sync.Mutex
@@ -90,6 +91,14 @@ func (s *Sleep) GetInfo() *plugin.Info {
 					"de_DE": "Ungültigen Statuswert senden",
 				},
 			},
+			{
+				Name: "success",
+				Type: "bool",
+				Label: map[string]string{
+					"en_US": "Return Always Success",
+					"de_DE": "Immer Erfolg zurückgeben",
+				},
+			},
 		},
 	}
 }
@@ -123,7 +132,12 @@ func (s *Sleep) SendNotification(nr *plugin.NotificationRequest) error {
 	spamStderr := s.SpamStderr
 	useInvalidStateK := s.UseInvalidStateK
 	useInvalidStateV := s.UseInvalidStateV
+	success := s.Success
 	s.mu.Unlock()
+
+	if success {
+		return nil
+	}
 
 	if persistState && nr.Incident != nil {
 		var key string

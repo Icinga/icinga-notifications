@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
@@ -25,6 +26,7 @@ import (
 func TestQueue(t *testing.T) {
 	t.Parallel()
 
+	testutils.SkipTestIfDBConfigIsMissing(t)
 	daemon.InjectTestConfig(func(configFile *daemon.ConfigFile) { testutils.LoadTestConfig(t, configFile) })
 
 	db := testutils.GetTestDB(t.Context(), t, &daemon.Config().Database)
@@ -54,9 +56,16 @@ func TestQueue(t *testing.T) {
 
 		require.NoError(t, Enqueue(t.Context(), db, ev))
 		assertJobCount(2) // Duplicate event should not increase count
+		ev.ID = types.MakeUUID(uuid.Nil, types.TransformNilUUIDToNull)
+
+		require.NoError(t, Enqueue(t.Context(), db, ev))
+		assertJobCount(3) // Duplicate
+
+		require.NoError(t, Enqueue(t.Context(), db, ev))
+		assertJobCount(3) // Duplicate
 
 		require.NoError(t, Enqueue(t.Context(), db, makeEvent(t)))
-		assertJobCount(3) // Different event with same ID but different body should be enqueued.
+		assertJobCount(4) // Different event with same ID but different body should be enqueued.
 
 		var wg sync.WaitGroup // Test concurrent enqueuing
 		for range 16 {
@@ -67,7 +76,7 @@ func TestQueue(t *testing.T) {
 			})
 		}
 		wg.Wait()
-		assertJobCount(163) // 3 from before + 16*10 = 163
+		assertJobCount(164) // 4 from before + 16*10 = 164
 	})
 
 	t.Run("Dequeue", func(t *testing.T) {
@@ -215,7 +224,7 @@ func makeEvent(t *testing.T) *Event {
 	return &Event{
 		Time: time.Now().Truncate(time.Second),
 		Event: baseEv.Event{
-			ID:   "test-event-id",
+			ID:   types.MakeUUID(uuid.New()),
 			Name: "Test Event",
 			Tags: map[string]string{
 				"host":    testutils.MakeRandomString(t),

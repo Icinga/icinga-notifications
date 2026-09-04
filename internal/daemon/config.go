@@ -160,17 +160,20 @@ func (c *ConfigFile) Validate() error {
 
 // RetentionOpts defines additional overrides for retention periods of specific components.
 //
-// Currently, we only have a single component (incidents), but this leaves room for future expansion
-// without breaking the config structure. The fields here must be pointers to distinguish between
-// "not set" and "set to zero" (i.e. no retention) when overriding the default retention period.
+// The fields here must be pointers to distinguish between "not set" and "set to zero" (i.e. no retention)
+// when overriding the default retention period.
 type RetentionOpts struct {
-	Incident *time.Duration `yaml:"incident" env:"INCIDENT"`
+	Incident            *time.Duration `yaml:"incident" env:"INCIDENT"`
+	NotificationHistory *time.Duration `yaml:"notification_history" env:"NOTIFICATION_HISTORY"`
 }
 
 // Validate implements the [config.Validator] interface.
 func (r *RetentionOpts) Validate() error {
 	if r.Incident != nil && *r.Incident < 0 {
 		return errors.New("invalid retention period for incidents")
+	}
+	if r.NotificationHistory != nil && *r.NotificationHistory < 0 {
+		return errors.New("invalid retention period for notification history")
 	}
 	return nil
 }

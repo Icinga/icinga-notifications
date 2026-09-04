@@ -86,32 +86,55 @@ func (r *Rule) Eval(filterable filter.Filterable) (bool, error) {
 	return r.ObjectFilter.Eval(filterable)
 }
 
-// ContactChannels stores a set of channel IDs for each set of individual contacts.
-type ContactChannels map[*recipient.Contact]map[int64]bool
+// ChannelOrigin identifies the escalation recipient through which a contact's channel was selected.
+//
+// A zero value denotes a contact that was added without any rule involvement,
+// e.g. a recipient that subscribed to or manages an incident via the UI.
+type ChannelOrigin struct {
+	ChannelID        int64
+	RuleID           int64 // Zero if the contact subscribed via web-gui
+	RuleEscalationID int64 // Zero if the contact subscribed via web-gui
+	ContactGroupID   int64 // Non-zero if the contact was resolved from a contact group.
+	ScheduleID       int64 // Non-zero if the contact was resolved from a schedule.
+	Role             recipient.Role
+}
+
+// ContactChannels stores, per contact and channel ID, the origins that selected this channel.
+//
+// When multiple escalation recipients resolve to the same contact and channel, all their origins are
+// recorded: the first origin is the one the notification is attributed to, any further ones denote
+// duplicates that would have notified the same contact via the same channel.
+type ContactChannels map[*recipient.Contact][]ChannelOrigin
 
 // LoadFromEscalationRecipients loads recipients channel of the specified escalation to the current map.
 // You can provide this method a callback to control whether the channel of a specific contact should
 // be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
 func (ch ContactChannels) LoadFromEscalationRecipients(escalation *Escalation, t time.Time, isNotifiable func(recipient.Key) bool) {
 	for _, escalationRecipient := range escalation.Recipients {
-		ch.LoadRecipientChannel(escalationRecipient, t, isNotifiable)
+		ch.LoadRecipientChannel(escalationRecipient, escalation.RuleID, t, isNotifiable)
 	}
 }
 
 // LoadRecipientChannel loads recipient channel to the current map.
 // You can provide this method a callback to control whether the channel of a specific contact should
 // be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
-func (ch ContactChannels) LoadRecipientChannel(er *EscalationRecipient, t time.Time, isNotifiable func(recipient.Key) bool) {
+func (ch ContactChannels) LoadRecipientChannel(er *EscalationRecipient, ruleID int64, t time.Time, isNotifiable func(recipient.Key) bool) {
 	if isNotifiable(er.Key) {
+		origin := ChannelOrigin{
+			ChannelID:        er.ChannelID.Int64,
+			RuleID:           ruleID,
+			RuleEscalationID: er.EscalationID,
+			ContactGroupID:   er.GroupID.Int64,
+			ScheduleID:       er.ScheduleID.Int64,
+			Role:             recipient.RoleRecipient,
+		}
 		for _, c := range er.Recipient.GetContactsAt(t) {
-			if ch[c] == nil {
-				ch[c] = make(map[int64]bool)
-			}
 			if er.ChannelID.Valid {
-				ch[c][er.ChannelID.Int64] = true
+				origin.ChannelID = er.ChannelID.Int64
 			} else {
-				ch[c][c.DefaultChannelID] = true
+				origin.ChannelID = c.DefaultChannelID
 			}
+			ch[c] = append(ch[c], origin)
 		}
 	}
 }

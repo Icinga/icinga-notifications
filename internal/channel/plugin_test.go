@@ -25,6 +25,7 @@ import (
 func TestPlugin(t *testing.T) {
 	t.Parallel()
 
+	testutils.SkipTestIfDBConfigIsMissing(t)
 	daemon.InjectTestConfig(func(configFile *daemon.ConfigFile) { testutils.LoadTestConfig(t, configFile) })
 
 	db := testutils.GetTestDB(t.Context(), t, &daemon.Config().Database)
@@ -32,11 +33,25 @@ func TestPlugin(t *testing.T) {
 
 	UpsertPlugins(t.Context(), daemon.Config().ChannelsDir, logs.GetChildLogger("channel"), db)
 
+	var filterMapMu sync.Mutex
+	filterMap := make(map[string][]string)
+
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		cleanupDB(ctx, db, t)
+		filterMapMu.Lock()
+		defer filterMapMu.Unlock()
+		cleanupDB(ctx, db, t, filterMap)
 	})
+
+	// assembleDBCleanupConditions is a helper function to add cleanup conditions for the database tables used in the tests.
+	assembleDBCleanupConditions := func(channelID int64) {
+		filterMapMu.Lock()
+		defer filterMapMu.Unlock()
+
+		filterMap["channel"] = append(filterMap["channel"], fmt.Sprintf("id = %d", channelID))
+		filterMap["channel_state"] = append(filterMap["channel_state"], fmt.Sprintf("channel_id = %d", channelID))
+	}
 
 	// getPluginS is a helper function to retrieve the pluginSupervisor from the channel's pluginCh channel.
 	getPluginS := func(ch *Channel) *pluginSupervisor {
@@ -52,6 +67,8 @@ func TestPlugin(t *testing.T) {
 		t.Parallel()
 
 		ch := makeTestChannel(t, db, logs.GetChildLogger("channel").Desugar(), "sleepy1", "sleep", `{"duration": "2s"}`)
+
+		assembleDBCleanupConditions(ch.ID)
 
 		var plugin1 *pluginSupervisor
 		require.Eventually(t, func() bool { plugin1 = getPluginS(ch); return plugin1 != nil }, 5*time.Second, 100*time.Millisecond)
@@ -99,6 +116,8 @@ func TestPlugin(t *testing.T) {
 
 		ch := makeTestChannel(t, db, logs.GetChildLogger("channel").Desugar(), "sleepy2", "sleep", `{"duration": "1s"}`)
 
+		assembleDBCleanupConditions(ch.ID)
+
 		var plugin1 *pluginSupervisor
 		require.Eventually(t, func() bool { plugin1 = getPluginS(ch); return plugin1 != nil }, 5*time.Second, 100*time.Millisecond)
 		require.NotNil(t, plugin1)
@@ -115,6 +134,8 @@ func TestPlugin(t *testing.T) {
 		t.Parallel()
 
 		ch := makeTestChannel(t, db, logs.GetChildLogger("channel").Desugar(), "sleepy3", "sleep", `{"duration": "1s", "persist_state": true}`)
+
+		assembleDBCleanupConditions(ch.ID)
 
 		var plugin1 *pluginSupervisor
 		require.Eventually(t, func() bool { plugin1 = getPluginS(ch); return plugin1 != nil }, 5*time.Second, 100*time.Millisecond)
@@ -177,6 +198,8 @@ func TestPlugin(t *testing.T) {
 		// Use a noop logger here, otherwise the test output will be spammed with the plugin's stderr output.
 		ch := makeTestChannel(t, db, zap.NewNop(), "sleepy4", "sleep", `{"duration": "1s", "spam_stderr": true}`)
 
+		assembleDBCleanupConditions(ch.ID)
+
 		var ps *pluginSupervisor
 		require.Eventually(t, func() bool { ps = getPluginS(ch); return ps != nil }, 5*time.Second, 100*time.Millisecond)
 		req := makeTestRequest("sleep", false, false)
@@ -190,6 +213,8 @@ func TestPlugin(t *testing.T) {
 		// sleep duration to 12 seconds to trigger a timeout.
 		ch := makeTestChannel(t, db, zap.NewNop(), "sleepy5", "sleep", `{"duration": "12s"}`)
 
+		assembleDBCleanupConditions(ch.ID)
+
 		var ps *pluginSupervisor
 		require.Eventually(t, func() bool { ps = getPluginS(ch); return ps != nil }, 5*time.Second, 100*time.Millisecond)
 		req := makeTestRequest("sleep", false, false)
@@ -200,6 +225,8 @@ func TestPlugin(t *testing.T) {
 		t.Parallel()
 
 		ch := makeTestChannel(t, db, zap.NewNop(), "sleepy6", "sleep", `{"duration": "1s", "persist_state": true}`)
+
+		assembleDBCleanupConditions(ch.ID)
 
 		var ps *pluginSupervisor
 		require.Eventually(t, func() bool { ps = getPluginS(ch); return ps != nil }, 5*time.Second, 100*time.Millisecond)
@@ -227,6 +254,9 @@ func TestPlugin(t *testing.T) {
 
 		config := `{"duration": "1s", "persist_state": true, "use_invalid_state_key": true}`
 		ch := makeTestChannel(t, db, logs.GetChildLogger("channel").Desugar(), "sleepy7", "sleep", config)
+
+		assembleDBCleanupConditions(ch.ID)
+
 		var ps *pluginSupervisor
 		require.Eventually(t, func() bool { ps = getPluginS(ch); return ps != nil }, 5*time.Second, 100*time.Millisecond)
 		// The sleep plugins sends any errors received from Icinga Notifications back to the SendNotification caller.
@@ -292,17 +322,20 @@ func makeRandomNumber() int64 {
 }
 
 // cleanupDB cleans up the database by deleting all rows from the relevant tables used in the tests.
-func cleanupDB(ctx context.Context, db *database.DB, t *testing.T) {
+func cleanupDB(ctx context.Context, db *database.DB, t *testing.T, filter map[string][]string) {
 	switch db.DriverName() {
 	case database.PostgreSQL, database.MySQL:
 		tables := []string{
 			"channel_state",
 			"channel",
-			"available_channel_type",
 		}
 
 		for _, table := range tables {
-			_, err := db.ExecContext(ctx, "DELETE FROM "+table)
+			var conditions string
+			if filters, ok := filter[table]; ok && len(filters) > 0 {
+				conditions = " WHERE " + strings.Join(filters, " OR ")
+			}
+			_, err := db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %q %s", table, conditions))
 			require.NoErrorf(t, err, "failed to clean up table %s", table)
 		}
 	default:

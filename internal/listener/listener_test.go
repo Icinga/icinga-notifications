@@ -78,6 +78,71 @@ func TestListener(t *testing.T) {
 			assert.Contains(t, rw.Body.String(), `cannot parse JSON body: json: unknown field "unknown_field"`)
 		})
 	})
+
+	t.Run("NotificationHistoryHandler", func(t *testing.T) {
+		t.Parallel()
+
+		l := makeTestListener(t, false, false)
+		src := l.runtimeConfig.Sources[1]
+		username := src.ListenerUsername.String
+
+		t.Run("Bad Credentials", func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/notification-history?since=0", nil)
+			req.SetBasicAuth(username, "wrong-password")
+			rw := httptest.NewRecorder()
+			l.NotificationHistoryHandler(rw, req)
+			assert.Equal(t, http.StatusUnauthorized, rw.Code)
+		})
+
+		t.Run("Invalid Method", func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+			req.SetBasicAuth(username, "secret")
+			rw := httptest.NewRecorder()
+
+			l.NotificationHistoryHandler(rw, req)
+			assert.Equal(t, http.StatusMethodNotAllowed, rw.Code)
+			assert.Equal(t, "GET required\n", rw.Body.String())
+		})
+
+		t.Run("Missing Since", func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/notification-history?filter=%7B%7D", nil)
+			req.SetBasicAuth(username, "secret")
+			rw := httptest.NewRecorder()
+
+			l.NotificationHistoryHandler(rw, req)
+			assert.Equal(t, http.StatusBadRequest, rw.Code)
+			assert.Equal(t, "missing required 'since' query parameter\n", rw.Body.String())
+		})
+
+		t.Run("Missing Filter", func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/notification-history?since=1", nil)
+			req.SetBasicAuth(username, "secret")
+			rw := httptest.NewRecorder()
+
+			l.NotificationHistoryHandler(rw, req)
+			assert.Equal(t, http.StatusBadRequest, rw.Code)
+			assert.Equal(t, "missing required filter query parameter\n", rw.Body.String())
+		})
+
+		t.Run("Invalid Filter", func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/notification-history?since=0&filter=invalid-json", nil)
+			req.SetBasicAuth(username, "secret")
+			rw := httptest.NewRecorder()
+
+			l.NotificationHistoryHandler(rw, req)
+			assert.Equal(t, http.StatusBadRequest, rw.Code)
+		})
+	})
 }
 
 func makeTestListener(t *testing.T, useSocket bool, withCNSrc bool) *Listener {

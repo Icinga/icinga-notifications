@@ -7,25 +7,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
+	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
+	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/icinga/icinga-notifications/internal/testutils"
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestIncidents(t *testing.T) {
 	t.Parallel()
 
 	// This will either load the test config from env vars or skip the test if the required env variable is not set.
+	testutils.SkipTestIfDBConfigIsMissing(t)
 	daemon.InjectTestConfig(func(configFile *daemon.ConfigFile) { testutils.LoadTestConfig(t, configFile) })
 
 	db := testutils.GetTestDB(t.Context(), t, &daemon.Config().Database)
@@ -57,6 +62,52 @@ func TestIncidents(t *testing.T) {
 		defer cancel()
 		cleanupDB(ctx, db, t)
 	})
+
+	channel.UpsertPlugins(t.Context(), daemon.Config().ChannelsDir, logs.GetChildLogger("channel"), db)
+	ch := makeTestChannel(t, db, logs.GetChildLogger("channel").Desugar(), "notification_history_channel ", "sleep", `{"success": true}`)
+
+	contact := recipient.Contact{
+		ExternalUUID:     types.MakeUUID(uuid.New()),
+		FullName:         "testuser",
+		DefaultChannelID: ch.ID,
+	}
+	contact.ChangedAt = types.UnixMilli(time.Now())
+	contact.Deleted = types.MakeBool(false)
+
+	basicRule := &rule.Rule{Name: "escalation test rule", SourceType: source.Type}
+	basicRule.ChangedAt = source.ChangedAt
+	basicRule.Deleted = source.Deleted
+
+	err = db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
+		id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, contact, "id"), contact)
+		require.NoError(t, err, "populating channel table should not fail")
+		contact.ID = id
+
+		id, err = database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, basicRule, "id"), basicRule)
+		assert.NoError(t, err)
+		basicRule.ID = id
+
+		escalation := &escalationRow{
+			RuleID:    id,
+			Position:  1,
+			Condition: "incident_severity>=ok",
+			ChangedAt: source.ChangedAt,
+			Deleted:   source.Deleted,
+		}
+		id, err = database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, escalation, "id"), escalation)
+		assert.NoError(t, err)
+
+		escalationRecipient := &rule.EscalationRecipient{EscalationID: id, Recipient: &contact}
+		escalationRecipient.ContactID = types.MakeInt(contact.ID)
+		escalationRecipient.ChangedAt = types.UnixMilli(time.Now())
+		escalationRecipient.Deleted = types.MakeBool(false)
+		stmt, _ := db.BuildUpsertStmt(escalationRecipient, "id")
+		_, err = tx.NamedExecContext(ctx, stmt, escalationRecipient)
+		assert.NoError(t, err)
+
+		return nil
+	})
+	assert.NoError(t, err)
 
 	runtimeConfig := config.NewRuntimeConfig(logs, db)
 	require.NoError(t, runtimeConfig.UpdateFromDatabase(t.Context()))
@@ -263,34 +314,13 @@ func TestIncidents(t *testing.T) {
 	t.Run("Time-Based Escalation", func(t *testing.T) {
 		t.Parallel()
 
-		// Dedicated source to not interact with other subtests.
-		escalationSource := &config.Source{
-			Type:             "notifications",
-			Name:             "Icinga Notifications Escalations",
-			ListenerUsername: types.MakeString("notifications-escalations"),
-		}
-		escalationSource.ChangedAt = types.UnixMilli(time.Now())
-		escalationSource.Deleted = types.MakeBool(false)
-
-		escalationRule := &rule.Rule{Name: "escalation test rule", SourceType: escalationSource.Type}
-		escalationRule.ChangedAt = escalationSource.ChangedAt
-		escalationRule.Deleted = escalationSource.Deleted
-
 		err := db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
-			id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, escalationSource, "id"), escalationSource)
-			assert.NoError(t, err)
-			escalationSource.ID = id
-
-			id, err = database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, escalationRule, "id"), escalationRule)
-			assert.NoError(t, err)
-			escalationRule.ID = id
-
 			escalation := &escalationRow{
-				RuleID:    id,
-				Position:  1,
+				RuleID:    basicRule.ID,
+				Position:  2,
 				Condition: "incident_age>=1h",
-				ChangedAt: escalationSource.ChangedAt,
-				Deleted:   escalationSource.Deleted,
+				ChangedAt: types.UnixMilli(time.Now()),
+				Deleted:   types.MakeBool(false),
 			}
 			stmt, _ := db.BuildInsertStmt(escalation)
 			_, err = tx.NamedExecContext(ctx, stmt, escalation)
@@ -301,7 +331,7 @@ func TestIncidents(t *testing.T) {
 		assert.NoError(t, runtimeConfig.UpdateFromDatabase(t.Context()))
 
 		i := makeIncident(db, logs, runtimeConfig, t,
-			makeEvent(t, escalationSource.ID, withIncident(), withSeverity(baseEv.SeverityCrit)))
+			makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityCrit)))
 		assert.NotNil(t, i)
 		assert.NotZero(t, i.NextEscalationCheckAt)
 		assert.WithinDuration(t, i.StartedAt.Time().Add(time.Hour), i.NextEscalationCheckAt.Time(), time.Second)
@@ -314,7 +344,9 @@ func TestIncidents(t *testing.T) {
 				i.Id))
 			return
 		}
-		assert.Empty(t, selectStates())
+		// We will find a single escalation state for the incident, because the condition of the escalation defined
+		// outside this function is met immediately.
+		assert.Len(t, selectStates(), 1)
 
 		var ruleRows []*RuleRow
 		assert.NoError(t, db.SelectContext(t.Context(), &ruleRows,
@@ -323,9 +355,61 @@ func TestIncidents(t *testing.T) {
 
 		assert.NoError(t, ReevaluateEscalations(t.Context(), db, logs.GetChildLogger("incident"), runtimeConfig))
 
-		assert.Len(t, selectStates(), 1)
+		// After reevaluating the escalations, we should find two escalation states for the incident,
+		// because the second escalation's condition is now met.
+		assert.Len(t, selectStates(), 2)
 		i = reloadIncident(t, db, i)
 		assert.Zero(t, i.NextEscalationCheckAt)
+	})
+
+	t.Run("Notification History", func(t *testing.T) {
+		t.Parallel()
+
+		tags := map[string]string{"notification_history_test": "true"}
+		msg := testutils.MakeRandomString(t)
+		ev := makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityDebug), withTags(tags), withMsg(msg))
+		assert.NotZero(t, ev.ID)
+		i := makeIncident(db, logs, runtimeConfig, t, ev)
+		assert.NotZero(t, i.ID())
+		assert.Zero(t, i.RecoveredAt)
+		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
+
+		t.Run("Fetch Everything", func(t *testing.T) {
+			t.Parallel()
+
+			entryCh, errCh := YieldNotificationHistory(t.Context(), db, 1)
+
+			count := 0
+			for entry := range entryCh {
+				if entry.EventID != ev.ID {
+					continue
+				}
+				count++
+				assert.Equal(t, i.ObjectID, entry.ObjectID)
+				assert.Equal(t, tags, entry.Object.Tags)
+				assert.Equal(t, types.MakeString(ch.Name), entry.ChannelName)
+				assert.Equal(t, types.MakeString(contact.FullName), entry.ContactName)
+				assert.Equal(t, types.MakeString(msg), entry.EventMessage)
+				assert.False(t, entry.ContactgroupName.Valid, "contactgroup_name must be an empty string, not null, when there's no contactgroup")
+				assert.False(t, entry.ScheduleName.Valid, "schedule_name must be an empty string, not null, when there's no schedule")
+			}
+			require.NoError(t, <-errCh)
+			assert.Equal(t, 1, count, "there must be at least one notification history entry")
+		})
+
+		t.Run("Filtered By Since", func(t *testing.T) {
+			t.Parallel()
+
+			entryCh, errCh := YieldNotificationHistory(t.Context(), db, 9999999999999)
+
+			count := 0
+			for range entryCh {
+				count++
+			}
+			require.NoError(t, <-errCh)
+			assert.Equal(t, count, 0, "there must be no notification history entries since a future timestamp")
+		})
+
 	})
 }
 
@@ -373,7 +457,7 @@ func cleanupDB(ctx context.Context, db *database.DB, t *testing.T) {
 	switch db.DriverName() {
 	case database.PostgreSQL:
 		// As opposed to MySQL, we can just use truncate to clean up all tables in one go.
-		_, err := db.ExecContext(ctx, `TRUNCATE TABLE source,object,rule RESTART IDENTITY CASCADE`)
+		_, err := db.ExecContext(ctx, `TRUNCATE TABLE source,object,rule,notification_history,channel,contact  RESTART IDENTITY CASCADE`)
 		require.NoError(t, err)
 	case database.MySQL:
 		// InnoDB doesn't support truncating tables with foreign key constraints, so we need to delete
@@ -382,12 +466,18 @@ func cleanupDB(ctx context.Context, db *database.DB, t *testing.T) {
 			"incident_history",
 			"incident_rule_escalation_state",
 			"incident_rule",
+			"incident_contact",
 			"incident",
+			"rule_escalation_recipient",
 			"rule_escalation",
 			"rule",
 			"object_id_tag",
 			"object_source",
+			"skipped_notification_history",
+			"notification_history",
 			"object",
+			"contact",
+			"channel",
 			"source",
 		}
 
@@ -452,7 +542,10 @@ func makeEvent(t *testing.T, sourceID int64, opts ...eventOption) *event.Event {
 	ev := &event.Event{
 		Time:     time.Now().Add(-2 * time.Hour).Truncate(time.Second),
 		SourceId: sourceID,
-		Event:    baseEv.Event{Name: testutils.MakeRandomString(t)},
+		Event: baseEv.Event{
+			ID:   types.MakeUUID(uuid.New()),
+			Name: testutils.MakeRandomString(t),
+		},
 	}
 	for _, opt := range opts {
 		opt(ev)
@@ -481,4 +574,21 @@ func withTags(tags map[string]string) eventOption { return func(ev *event.Event)
 func withMsg(msg string) eventOption              { return func(ev *event.Event) { ev.Message = msg } }
 func withSeverity(sev baseEv.Severity) eventOption {
 	return func(ev *event.Event) { ev.Severity = sev }
+}
+
+// makeTestChannel creates a new Channel instance with the provided name, type, and config for testing purposes.
+func makeTestChannel(t *testing.T, db *database.DB, logger *zap.Logger, name, ctype, config string) *channel.Channel {
+	ch := &channel.Channel{Name: name, Type: ctype, Config: config, ExternalUUID: types.MakeUUID(uuid.New())}
+	ch.ChangedAt = types.UnixMilli(time.Date(2025, time.November, 10, 23, 0, 0, 0, time.UTC))
+	ch.Deleted = types.MakeBool(false)
+
+	err := db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
+		id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, ch, "id"), ch)
+		require.NoError(t, err, "populating channel table should not fail")
+		ch.ID = id
+		return nil
+	})
+	require.NoError(t, err, "db.ExecTx should not fail")
+	ch.Start(t.Context(), db, logger.Sugar())
+	return ch
 }
