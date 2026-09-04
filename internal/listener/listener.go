@@ -476,9 +476,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		zap.String("source", src.Name),
 		zap.String("event_name", ev.Name))
 
-	w.WriteHeader(http.StatusAccepted)
-	_, _ = fmt.Fprintln(w, "event accepted for processing")
-	_, _ = fmt.Fprintln(w)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // IncidentsHandler handles GET and POST requests to the /incidents endpoint.
