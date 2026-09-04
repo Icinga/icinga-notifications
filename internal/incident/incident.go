@@ -23,6 +23,15 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	// ErrSeverityChangeWithoutIncidentFlag is returned when an event tries to change the severity of an incident
+	// but does not set the 'incident' flag.
+	ErrSeverityChangeWithoutIncidentFlag = errors.New("cannot change severity of an incident with an event that doesn't set the 'incident' flag")
+
+	// ErrOpenIncidentWithoutSeverity is returned when an event tries to open a new incident without a severity.
+	ErrOpenIncidentWithoutSeverity = errors.New("cannot open or escalate an incident without a severity")
+)
+
 type ruleID = int64
 type escalationID = int64
 
@@ -48,7 +57,7 @@ type Incident struct {
 
 	EscalationState map[escalationID]*EscalationState `db:"-"`
 	Rules           map[ruleID]struct{}               `db:"-"`
-	Recipients      map[recipient.Key]*RecipientState `db:"-"`
+	Recipients      map[recipient.Key]RecipientState  `db:"-"`
 
 	db            *database.DB
 	logger        *zap.SugaredLogger
@@ -62,7 +71,7 @@ func (i *Incident) initializeFields(db *database.DB, runtimeConfig *config.Runti
 	i.runtimeConfig = runtimeConfig
 	i.EscalationState = map[escalationID]*EscalationState{}
 	i.Rules = map[ruleID]struct{}{}
-	i.Recipients = map[recipient.Key]*RecipientState{}
+	i.Recipients = map[recipient.Key]RecipientState{}
 }
 
 // Object fetches the object.Object this incident belongs to from the database.
@@ -110,16 +119,16 @@ func (i *Incident) HasManager() bool {
 	return false
 }
 
-// IsNotifiable returns whether contacts in the given role should be notified about this incident.
+// IsNotifiable returns whether the given recipient state is eligible to be notified for this incident.
 //
-// For a managed incident, only managers and subscribers should be notified, for unmanaged incidents,
-// regular recipients are notified as well.
-func (i *Incident) IsNotifiable(role recipient.Role) bool {
+// For a managed incident, only managers and subscribers should be notified, unless the recipient is new
+// and has not yet been notified. For an unmanaged incident, all recipients are eligible to be notified.
+func (i *Incident) IsNotifiable(rs RecipientState) bool {
 	if !i.HasManager() {
 		return true
 	}
 
-	return role > recipient.RoleRecipient
+	return rs.IsNew || rs.Role > recipient.RoleRecipient
 }
 
 // ProcessEvent processes the given event for the current incident in an own transaction.
@@ -361,9 +370,100 @@ func (i *Incident) Close(ctx context.Context, tx *sqlx.Tx) error {
 	return nil
 }
 
-// ErrSeverityChangeWithoutIncidentFlag is returned when an event tries to change the severity of an incident
-// but does not set the 'incident' flag.
-var ErrSeverityChangeWithoutIncidentFlag = errors.New("cannot change severity of an incident with an event that doesn't set the 'incident' flag")
+// DoQuickAction executes the given quick action for the current incident in an own transaction.
+func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) error {
+	recipientKey := recipient.Key{ContactID: types.MakeInt(qa.ContactID)}
+	r := func() recipient.Recipient {
+		i.runtimeConfig.RLock()
+		defer i.runtimeConfig.RUnlock()
+
+		return i.runtimeConfig.GetRecipient(recipientKey)
+	}()
+	if r == nil {
+		i.logger.Debugw("Quick action refers to unknown recipient, might got deleted",
+			zap.Stringer("action", qa.Kind),
+			zap.Int64("contact_id", qa.ContactID))
+		return nil
+	}
+
+	var ev *event.Event
+	var notifications []*NotificationEntry
+
+	err := i.db.ExecTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, func(ctx context.Context, tx *sqlx.Tx) error {
+		i.ObjectID = object.ID(qa.ObjectTags)
+		if err := i.RestoreState(ctx, tx, true); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil // The incident is already recovered, so nothing to do.
+			}
+			return fmt.Errorf("cannot restore incident state: %w", err)
+		}
+
+		switch qa.Kind {
+		case event.ActionManage:
+			i.runtimeConfig.RLock()
+			defer i.runtimeConfig.RUnlock()
+
+			if i.HasManager() {
+				return fmt.Errorf("incident already has a manager, cannot add recipient %q as manager", r)
+			}
+
+			if err := i.addRecipient(ctx, tx, r, recipient.RoleManager); err != nil {
+				return fmt.Errorf("cannot add recipient %q as manager: %w", r, err)
+			}
+			// Remove the recipient from the incident's recipients list for now, so that we don't notify him about his
+			// own promotion to manager. We only want to notify the other recipients that a new manager has been added.
+			delete(i.Recipients, recipientKey)
+
+			var err error
+			message := fmt.Sprintf("Recipient %s has been added as the new incident manager", r.String())
+			ev = &event.Event{Time: time.Now(), Event: baseEv.Event{Message: message}}
+			notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
+			return err
+
+		case event.ActionUnmanage, event.ActionSubscribe:
+			i.runtimeConfig.RLock()
+			defer i.runtimeConfig.RUnlock()
+
+			if qa.Kind == event.ActionUnmanage && !i.HasManager() {
+				return fmt.Errorf("incident has no manager, cannot demote recipient %q", r)
+			}
+
+			if err := i.addRecipient(ctx, tx, r, recipient.RoleSubscriber); err != nil {
+				return fmt.Errorf("cannot add recipient %q as subscriber: %w", r, err)
+			}
+			return nil
+
+		case event.ActionUnsubscribe:
+			state, exists := i.Recipients[recipientKey]
+			if !exists {
+				return fmt.Errorf("recipient %q is not subscribed to the incident", r)
+			}
+
+			query := `DELETE FROM incident_contact WHERE incident_id = :incident_id AND contact_id = :contact_id`
+			if _, err := tx.NamedExecContext(ctx, query, &ContactRow{Key: recipientKey, IncidentID: i.ID()}); err != nil {
+				return fmt.Errorf("cannot remove recipient %q from incident: %w", r, err)
+			}
+			return i.recordRecipientRoleChange(ctx, tx, r, state.Role, recipient.RoleNone)
+
+		default:
+			return fmt.Errorf("unknown quick action kind: %s", qa.Kind)
+		}
+	})
+	if err != nil {
+		return err
+	}
+
+	if ev != nil && len(notifications) > 0 {
+		obj, err := i.Object(ctx)
+		if err != nil {
+			return fmt.Errorf("cannot fetch incident object for quick action notifications: %w", err)
+		}
+
+		return i.notifyContacts(ctx, obj, ev, notifications)
+	}
+
+	return nil
+}
 
 // processSeverityChangedEvent processes the given event as a severity changed event, if the severity has actually changed.
 //
@@ -627,7 +727,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, escalati
 			return err
 		}
 
-		if err := i.AddRecipient(ctx, tx, escalation); err != nil {
+		if err := i.AddEscalationRecipients(ctx, tx, escalation); err != nil {
 			return err
 		}
 	}
@@ -733,7 +833,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	}
 
 	// Check whether all the incident recipients do have an appropriate contact channel configured.
-	// When a recipient has subscribed/managed this incident via the UI, fallback to the default contact channel.
+	// If subscribed/managed via the UI/quick action, fallback to the default contact channel.
 	for recipientKey, state := range i.Recipients {
 		r := i.runtimeConfig.GetRecipient(recipientKey)
 		if r == nil {
@@ -741,7 +841,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 			continue
 		}
 
-		if i.IsNotifiable(state.Role) {
+		if i.IsNotifiable(state) {
 			contacts := r.GetContactsAt(t)
 			if len(contacts) > 0 {
 				i.logger.Debugw("Expanded recipient to contacts",
@@ -820,9 +920,9 @@ func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
 		return err
 	}
 
-	i.Recipients = make(map[recipient.Key]*RecipientState)
+	i.Recipients = make(map[recipient.Key]RecipientState)
 	err = utils.ForEachRow(ctx, i.db, tx, "incident_id", []int64{i.Id}, func(cr *ContactRow) {
-		i.Recipients[cr.Key] = &RecipientState{Role: cr.Role}
+		i.Recipients[cr.Key] = RecipientState{Role: cr.Role}
 	})
 	if err != nil {
 		i.logger.Errorw("Failed to restore incident recipients from the database", zap.Error(err))
@@ -832,16 +932,17 @@ func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
 	return nil
 }
 
-// isRecipientNotifiable checks whether the given recipient should be notified about the current incident.
-// If the specified recipient has not yet been notified of this incident, it always returns false.
-// Otherwise, the recipient role is forwarded to IsNotifiable and may or may not return true.
+// isRecipientNotifiable checks whether the given recipient key is eligible to be notified for this incident.
+//
+// If the specified recipient is not part of the incident, this returns false. Otherwise, it checks whether
+// the recipient state is eligible to be notified via the [Incident.IsNotifiable] method.
 func (i *Incident) isRecipientNotifiable(key recipient.Key) bool {
-	state := i.Recipients[key]
-	if state == nil {
+	state, exists := i.Recipients[key]
+	if !exists {
 		return false
 	}
 
-	return i.IsNotifiable(state.Role)
+	return i.IsNotifiable(state)
 }
 
 type EscalationState struct {
@@ -857,6 +958,12 @@ func (e *EscalationState) TableName() string {
 
 type RecipientState struct {
 	Role recipient.Role
+
+	// IsNew defines whether the associated recipient was added to the incident during the current transaction.
+	//
+	// Every recipient loaded from the database aren't new, so IsNew is false. For all other recipients
+	// added in Incident.AddRecipient due to the ongoing event, IsNew is set true.
+	IsNew bool
 }
 
 var (

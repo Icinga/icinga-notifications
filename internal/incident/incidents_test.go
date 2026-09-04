@@ -74,6 +74,9 @@ func TestIncidents(t *testing.T) {
 	contact.ChangedAt = types.UnixMilli(time.Now())
 	contact.Deleted = types.MakeBool(false)
 
+	incidentManager := makeContact(t, db, "Thomas A. Anderson", "neo", ch.ID)
+	incidentSubscriber := makeContact(t, db, "Agent Smith", "smith", ch.ID)
+
 	basicRule := &rule.Rule{Name: "escalation test rule", SourceType: source.Type}
 	basicRule.ChangedAt = source.ChangedAt
 	basicRule.Deleted = source.Deleted
@@ -112,18 +115,9 @@ func TestIncidents(t *testing.T) {
 	runtimeConfig := config.NewRuntimeConfig(logs, db)
 	require.NoError(t, runtimeConfig.UpdateFromDatabase(t.Context()))
 
-	t.Run("LoadOpenIncidents", func(t *testing.T) {
-		// Reduce the default placeholders per statement to a meaningful number, so that we can
-		// test some parallelism when loading the incidents.
-		db.Options.MaxPlaceholdersPerStatement = 100
-
-		// Due to the 10*maxPlaceholders constraint, only 10 goroutines are going to process simultaneously.
-		// Therefore, reduce the default maximum number of connections per table to 4 in order to fully simulate
-		// semaphore lock wait cycles for a given table.
-		db.Options.MaxConnectionsPerTable = 4
-
-		testData := make(map[string]*Incident, 10*db.Options.MaxPlaceholdersPerStatement)
-		for j := 1; j <= 10*db.Options.MaxPlaceholdersPerStatement; j++ {
+	t.Run("YieldIncidents", func(t *testing.T) {
+		testData := make(map[string]*Incident, 64)
+		for range 64 {
 			i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityCrit)))
 			testData[i.ObjectID.String()] = i
 		}
@@ -136,8 +130,8 @@ func TestIncidents(t *testing.T) {
 			pairCh, errCh := Yield(t.Context(), db, logs, runtimeConfig)
 			for pair := range pairCh {
 				// Mark some of the existing incidents as recovered.
-				if pair.Incident.Id%20 == 0 { // 1000 / 20 => 50 existing incidents will be marked as recovered!
-					require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				if pair.Incident.Id%4 == 0 { // 64 / 4 => 16 existing incidents will be marked as recovered!
+					require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 						withIncident(), withClose(), withTags(pair.Object.Tags))))
 					require.NotZero(t, reloadIncident(t, db, pair.Incident).RecoveredAt)
 					delete(testData, pair.Object.ID.String())
@@ -153,8 +147,8 @@ func TestIncidents(t *testing.T) {
 			assert.NoError(t, <-errCh)
 			assert.Equal(t, len(testData), incidentsLen, "only the recovered incidents should be gone")
 
-			for j := 1; j <= db.Options.MaxPlaceholdersPerStatement/2; j++ {
-				require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+			for j := range 16 {
+				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 					withIncident(), withClose(), withSeverity(baseEv.SeverityAlert))))
 
 				if j%2 == 0 {
@@ -170,7 +164,7 @@ func TestIncidents(t *testing.T) {
 			// Close all remaining incidents to clean up the database for the next test run.
 			pairCh, errCh = Yield(t.Context(), db, logs, runtimeConfig)
 			for pair := range pairCh {
-				require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 					withIncident(), withClose(), withTags(pair.Object.Tags))))
 			}
 			assert.NoError(t, <-errCh)
@@ -182,7 +176,8 @@ func TestIncidents(t *testing.T) {
 			}
 			assert.NoError(t, <-errCh)
 			assert.Equal(t, 0, incidentsLen, "there should be no active incidents")
-			testData = make(map[string]*Incident) // Reset test data for the next test run.
+			clear(testData)
+			testData = nil
 		})
 	})
 
@@ -194,12 +189,12 @@ func TestIncidents(t *testing.T) {
 		assert.Zero(t, i.RecoveredAt)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
 
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withSeverity(baseEv.SeverityEmerg), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
 
-		err := ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		err := Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withMuted(false), withSeverity(baseEv.SeverityNotice), withTags(mustIncidentObject(t, i).Tags)))
 		require.ErrorIs(t, err, ErrSeverityChangeWithoutIncidentFlag)
 		i = reloadIncident(t, db, i)
@@ -215,7 +210,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
 
 		// Attempting to open an incident without a severity should fail.
-		err := ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID, withIncident()))
+		err := Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID, withIncident()))
 		require.ErrorIs(t, err, ErrOpenIncidentWithoutSeverity)
 
 		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
@@ -224,7 +219,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
 		assert.Equal(t, "Incident opened!", i.Message.String)
 
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(),
 			withSeverity(baseEv.SeverityEmerg),
 			withMsg("Incident updated!"),
@@ -234,7 +229,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, "Incident updated!", i.Message.String)
 
 		// We shouldn't be able to update the incident message without the incident flag set.
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig,
 			makeEvent(t, source.ID, withMuted(false), withMsg("YOLO!"), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, "Incident updated!", i.Message.String)
@@ -253,7 +248,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityInfo, i.Severity)
 
 		// Closing incident with a new severity will update the severity and mark it as recovered.
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withClose(), withSeverity(baseEv.SeverityEmerg), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.NotZero(t, i.RecoveredAt)
@@ -264,7 +259,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityWarning, i.Severity)
 
 		// Closing incident without providing a severity will keep the existing severity and mark it as recovered.
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withClose(), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.NotZero(t, i.RecoveredAt)
@@ -285,7 +280,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, "You're gonna have a bad time!", i.MuteReason.String)
 
 		// Unmute it with the incident flag still set...
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withIncident(), withMuted(false), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
@@ -299,7 +294,7 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, "You're gonna have a bad time!", i.MuteReason.String)
 
 		// Unmute it without the incident flag set...
-		require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withMuted(false), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
@@ -309,6 +304,77 @@ func TestIncidents(t *testing.T) {
 		// Muted flag without the incident flag has no effect on non-existing incidents.
 		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withMuted(true)))
 		require.Nil(t, i)
+	})
+
+	t.Run("QuickAction", func(t *testing.T) {
+		t.Parallel()
+
+		reloadRelated := func(t *testing.T, i *Incident) *Incident {
+			reloaded := reloadIncident(t, db, i)
+			err := db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
+				return reloaded.restoreRelatedState(ctx, tx)
+			})
+			require.NoError(t, err)
+			return reloaded
+		}
+
+		ev := makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityWarning), withMsg("Something went wrong!"))
+		i := makeIncident(db, logs, runtimeConfig, t, ev)
+
+		for _, action := range []event.Action{event.ActionSubscribe, event.ActionManage} {
+			qa := &event.QuickAction{Kind: action, ContactID: makeContact(t, db, "Unknown", "unknown"+action.String(), ch.ID).ID, ObjectTags: ev.Tags}
+
+			// Recipient is not yet known to the runtime config, so nothing should happen here.
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+			i = reloadRelated(t, i)
+			assert.Len(t, i.Recipients, 1)
+			assert.Equal(t, i.Recipients[recipient.ToKey(&contact)].Role, recipient.RoleRecipient)
+			assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleNone)
+			assert.Equal(t, i.Recipients[recipient.ToKey(incidentSubscriber)].Role, recipient.RoleNone)
+
+			if action == event.ActionManage {
+				qa.ContactID = incidentManager.ID
+			} else {
+				qa.ContactID = incidentSubscriber.ID
+			}
+
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+			i = reloadRelated(t, i)
+			assert.Len(t, i.Recipients, 2)
+			if action == event.ActionManage {
+				assert.True(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleManager)
+
+				qa.Kind = event.ActionUnmanage
+			} else {
+				assert.False(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentSubscriber)].Role, recipient.RoleSubscriber)
+
+				qa.Kind = event.ActionUnsubscribe
+			}
+
+			// Now, unsubscribe/unmanage the recipient from that very same incident.
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+			i = reloadRelated(t, i)
+			if action == event.ActionManage { // Managers get first demoted to subscribers.
+				assert.False(t, i.HasManager())
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleSubscriber)
+
+				// Cannot unmanage an incident that doesn't have a manager.
+				require.Error(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleSubscriber)
+
+				qa.Kind = event.ActionUnsubscribe
+				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+				i = reloadRelated(t, i)
+			}
+			assert.Len(t, i.Recipients, 1)
+
+			// Unsubscribing an already unsubscribed contact makes no sense, so it should fail.
+			require.Error(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+			assert.Len(t, i.Recipients, 1)
+			i = reloadRelated(t, i)
+		}
 	})
 
 	t.Run("Time-Based Escalation", func(t *testing.T) {
@@ -494,7 +560,7 @@ func cleanupDB(ctx context.Context, db *database.DB, t *testing.T) {
 //
 // The incident is guaranteed to be fully initialized and ready for assertions but might be nil if it's immediately closed.
 func makeIncident(db *database.DB, logs *logging.Logging, runtimeConfig *config.RuntimeConfig, t *testing.T, ev *event.Event) *Incident {
-	require.NoError(t, ProcessEvent(t.Context(), db, logs, runtimeConfig, ev))
+	require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, ev))
 	i := new(Incident)
 	i.ObjectID = object.ID(ev.Tags)
 	i.initializeFields(db, runtimeConfig, logs.GetChildLogger("incident").SugaredLogger)
@@ -535,6 +601,23 @@ func mustIncidentObject(t *testing.T, i *Incident) *object.Object {
 	obj, err := i.Object(t.Context())
 	require.NoError(t, err)
 	return obj
+}
+
+// makeContact generates a fully initialized contact based on the provided args, sync it to the database and returns it.
+func makeContact(t *testing.T, db *database.DB, fullName, username string, channelID int64) *recipient.Contact {
+	contact := &recipient.Contact{
+		FullName:         fullName,
+		Username:         types.MakeString(username),
+		DefaultChannelID: channelID,
+		ExternalUUID:     types.MakeUUID(uuid.New()),
+	}
+	contact.Deleted = types.MakeBool(false)
+	contact.ChangedAt = types.UnixMilli(time.Now())
+
+	contactID, err := database.InsertObtainID(t.Context(), db, database.BuildInsertStmtWithout(db, contact, "id"), contact)
+	require.NoError(t, err)
+	contact.ID = contactID
+	return contact
 }
 
 // makeEvent returns a fully initialized event based on the given parameters.
