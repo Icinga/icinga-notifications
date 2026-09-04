@@ -533,10 +533,13 @@ func (l *Listener) getIncidentsHandler(w http.ResponseWriter, r *http.Request, s
 			if match, err := EvaluateQueryFilter(filter, pair.Object.Tags); err != nil {
 				return nil, err
 			} else if match {
-				return &source.Incident{
-					IsMuted:    pair.Incident.IsMuted(),
-					ObjectTags: pair.Object.Tags,
-					Severity:   pair.Incident.Severity,
+				return source.Response[source.Incident]{
+					Status: source.ResponseStatusSuccess,
+					Result: source.Incident{
+						IsMuted:    pair.Incident.IsMuted(),
+						ObjectTags: pair.Object.Tags,
+						Severity:   pair.Incident.Severity,
+					},
 				}, nil
 			}
 			return nil, nil
@@ -602,14 +605,20 @@ func (l *Listener) modifyIncidentsHandler(w http.ResponseWriter, r *http.Request
 
 				case err != nil:
 					l.logger.Errorw("Failed to modify incident", zap.String("source", src.Name), zap.Error(err))
-					return &source.ModifiedIncidentResp{
-						ObjectTags: pair.Object.Tags,
-						ErrorState: source.ErrorState{
-							Error: "failed to modify incident, see server logs for details",
+					return source.Response[source.ModifiedIncidentResp]{
+						Status: source.ResponseStatusError,
+						Result: source.ModifiedIncidentResp{
+							ObjectTags: pair.Object.Tags,
+							ErrorState: source.ErrorState{
+								Error: "failed to modify incident, see server logs for details",
+							},
 						},
 					}, nil
 				default:
-					return &source.ModifiedIncidentResp{ObjectTags: pair.Object.Tags}, nil
+					return source.Response[source.ModifiedIncidentResp]{
+						Status: source.ResponseStatusSuccess,
+						Result: source.ModifiedIncidentResp{ObjectTags: pair.Object.Tags},
+					}, nil
 				}
 			}
 			return nil, nil
@@ -665,7 +674,10 @@ func (l *Listener) NotificationHistoryHandler(w http.ResponseWriter, r *http.Req
 			if match, err := EvaluateQueryFilter(filter, entry.Object.Tags); err != nil {
 				return nil, err
 			} else if match {
-				return entry.NotificationHistory, nil
+				return source.Response[source.NotificationHistory]{
+					Status: source.ResponseStatusSuccess,
+					Result: entry.NotificationHistory,
+				}, nil
 			}
 			return nil, nil
 		}),
@@ -710,7 +722,7 @@ func (l *Listener) createStreamErrFunc(r *http.Request, w http.ResponseWriter, s
 		if !*wroteHeader {
 			*wroteHeader = true
 			l.abort(w, code, src, "%s", errState.Error)
-		} else if err := enc.Encode(&errState); err != nil {
+		} else if err := enc.Encode(source.Response[source.ErrorState]{Status: source.ResponseStatusError, Result: errState}); err != nil {
 			l.logger.Warnw("Error serializing error response", zap.String("source", src.Name), zap.Error(err))
 		}
 	}
@@ -780,7 +792,12 @@ func (l *Listener) DumpIncidents(w http.ResponseWriter, r *http.Request) {
 			}
 			// It's a debugging endpoint, so don't care about sending a proper error response here.
 		}),
-		WithOnResult(func(pair incident.Pair) (any, error) { return pair, nil }),
+		WithOnResult(func(pair incident.Pair) (any, error) {
+			return source.Response[incident.Pair]{
+				Status: source.ResponseStatusSuccess,
+				Result: pair,
+			}, nil
+		}),
 	}
 	pairCh, errCh := incident.Yield(r.Context(), l.db, l.logs, l.runtimeConfig)
 	_ = StreamJsonResults(r.Context(), w, pairCh, errCh, opts...)

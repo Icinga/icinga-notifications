@@ -1,7 +1,8 @@
 # HTTP API
 
-Icinga Notifications comes with its own HTTP API, [configurable](03-Configuration.md#http-api-configuration)
-via `listen` and `debug-password`.
+Icinga Notifications exposes an HTTP API for submitting events, retrieving and modifying incidents, and more.
+Please refer to the [Configuration](03-Configuration.md#http-api-configuration) section for details on how to
+configure the HTTP listener and the supported transports.
 
 ## Authentication
 
@@ -113,6 +114,32 @@ curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomple
 EOF
 ```
 
+## Response Format
+
+All responses from the Icinga Notifications HTTP API endpoints are JSON-encoded and follow a consistent structure.
+The only exception to this is the [`/process-event`](#process-event) endpoint, which returns a `204 No Content` status
+code with an empty body in the successful case and a proper HTTP error status code in the error case.
+
+The general structure of the response for all other endpoints consists of the following attributes:
+
+| Attribute | Description                                                                   |
+|-----------|-------------------------------------------------------------------------------|
+| status    | A string indicating the overall status of the response object being streamed. |
+| result    | A JSON object containing the result of the request.                           |
+
+The `status` attribute can be a `success` or `error` string, indicating that the response result is either a successful
+or failed response. The `result` attribute contains the actual result and varies depending on the request type and also
+endpoint being used. For detailed information on the structure of the `result` attribute for each endpoint, please
+refer to the respective sections below.
+
+All responses are streamed as a series of JSON objects, one per line, in [JSON Lines/NDJSON](https://jsonlines.org/)
+format. This allows for efficient processing of large datasets without requiring the entire response to be loaded into
+memory at once. Each line in the response represents a single JSON object, and can be read and processed independently.
+As a consequence, the general HTTP status code for those endpoints will always be 202 in the successful case, even if
+the response contains no results at all. If some error occurs mid-stream after Icinga Notifications has already started
+streaming the response, it will send a final JSON object with the `status` attribute set to `error` and the `result`
+attribute containing a JSON object that describes the error.
+
 ## Incidents
 
 The `/incidents` Icinga Notifications HTTP API endpoint allows sources to query and modify a list of open incidents.
@@ -126,14 +153,20 @@ See [Authentication](#authentication) for the transport-specific rules that appl
 ### Getting Incidents
 
 In order to retrieve incidents, one can send a `GET` request to the `/incidents` endpoint with the appropriate `filter`
-query parameter. Currently, this endpoint will include the attributes listed below in the response for each incident:
+query parameter. In successful cases, the response result as described in the [Response Format](#response-format)
+section will contain the following attributes for each incident that matches the filter:
 
 | Attribute   | Description                                                                                   |
 |-------------|-----------------------------------------------------------------------------------------------|
 | is_muted    | A boolean indicating whether the incident is muted or not.                                    |
 | object_tags | A dictionary containing the object ID tags associated with the incident.                      |
 | severity    | The severity level of the incident (e.g., `crit`, `err`, `warning`, etc.).                    |
-| error       | An optional attribute that may be present if an error occurred while retrieving the incident. |
+
+For error cases, the response result will contain the following attributes:
+
+| Attribute | Description                                                                 |
+|-----------|-----------------------------------------------------------------------------|
+| error     | A string describing the error that occurred while retrieving the incidents. |
 
 For instance, when using Icinga DB as a source, the `environment` object ID tag can be used to filter incidents for a
 specific Icinga DB environment. The following example shows how to retrieve all incidents for the
@@ -142,18 +175,9 @@ specific Icinga DB environment. The following example shows how to retrieve all 
 ```
 $ curl -u 'example:insecureinsecure' 'http://localhost:5680/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b"}'
 ...
-{"is_muted":false,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"},"severity":"crit"}
-{"is_muted":true,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"severity":"err"}
+{"status":"success","result":{"is_muted":false,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"},"severity":"crit"}}
+{"status":"success","result":{"is_muted":true,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"severity":"err"}}
 ```
-
-Icinga Notifications will stream the response as a series of JSON objects, one per line, for each incident that matches
-the filter. This format is known as [JSON Lines/NDJSON](https://jsonlines.org/), and allows for efficient processing of
-large datasets without requiring the entire response to be loaded into memory at once. Each line in the response
-represents a single incident JSON object, and can be read and processed independently. As a consequence, the general
-HTTP status code of the response will always be `202 Accepted` in the successful case, even if the response contains no
-incidents at all. If some error occurs after Icinga Notifications has already started streaming the response, it will
-send a final JSON object with the `error` attribute set to a string describing the error. In all other cases, the
-`error` attribute will be omitted entirely from the response.
 
 ### Modifying Incidents
 
@@ -174,8 +198,10 @@ a 400 status code. The `message` attribute can be used to update the incident's 
 well. For instance, this can be useful to regularly synchronize only the plugin output of the associated object so that
 the incident's message is always up to date.
 
-This endpoint will return the following attributes for each modified, but not necessarily successfully modified,
-incident in the response:
+The [response result](#response-format) of this endpoint will contain the following attributes for each incident that
+matches the filter. If the modification was successful, the `error` attribute will be omitted entirely. Otherwise, the
+`error` attribute will be present and contain a string describing the error. Also, in that case, the response status
+will be set to `error` instead of `success`.
 
 | Attribute   | Description                                                                                  |
 |-------------|----------------------------------------------------------------------------------------------|
@@ -206,17 +232,16 @@ EOF
 ```
 
 When bulk modifying incidents, the changes will be applied to all the matching incidents that satisfy the filter
-sequentially. If any of the incidents cannot be modified due to some reason, each incident will convey its own status
-in the response, and the general HTTP status code will be `202 Accepted` if the request validation was successful.
-Icinga Notifications will stream each incident's modification result as a JSON object, one per line, in the same
-[JSON Lines/NDJSON](https://jsonlines.org/) format as the retrieval endpoint. The following snippet shows the result of
-the above curl request, where the incident for the `mailserver` host and `filesystem` service was successfully modified,
-while the incident for the `database` host and `load` service failed to be modified due to some server-side error.
+sequentially. If any of the incidents cannot be modified due to some reason, each incident will convey its own
+status in the response as described in the [Response Format](#response-format) section. The following snippet shows
+the result of the above curl request, where the incident for the `mailserver` host and `filesystem` service was
+successfully modified, while the incident for the `database` host and `load` service failed to be modified due to
+some server-side error.
 
 ```
 ...
-{"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"}}
-{"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"error":"failed to modify incident, see server logs for details"}
+{"status":"success","result":{"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"}}}
+{"status":"error","result":{"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"error":"failed to modify incident, see server logs for details"}}
 ```
 
 ## Notification History
@@ -225,8 +250,10 @@ See [Authentication](#authentication) for the transport-specific rules that appl
 
 In order to retrieve notification history entries, send a `GET` request to the `/notification-history` endpoint
 with the query parameters `filter` described in [API Filtering](#api-filtering) and `since` set to a Unix timestamp in
-milliseconds. Only entries whose `triggered_at` is greater than or equal to this value are returned. This endpoint
-will include the attributes listed below in the response for each entry:
+milliseconds. Only entries whose `triggered_at` is greater than or equal to this value are returned.
+
+In the successful case with matching notification history entries, the [response result](#response-format) will contain
+the following attributes for each notification history entry:
 
 | Attribute         | Description                                                                                |
 |-------------------|--------------------------------------------------------------------------------------------|
@@ -238,7 +265,16 @@ will include the attributes listed below in the response for each entry:
 | channel_name      | Name of the channel used to deliver the notification.                                      |
 | event_message     | The message of the event that triggered the notification.                                  |
 | state             | The state of the notification attempt, either `sent` or `failed`.                          |
-| error             | An optional attribute that may be present if an error occurred while retrieving the entry. |
+
+In error cases, the response result will contain the following attributes:
+
+| Attribute | Description                                                                                    |
+|-----------|------------------------------------------------------------------------------------------------|
+| error     | A string describing the error that occurred while retrieving the notification history entries. |
+
+When this happens mid-stream, the above attributes will be sent in a final JSON object, and the
+[response status](#response-format) will be set to `error` instead of `success`. Afterward, the stream will be closed
+and no further entries will be sent.
 
 The following example shows how to retrieve all notification history entries recorded since
 2026-01-01T00:00:00Z (`1767225600000`):
@@ -246,13 +282,9 @@ The following example shows how to retrieve all notification history entries rec
 ```
 $ curl -u 'example:insecureinsecure' 'http://localhost:5680/notification-history?since=1767225600000' -G --data-urlencode 'filter={"host":"test-host"}'
 ...
-{"event_id":"abc47021-7c9c-49e1-b23e-f7fa446ff513","triggered_at":1767225654000,"contact_name":"Jane Doe","contactgroup_name":"","schedule_name":"On-Call","channel_name":"email","event_message":"Something went somewhere very wrong.","state":"sent"}
+{"status":"success","result":{"event_id":"b56665fc-70f1-48b9-a19c-b15beeb0152e","triggered_at":1788518901863,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"PING OK - Packet loss = 0%, RTA = 0.09 ms","state":"sent"}}
+{"status":"success","result":{"event_id":"48bb1a43-4066-4b69-a14f-7d3d1fd76927","triggered_at":1788518901865,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"LOAD OK - total load average: 1.93, 0.98, 0.66","state":"sent"}}
 ```
-
-Like the `/incidents` endpoint, Icinga Notifications streams the response as a series of JSON objects with the fields
-described above, one per line, in [JSON Lines/NDJSON](https://jsonlines.org/) format. The general HTTP status code of the response will
-always be `202 Accepted` in the successful case, even if the response contains no entries at all. If an error
-occurs after streaming has already started, a final JSON object with the `error` attribute set is sent instead.
 
 ## API Filtering
 
