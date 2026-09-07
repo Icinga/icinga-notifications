@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"fmt"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +18,80 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
 )
+
+// DBCleaner deletes only the rows a test created from a shared test database, instead of truncating whole tables,
+// so that tests running concurrently against the same database don't clobber each other's data.
+//
+// Register conditions for the registered tables with Add or AddLazy, and then call Clean (typically via t.Cleanup)
+// to delete all rows matching those conditions. Clean will only ever delete rows from tables that have registered
+// conditions, and won't touch any other tables, so it's safe to use in parallel tests that share a database.
+type DBCleaner struct {
+	tables                []string
+	conditions            map[string][]string
+	lazyTableConditioners map[string]func(context.Context) string
+
+	mu sync.Mutex
+}
+
+// NewDBCleaner returns a DBCleaner that will only ever touch the given tables, deleted in the given order.
+//
+// The order must respect foreign key constraints, i.e. children before their parents, since Clean will
+// perform plain filtered DELETEs rather than relying on cascading deletes.
+func NewDBCleaner(tables ...string) *DBCleaner {
+	return &DBCleaner{
+		tables:                tables,
+		conditions:            make(map[string][]string),
+		lazyTableConditioners: make(map[string]func(context.Context) string),
+	}
+}
+
+// Add registers a SQL WHERE condition for rows this test owns in the given table.
+//
+// The condition is used verbatim without any adjustments. You have to build it with fmt.Sprintf and
+// embed values directly into your condition, since the cleaner doesn't support parameterized queries.
+// Multiple conditions added for the same table are OR-ed together.
+func (c *DBCleaner) Add(table, condition string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.conditions[table] = append(c.conditions[table], condition)
+}
+
+// AddLazy registers a SQL WHERE condition for the given table, but the condition is only evaluated when Clean is called.
+//
+// This is useful if the condition depends on values that are only known at the time of cleaning, or you just
+// want to defer whatever logic is needed to build the condition until the last possible moment. f is called
+// with the context passed to Clean, and should return the actual SQL WHERE condition string. If it returns
+// an empty string, Clean will skip it if no other conditions were registered for it.
+func (c *DBCleaner) AddLazy(table string, f func(context.Context) string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lazyTableConditioners[table] = f
+}
+
+// Clean deletes all registered tables, one by one, in the order given to NewDBCleaner.
+//
+// It is safe to call concurrently from parallel subtests, but it will only delete rows from tables
+// that have registered conditions. If no conditions are registered for a table, it will be skipped.
+func (c *DBCleaner) Clean(ctx context.Context, t *testing.T, db *database.DB) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Evaluate lazy conditions and add them to the conditions map before executing the DELETE statements.
+	for table, conditionFunc := range c.lazyTableConditioners {
+		if condition := conditionFunc(ctx); condition != "" {
+			c.conditions[table] = append(c.conditions[table], condition)
+		}
+	}
+
+	for _, table := range c.tables {
+		tableConditions, ok := c.conditions[table]
+		if !ok || len(tableConditions) == 0 {
+			continue
+		}
+		_, err := db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %q WHERE %s`, table, strings.Join(tableConditions, " OR ")))
+		require.NoError(t, err)
+	}
+}
 
 // SkipTestIfDBConfigIsMissing skips the calling test if the required test database environment variable is not set.
 //

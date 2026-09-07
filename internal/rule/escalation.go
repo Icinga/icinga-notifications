@@ -3,24 +3,27 @@ package rule
 import (
 	"database/sql"
 	"fmt"
+	"strings"
+	"time"
+
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"go.uber.org/zap/zapcore"
-	"strings"
-	"time"
 )
 
 type Escalation struct {
 	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
 
-	RuleID        int64          `db:"rule_id"`
-	NameRaw       sql.NullString `db:"name"`
-	Condition     filter.Filter  `db:"-"`
-	ConditionExpr sql.NullString `db:"condition"`
-	FallbackForID sql.NullInt64  `db:"fallback_for"`
-	Fallbacks     []*Escalation  `db:"-"`
+	RuleID        int64        `db:"rule_id"`
+	Position      types.Int    `db:"position"`
+	NameRaw       types.String `db:"name"`
+	ConditionExpr types.String `db:"condition"`
+	FallbackForID types.Int    `db:"fallback_for"`
 
+	Condition  filter.Filter          `db:"-"`
+	Fallbacks  []*Escalation          `db:"-"`
 	Recipients []*EscalationRecipient `db:"-"`
 }
 

@@ -33,24 +33,17 @@ func TestPlugin(t *testing.T) {
 
 	UpsertPlugins(t.Context(), daemon.Config().ChannelsDir, logs.GetChildLogger("channel"), db)
 
-	var filterMapMu sync.Mutex
-	filterMap := make(map[string][]string)
-
+	cleaner := testutils.NewDBCleaner("channel_state", "channel")
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		filterMapMu.Lock()
-		defer filterMapMu.Unlock()
-		cleanupDB(ctx, db, t, filterMap)
+		cleaner.Clean(ctx, t, db)
 	})
 
 	// assembleDBCleanupConditions is a helper function to add cleanup conditions for the database tables used in the tests.
 	assembleDBCleanupConditions := func(channelID int64) {
-		filterMapMu.Lock()
-		defer filterMapMu.Unlock()
-
-		filterMap["channel"] = append(filterMap["channel"], fmt.Sprintf("id = %d", channelID))
-		filterMap["channel_state"] = append(filterMap["channel_state"], fmt.Sprintf("channel_id = %d", channelID))
+		cleaner.Add("channel", fmt.Sprintf("id = %d", channelID))
+		cleaner.Add("channel_state", fmt.Sprintf("channel_id = %d", channelID))
 	}
 
 	// getPluginS is a helper function to retrieve the pluginSupervisor from the channel's pluginCh channel.
@@ -319,26 +312,4 @@ func makeRandomNumber() int64 {
 	var b [4]byte
 	_, _ = rand.Read(b[:]) // crypto/rand.Read never returns an error, so we can ignore it here.
 	return int64(binary.LittleEndian.Uint32(b[:]))
-}
-
-// cleanupDB cleans up the database by deleting all rows from the relevant tables used in the tests.
-func cleanupDB(ctx context.Context, db *database.DB, t *testing.T, filter map[string][]string) {
-	switch db.DriverName() {
-	case database.PostgreSQL, database.MySQL:
-		tables := []string{
-			"channel_state",
-			"channel",
-		}
-
-		for _, table := range tables {
-			var conditions string
-			if filters, ok := filter[table]; ok && len(filters) > 0 {
-				conditions = " WHERE " + strings.Join(filters, " OR ")
-			}
-			_, err := db.ExecContext(ctx, fmt.Sprintf("DELETE FROM %q %s", table, conditions))
-			require.NoErrorf(t, err, "failed to clean up table %s", table)
-		}
-	default:
-		t.Fatalf("unsupported database driver: %s", db.DriverName())
-	}
 }
