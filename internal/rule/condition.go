@@ -2,10 +2,11 @@ package rule
 
 import (
 	"fmt"
-	"github.com/icinga/icinga-go-library/notifications/event"
-	"github.com/icinga/icinga-notifications/internal/filter"
 	"math"
 	"time"
+
+	"github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-notifications/internal/filter"
 )
 
 // RetryNever indicates that an escalation condition should never be retried once it has been evaluated.
@@ -14,6 +15,7 @@ const RetryNever = time.Duration(math.MaxInt64)
 type EscalationFilter struct {
 	IncidentAge      time.Duration
 	IncidentSeverity event.Severity
+	IsManaged        bool
 }
 
 // ReevaluateAfter returns the duration after which escalationCond should be reevaluated the
@@ -57,6 +59,13 @@ func (e *EscalationFilter) EvalEqual(key, value any) (bool, error) {
 		}
 
 		return e.IncidentSeverity == severity, nil
+	case "is_managed":
+		managed, err := parseManagedValue(value)
+		if err != nil {
+			return false, err
+		}
+
+		return e.IsManaged == managed, nil
 	default:
 		return false, nil
 	}
@@ -78,6 +87,8 @@ func (e *EscalationFilter) EvalLess(key, value any) (bool, error) {
 		}
 
 		return e.IncidentSeverity < severity, nil
+	case "is_managed":
+		return false, fmt.Errorf("is_managed only supports the equality operators (= and !=)")
 	default:
 		return false, nil
 	}
@@ -103,6 +114,8 @@ func (e *EscalationFilter) EvalLessOrEqual(key, value any) (bool, error) {
 		}
 
 		return e.IncidentSeverity <= severity, nil
+	case "is_managed":
+		return false, fmt.Errorf("is_managed only supports the equality operators (= and !=)")
 	default:
 		return false, nil
 	}
@@ -113,8 +126,22 @@ func (e *EscalationFilter) EvalExists(key any) bool {
 	case "incident_age":
 		fallthrough
 	case "incident_severity":
+		fallthrough
+	case "is_managed":
 		return true
 	default:
 		return false
+	}
+}
+
+// parseManagedValue parses the value of the is_managed attribute, which is expected to be either "y" or "n".
+func parseManagedValue(value any) (bool, error) {
+	switch v := fmt.Sprint(value); v {
+	case "y":
+		return true, nil
+	case "n":
+		return false, nil
+	default:
+		return false, fmt.Errorf(`invalid is_managed value %q, expected either "y" or "n"`, v)
 	}
 }
