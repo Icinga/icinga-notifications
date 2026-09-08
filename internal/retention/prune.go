@@ -147,26 +147,36 @@ type ResetPruner struct {
 // The ResetPruner understands pruning as a UPDATE query, which should alter the row to not be matched again.
 // If Referrers are defined, it will remove the matching rows atomically in a transaction.
 func (rp *ResetPruner) Exec(ctx context.Context, db *database.DB, l *logging.Logger, olderThan types.UnixMilli, limit uint64) (uint64, error) {
-	var updated uint64
-	err := retry.WithBackoff(
-		ctx,
-		func(ctx context.Context) (err error) {
-			if len(rp.Referrers) == 0 {
-				updated, err = exec(ctx, db, db, rp.assembleUpdate(db.DriverName(), limit), limit, olderThan)
-				return
-			}
+	var total uint64
+	for {
+		var updated uint64
+		err := retry.WithBackoff(
+			ctx,
+			func(ctx context.Context) (err error) {
+				if len(rp.Referrers) == 0 {
+					updated, err = exec(ctx, db, db, rp.assembleUpdate(db.DriverName(), limit), limit, olderThan)
+					return
+				}
 
-			// A tx is required here to ensure that the updates to the main table and its referrers are executed atomically.
-			return db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) (err error) {
-				updated, err = execCascade(ctx, db, tx, rp, limit, olderThan)
-				return
-			})
-		},
-		retry.Retryable,
-		backoff.DefaultBackoff,
-		getPrunerRetrySettings(l),
-	)
-	return updated, err
+				// A tx is required here to ensure that the updates to the main table and its referrers are executed atomically.
+				return db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) (err error) {
+					updated, err = execCascade(ctx, db, tx, rp, limit, olderThan)
+					return
+				})
+			},
+			retry.Retryable,
+			backoff.DefaultBackoff,
+			getPrunerRetrySettings(l),
+		)
+		if err != nil {
+			return 0, err
+		}
+
+		total += updated
+		if updated < limit {
+			return total, nil
+		}
+	}
 }
 
 func (rp *ResetPruner) assembleUpdate(driverName string, limit uint64) string {
