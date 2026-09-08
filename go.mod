@@ -7,7 +7,7 @@ require (
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
 	github.com/emersion/go-smtp v0.25.0
 	github.com/google/uuid v1.6.0
-	github.com/icinga/icinga-go-library v0.9.1-0.20260904123307-5937dfc8fd5b
+	github.com/icinga/icinga-go-library v0.9.1-0.20260908070857-97ea5267070e
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/okzk/sdnotify v0.0.0-20180710141335-d9becc38acbd
@@ -27,7 +27,7 @@ require (
 	github.com/cention-sany/utf7 v0.0.0-20170124080048-26cad61bd60a // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
-	github.com/go-sql-driver/mysql v1.10.0 // indirect
+	github.com/go-sql-driver/mysql v1.10.1 // indirect
 	github.com/goccy/go-yaml v1.13.0 // indirect
 	github.com/gogs/chardet v0.0.0-20211120154057-b7413eaefb8f // indirect
 	github.com/jaytaylor/html2text v0.0.0-20230321000545-74c2419ad056 // indirect

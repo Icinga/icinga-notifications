@@ -129,7 +129,7 @@ func (ch *Telegram) SendNotification(req *plugin.NotificationRequest) error {
 		ChatID: chatID,
 		// Telegram limits sendMessage "text" field to 4096 characters.
 		// https://core.telegram.org/bots/api#sendmessage
-		Text:                  utils.Ellipsize(output.String(), 4096),
+		Text:                  utils.EllipsizeRunes(output.String(), 4096),
 		DisableWebPagePreview: true,
 	}
 
