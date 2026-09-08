@@ -26,7 +26,7 @@ func (c *ContactRow) TableName() string {
 }
 
 // Upsert implements the contracts.Upserter interface.
-func (c *ContactRow) Upsert() interface{} {
+func (c *ContactRow) Upsert() any {
 	return &struct {
 		Role      recipient.Role  `db:"role"`
 		ChangedAt types.UnixMilli `db:"changed_at"`

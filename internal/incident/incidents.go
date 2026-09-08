@@ -8,7 +8,6 @@ import (
 
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
-	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
@@ -33,8 +32,8 @@ func ReevaluateEscalations(
 	var errs []error
 	for pair := range pairCh {
 		err := pair.Incident.RetriggerEscalations(ctx, pair.Object, &event.Event{
-			Time:  time.Now(),
-			Event: baseEv.Event{Incident: types.MakeBool(true)},
+			Time:     time.Now(),
+			Incident: types.MakeBool(true),
 		})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("cannot reevaluate incident %s escalations: %w", pair.Incident, err))
