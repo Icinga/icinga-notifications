@@ -18,6 +18,7 @@ import (
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -91,12 +92,18 @@ type (
 		//
 		// The callback must honor the provided context and return an error if the processing failed.
 		ProcessEvent func(context.Context, *Event) error
+
+		// QuickAction is the callback function type used by [ProcessQueue] to process a quick action.
+		//
+		// The callback is invoked with a context limited to one minute, and it must honor this context.
+		QuickAction func(context.Context, *QuickAction) error
 	}
 
 	// job pairs a Queue entry with its corresponding event.Event for processing.
 	job struct {
 		Q  *Queue
 		Ev *Event
+		QA *QuickAction
 	}
 
 	// jobProcessingLock describes a lock for a job queue entry that is currently being processed.
@@ -134,33 +141,30 @@ func (q *Queue) TableName() string {
 	return "job_queue"
 }
 
-// toEvent converts the Queue entry into an event.Event.
+// decodeEnvelopeAs deserializes the payload of the queue entry's envelope into a struct of type T.
 //
-// It returns an error if the envelope format doesn't match EnvelopeFmtEvent or if the payload
-// cannot be deserialized into an event.Event.
-func (q *Queue) toEvent() (*Event, error) {
-	if q.Envelope.Format != EnvelopeFmtEvent {
-		return nil, fmt.Errorf("cannot convert envelope of format %q to event.Event", q.Envelope.Format)
+// Returns an error if the envelope format does not match the expected format, or if the envelope version
+// is newer than the expected one. It also returns an error if the payload cannot be deserialized into a T struct.
+func (q *Queue) decodeEnvelopeAs[T any](envelopeFmt EnvelopeFmt, expectedVersion uint8) (*T, error) {
+	if q.Envelope.Format != envelopeFmt {
+		return nil, fmt.Errorf("cannot convert envelope of format %q to %T", q.Envelope.Format, *new(T))
 	}
 
-	if q.Envelope.Version > EnvelopeEventVersion {
+	if q.Envelope.Version > expectedVersion {
 		return nil, fmt.Errorf("%w: got %d, supported <= %d",
-			errEnvelopeVersionTooNew, q.Envelope.Version, EnvelopeEventVersion)
+			errEnvelopeVersionTooNew, q.Envelope.Version, expectedVersion)
 	}
 
-	// NOTE: There might be breaking changes with future updates to the event.Event struct, so apply any necessary
-	// migration steps here for older envelope versions before deserializing the payload into an event.Event.
+	// NOTE: There might be breaking changes with future updates to the T struct, so apply any necessary
+	// migration steps here for older envelope versions before deserializing the payload into a T.
 
-	var ev Event
-	err := json.NewDecoder(bytes.NewReader(q.Envelope.Payload)).Decode(&ev)
+	var payload T
+	err := json.NewDecoder(bytes.NewReader(q.Envelope.Payload)).Decode(&payload)
 	if err != nil {
-		return nil, fmt.Errorf("cannot JSON decode job queue entry: %w", err)
+		return nil, fmt.Errorf("cannot JSON decode envelope payload into %T: %w", payload, err)
 	}
 
-	ev.Time = q.Envelope.Time.Time()
-	ev.ID = q.ID
-
-	return &ev, nil
+	return &payload, nil
 }
 
 // Enqueue enqueues an event.Event into the job queue.
@@ -254,7 +258,13 @@ func ProcessQueue(ctx context.Context, db *database.DB, logger *logging.Logger, 
 				return fmt.Errorf("cannot acquire semaphore for processing job queue entry: %w", err)
 			}
 
-			logger.Debugw("Claimed job queue entry for processing", zap.Stringer("id", j.Q.ID), zap.Object("event", j.Ev))
+			var marshaler zapcore.ObjectMarshaler
+			if j.Ev != nil {
+				marshaler = j.Ev
+			} else {
+				marshaler = j.QA
+			}
+			logger.Debugw("Claimed job queue entry for processing", zap.Stringer("id", j.Q.ID), zap.Object("payload", marshaler))
 
 			go func(j job) {
 				defer sem.Release(1)
@@ -308,11 +318,22 @@ func startClaiming(
 						var (
 							err error
 							ev  *Event
+							qa  *QuickAction
 						)
 
 						switch q.Envelope.Format {
 						case EnvelopeFmtEvent:
-							ev, err = q.toEvent()
+							ev, err = q.decodeEnvelopeAs[Event](EnvelopeFmtEvent, EnvelopeEventVersion)
+							if err == nil {
+								ev.ID = q.ID
+								ev.Time = q.Envelope.Time.Time()
+							}
+						case EnvelopeFmtQA:
+							qa, err = q.decodeEnvelopeAs[QuickAction](EnvelopeFmtQA, EnvelopeQAVersion)
+							if err == nil {
+								qa.ID = q.ID
+								qa.Time = q.Envelope.Time.Time()
+							}
 						default:
 							err = fmt.Errorf("%w: %q", errUnknownEnvelopeFmt, q.Envelope.Format)
 						}
@@ -344,7 +365,7 @@ func startClaiming(
 							continue
 						}
 
-						j := job{Q: &q, Ev: ev}
+						j := job{Q: &q, Ev: ev, QA: qa}
 						switch err := tryClaim(ctx, db, j, casStmt, lockStmt, cbs); {
 						case err == nil:
 							// If the ctx is canceled while sending the claimed job, we'll inevitably leave the
@@ -420,8 +441,15 @@ func startClaiming(
 // Returns errClaimLost if the object is already locked by another node, or if a concurrent one claimed this
 // exact entry first.
 func tryClaim(ctx context.Context, db *database.DB, j job, casStmt, lockStmt string, cbs QueueCallbacks) error {
+	var tags map[string]string
+	if j.Q.Envelope.Format == EnvelopeFmtEvent {
+		tags = j.Ev.Tags
+	} else {
+		tags = j.QA.ObjectTags
+	}
+
 	return db.ExecTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, func(ctx context.Context, tx *sqlx.Tx) error {
-		queueLock := &jobProcessingLock{QueueID: j.Q.ID, ObjectID: cbs.GenObjectID(j.Ev.Tags)}
+		queueLock := &jobProcessingLock{QueueID: j.Q.ID, ObjectID: cbs.GenObjectID(tags)}
 		res, err := tx.NamedExecContext(ctx, lockStmt, queueLock)
 		if err != nil {
 			return database.CantPerformQuery(err, lockStmt)
@@ -470,7 +498,7 @@ func processAndFinalize(
 	callbackCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	q, ev := j.Q, j.Ev
+	q, ev, qa := j.Q, j.Ev, j.QA
 	switch q.Envelope.Format {
 	case EnvelopeFmtEvent:
 		if err := cbs.ProcessEvent(callbackCtx, ev); err != nil {
@@ -478,6 +506,17 @@ func processAndFinalize(
 			q.State = QueueStateError
 		} else {
 			logger.Debugw("Successfully processed event", zap.Stringer("id", q.ID))
+			q.State = QueueStateDone
+		}
+
+	case EnvelopeFmtQA:
+		if err := cbs.QuickAction(callbackCtx, qa); err != nil {
+			logger.Errorw("Failed to process quick action",
+				zap.Stringer("kind", qa.Kind), zap.Stringer("id", q.ID), zap.Error(err))
+			q.State = QueueStateError
+		} else {
+			logger.Debugw("Successfully processed quick action",
+				zap.Stringer("kind", qa.Kind), zap.Stringer("id", q.ID))
 			q.State = QueueStateDone
 		}
 

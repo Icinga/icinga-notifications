@@ -61,58 +61,29 @@ func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, stat
 	return err
 }
 
-// AddRecipient adds recipient from the given *rule.Escalation to this incident.
-// Syncs also all the recipients with the database and returns an error on db failure.
-func (i *Incident) AddRecipient(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation) error {
-	newRole := recipient.RoleRecipient
-	if i.HasManager() {
-		newRole = recipient.RoleSubscriber
-	}
-
+// AddEscalationRecipients adds the recipients of the given *rule.Escalation to the incident's recipients list.
+//
+// Each recipient is added to the incident's recipients list with the role RoleRecipient, and a new ContactRow
+// is inserted into the incident_contact table. If a recipient already exists in the incident's recipients list,
+// it is skipped and no new ContactRow is inserted for that recipient.
+func (i *Incident) AddEscalationRecipients(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation) error {
 	for _, escalationRecipient := range escalation.Recipients {
 		r := escalationRecipient.Recipient
-		cr := &ContactRow{IncidentID: i.Id, Role: newRole, ChangedAt: types.UnixMilli(time.Now())}
-
 		recipientKey := recipient.ToKey(r)
-		cr.Key = recipientKey
-
-		state, ok := i.Recipients[recipientKey]
-		if !ok {
-			i.Recipients[recipientKey] = &RecipientState{Role: newRole}
-		} else {
-			if state.Role < newRole {
-				oldRole := state.Role
-				state.Role = newRole
-
-				i.logger.Infof("Contact %q role changed from %s to %s", r, state.Role.String(), newRole.String())
-
-				hr := &HistoryRow{
-					IncidentID:       i.Id,
-					Key:              cr.Key,
-					Time:             types.UnixMilli(time.Now()),
-					Type:             RecipientRoleChanged,
-					NewRecipientRole: newRole,
-					OldRecipientRole: oldRole,
-				}
-
-				if err := hr.Sync(ctx, i.db, tx); err != nil {
-					i.logger.Errorw(
-						"Failed to insert recipient role changed incident history", zap.Object("escalation", escalation),
-						zap.String("recipients", r.String()), zap.Error(err),
-					)
-					return err
-				}
-			}
-			cr.Role = state.Role
+		if _, exists := i.Recipients[recipientKey]; exists {
+			continue
 		}
+		i.Recipients[recipientKey] = RecipientState{Role: recipient.RoleRecipient, IsNew: true}
+		cr := &ContactRow{IncidentID: i.Id, Key: recipientKey, Role: recipient.RoleRecipient, ChangedAt: types.UnixMilli(time.Now())}
 
 		stmt, _ := i.db.BuildUpsertStmt(cr, "id")
 		_, err := tx.NamedExecContext(ctx, stmt, cr)
 		if err != nil {
 			i.logger.Errorw(
-				"Failed to upsert incident recipient", zap.Object("escalation", escalation),
-				zap.String("recipient", r.String()), zap.Error(err),
-			)
+				"Failed to add escalation recipient to incident",
+				zap.Object("escalation", escalation),
+				zap.String("recipient", r.String()),
+				zap.Error(err))
 			return err
 		}
 	}
@@ -128,6 +99,60 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 	_, err := tx.NamedExecContext(ctx, stmt, rr)
 
 	return err
+}
+
+// addRecipient adds a recipient to the incident's recipients list and upserts a corresponding ContactRow in the database.
+//
+// If the recipient already exists in the incident's recipients list, their role is updated to the new role and a
+// history entry is created to record the change. If the recipient does not exist, they are added to the list with
+// the specified role and a new ContactRow is inserted.
+func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Recipient, role recipient.Role) error {
+	recipientKey := recipient.ToKey(r)
+	state, exists := i.Recipients[recipientKey]
+	if exists && state.Role == role {
+		return nil // The recipient already has the desired role, so no changes are needed.
+	}
+
+	if !exists {
+		i.Recipients[recipientKey] = RecipientState{Role: role, IsNew: true}
+	} else {
+		if err := i.recordRecipientRoleChange(ctx, tx, r, state.Role, role); err != nil {
+			return err
+		}
+		state.Role = role
+		i.Recipients[recipientKey] = state
+	}
+
+	cr := &ContactRow{IncidentID: i.Id, Key: recipientKey, Role: role, ChangedAt: types.UnixMilli(time.Now())}
+	stmt, _ := i.db.BuildUpsertStmt(cr, "id")
+	if _, err := tx.NamedExecContext(ctx, stmt, cr); err != nil {
+		return fmt.Errorf("failed to upsert contact: %w", err)
+	}
+	return nil
+}
+
+// recordRecipientRoleChange records a recipient role change in the incident's history table.
+func (i *Incident) recordRecipientRoleChange(ctx context.Context, tx *sqlx.Tx, r recipient.Recipient, oldR, newR recipient.Role) error {
+	i.logger.Infof("Changing contact %q role from %s to %s", r, oldR.String(), newR.String())
+
+	hr := &HistoryRow{
+		IncidentID:       i.Id,
+		Key:              recipient.ToKey(r),
+		Time:             types.UnixMilli(time.Now()),
+		Type:             RecipientRoleChanged,
+		NewRecipientRole: newR,
+		OldRecipientRole: oldR,
+	}
+
+	if err := hr.Sync(ctx, i.db, tx); err != nil {
+		i.logger.Errorw("Failed to insert incident recipient role change history",
+			zap.Stringer("contact", r),
+			zap.String("old_role", oldR.String()),
+			zap.String("new_role", newR.String()),
+			zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // generateNotifications generates incident notification histories of the given recipients.

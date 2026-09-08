@@ -115,6 +115,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 
 			curElement.ChangedAt = update.ChangedAt
 			curElement.NameRaw = update.NameRaw
+			curElement.Position = update.Position
 			// Condition{,Expr} are being initialized by config.IncrementalConfigurableInitAndValidatable.
 			curElement.Condition = update.Condition
 			curElement.ConditionExpr = update.ConditionExpr

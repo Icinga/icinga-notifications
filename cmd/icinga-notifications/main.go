@@ -133,7 +133,7 @@ func run() int {
 		cbs := event.QueueCallbacks{
 			GenObjectID: object.ID,
 			ProcessEvent: func(ctx context.Context, ev *event.Event) error {
-				err := incident.ProcessEvent(ctx, db, logs, runtimeConfig, ev)
+				err := incident.Process(ctx, db, logs, runtimeConfig, ev)
 				if errors.Is(err, incident.ErrSeverityChangeWithoutIncidentFlag) ||
 					errors.Is(err, incident.ErrOpenIncidentWithoutSeverity) {
 					logger.Debugw("Skipping event processing",
@@ -142,6 +142,9 @@ func run() int {
 					return nil
 				}
 				return err
+			},
+			QuickAction: func(ctx context.Context, qa *event.QuickAction) error {
+				return incident.Process(ctx, db, logs, runtimeConfig, qa)
 			},
 		}
 
