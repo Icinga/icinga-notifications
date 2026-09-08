@@ -312,12 +312,16 @@ func (orp *OrphanRowPruner) assembleSelect(limit uint64) string {
 func (orp *OrphanRowPruner) assembleDelete(driverName string, limit uint64) string {
 	switch driverName {
 	case database.MySQL:
-		joins, conds := orp.joinList()
-		// MariaDB does support JOIN based ANTI-JOINs but doesn't support LIMIT in DELETE statements with JOINs
-		// on older versions, so we have to use a subquery instead.
+		// MariaDB does support JOIN based ANTI-JOINs but doesn't support LIMIT in DELETE statements with
+		// JOINs on older versions (and even latest MySQL versions), so we have to use a subquery instead.
+		// And the nested subquery is required to avoid the (MySQL only) "You can't specify target table
+		// for update in FROM clause" error.
 		return fmt.Sprintf(
-			`DELETE FROM %[1]s WHERE %[2]s IN (SELECT main.%[2]s FROM %[1]s main %[3]s WHERE %[4]s) LIMIT %[5]d`,
-			orp.Table, orp.PKorFK, joins, conds, limit)
+			`DELETE FROM %[1]s WHERE %[2]s IN (
+				SELECT sub_tmp_table.%[2]s FROM (
+					%[3]s
+				) AS sub_tmp_table
+			)`, orp.Table, orp.PKorFK, orp.assembleSelect(limit))
 	case database.PostgreSQL:
 		return fmt.Sprintf(`
 			WITH rows_to_delete AS (%s)
