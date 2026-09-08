@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-notifications/internal/filter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,18 +16,16 @@ func TestEvent(t *testing.T) {
 		t.Parallel()
 
 		ev := &Event{
-			Event: baseEv.Event{
-				CompleteRelations: []string{"host.vars", "host", "services"},
-				Relations: map[string]any{
-					"host.vars": map[string]any{
-						"os": "Linux",
-					},
-					"services": []any{
-						map[string]any{
-							"name": "service",
-							"vars": map[string]any{
-								"department": "IT",
-							},
+			CompleteRelations: []string{"host.vars", "host", "services"},
+			Relations: map[string]any{
+				"host.vars": map[string]any{
+					"os": "Linux",
+				},
+				"services": []any{
+					map[string]any{
+						"name": "service",
+						"vars": map[string]any{
+							"department": "IT",
 						},
 					},
 				},
@@ -51,32 +48,30 @@ func TestEvent(t *testing.T) {
 		t.Parallel()
 
 		ev := &Event{
-			Event: baseEv.Event{
-				Relations: map[string]any{
-					"host": map[string]any{
-						"name": "test-host",
-						"vars": map[string]any{
-							"dict": map[string]any{
-								"key":       "value",
-								"key_int":   42,
-								"key_float": 3.1415,
-								"domain":    "example.com",
-								"key_array": []any{
-									"value1",
-									"value2",
-									map[string]any{
-										"dict_in_array": "dict_in_array1",
-									},
+			Relations: map[string]any{
+				"host": map[string]any{
+					"name": "test-host",
+					"vars": map[string]any{
+						"dict": map[string]any{
+							"key":       "value",
+							"key_int":   42,
+							"key_float": 3.1415,
+							"domain":    "example.com",
+							"key_array": []any{
+								"value1",
+								"value2",
+								map[string]any{
+									"dict_in_array": "dict_in_array1",
 								},
 							},
-							"array": []any{
-								"value1-from-array",
-								map[string]any{
-									"dict_in_array": "dict_in_array2",
-								},
-								map[string]any{
-									"dict_in_array": "dict_in_array3",
-								},
+						},
+						"array": []any{
+							"value1-from-array",
+							map[string]any{
+								"dict_in_array": "dict_in_array2",
+							},
+							map[string]any{
+								"dict_in_array": "dict_in_array3",
 							},
 						},
 					},

@@ -300,17 +300,17 @@ func (p *Parser) readValue() (string, error) {
 // readUntil reads chars until any of the given characters
 // May return empty string if there is no char to read
 func (p *Parser) readUntil(chars string) string {
-	var buffer string
+	var buffer strings.Builder
 	for char := p.readChar(); char != ""; char = p.readChar() {
 		if strings.Contains(chars, char) {
 			p.pos--
 			break
 		}
 
-		buffer += char
+		buffer.WriteString(char)
 	}
 
-	return buffer
+	return buffer.String()
 }
 
 // readChar peeks the next char of the Parser.tag and increments the Parser.pos by one
