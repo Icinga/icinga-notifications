@@ -147,26 +147,36 @@ type ResetPruner struct {
 // The ResetPruner understands pruning as a UPDATE query, which should alter the row to not be matched again.
 // If Referrers are defined, it will remove the matching rows atomically in a transaction.
 func (rp *ResetPruner) Exec(ctx context.Context, db *database.DB, l *logging.Logger, olderThan types.UnixMilli, limit uint64) (uint64, error) {
-	var updated uint64
-	err := retry.WithBackoff(
-		ctx,
-		func(ctx context.Context) (err error) {
-			if len(rp.Referrers) == 0 {
-				updated, err = exec(ctx, db, db, rp.assembleUpdate(db.DriverName(), limit), limit, olderThan)
-				return
-			}
+	var total uint64
+	for {
+		var updated uint64
+		err := retry.WithBackoff(
+			ctx,
+			func(ctx context.Context) (err error) {
+				if len(rp.Referrers) == 0 {
+					updated, err = exec(ctx, db, db, rp.assembleUpdate(db.DriverName(), limit), limit, olderThan)
+					return
+				}
 
-			// A tx is required here to ensure that the updates to the main table and its referrers are executed atomically.
-			return db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) (err error) {
-				updated, err = execCascade(ctx, db, tx, rp, limit, olderThan)
-				return
-			})
-		},
-		retry.Retryable,
-		backoff.DefaultBackoff,
-		getPrunerRetrySettings(l),
-	)
-	return updated, err
+				// A tx is required here to ensure that the updates to the main table and its referrers are executed atomically.
+				return db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) (err error) {
+					updated, err = execCascade(ctx, db, tx, rp, limit, olderThan)
+					return
+				})
+			},
+			retry.Retryable,
+			backoff.DefaultBackoff,
+			getPrunerRetrySettings(l),
+		)
+		if err != nil {
+			return 0, err
+		}
+
+		total += updated
+		if updated < limit {
+			return total, nil
+		}
+	}
 }
 
 func (rp *ResetPruner) assembleUpdate(driverName string, limit uint64) string {
@@ -302,12 +312,16 @@ func (orp *OrphanRowPruner) assembleSelect(limit uint64) string {
 func (orp *OrphanRowPruner) assembleDelete(driverName string, limit uint64) string {
 	switch driverName {
 	case database.MySQL:
-		joins, conds := orp.joinList()
-		// MariaDB does support JOIN based ANTI-JOINs but doesn't support LIMIT in DELETE statements with JOINs
-		// on older versions, so we have to use a subquery instead.
+		// MariaDB does support JOIN based ANTI-JOINs but doesn't support LIMIT in DELETE statements with
+		// JOINs on older versions (and even latest MySQL versions), so we have to use a subquery instead.
+		// And the nested subquery is required to avoid the (MySQL only) "You can't specify target table
+		// for update in FROM clause" error.
 		return fmt.Sprintf(
-			`DELETE FROM %[1]s WHERE %[2]s IN (SELECT main.%[2]s FROM %[1]s main %[3]s WHERE %[4]s) LIMIT %[5]d`,
-			orp.Table, orp.PKorFK, joins, conds, limit)
+			`DELETE FROM %[1]s WHERE %[2]s IN (
+				SELECT sub_tmp_table.%[2]s FROM (
+					%[3]s
+				) AS sub_tmp_table
+			)`, orp.Table, orp.PKorFK, orp.assembleSelect(limit))
 	case database.PostgreSQL:
 		return fmt.Sprintf(`
 			WITH rows_to_delete AS (%s)
