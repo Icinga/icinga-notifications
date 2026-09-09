@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -126,52 +127,70 @@ func TestIncidents(t *testing.T) {
 	incidentManager := makeContact(t, db, cleaner, "Thomas A. Anderson", "neo", ch.ID)
 	incidentSubscriber := makeContact(t, db, cleaner, "Agent Smith", "smith", ch.ID)
 
-	basicRule := &rule.Rule{Name: "escalation test rule", SourceType: source.Type, ChangedAt: source.ChangedAt, Deleted: source.Deleted}
+	var unmanagedEscalationID, managedEscalationID int64
+	var basicRule, managedRule *rule.Rule
 	err = db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
-		id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, basicRule, "id"), basicRule)
-		assert.NoError(t, err)
-		basicRule.ID = id
-
-		escalation := &rule.Escalation{
-			RuleID:        basicRule.ID,
-			Position:      types.MakeInt(2),
-			ConditionExpr: types.MakeString("incident_severity>=ok"),
-			ChangedAt:     types.UnixMilli(time.Now()),
-			Deleted:       types.MakeBool(false),
+		insertRule := func(name, filter string) *rule.Rule {
+			r := &rule.Rule{
+				Name:             name,
+				SourceType:       source.Type,
+				ObjectFilterExpr: types.MakeString(filter),
+				ChangedAt:        source.ChangedAt,
+				Deleted:          source.Deleted,
+			}
+			id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, r, "id"), r)
+			assert.NoError(t, err)
+			r.ID = id
+			return r
 		}
-		id, err = database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, escalation, "id"), escalation)
-		assert.NoError(t, err)
+		basicRule = insertRule("Escalation Test Rule", `{"ast":{"op":"!=","attributes":["$.host.name"],"value":"managed_escalations"}}`)
+		managedRule = insertRule("Managed Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"managed_escalations"}}`)
 
-		escalationRecipient := &rule.EscalationRecipient{
-			EscalationID: id,
-			Recipient:    contact,
-			ContactID:    types.MakeInt(contact.ID),
-			ChangedAt:    types.UnixMilli(time.Now()),
-			Deleted:      types.MakeBool(false),
-		}
-		_, err = tx.NamedExecContext(ctx, database.BuildInsertStmtWithout(db, escalationRecipient, "id"), escalationRecipient)
-		assert.NoError(t, err)
+		insertEscalation := func(position, ruleID int64, condition string) int64 {
+			escalation := &rule.Escalation{
+				RuleID:        ruleID,
+				Position:      types.MakeInt(position),
+				ConditionExpr: types.MakeString(condition),
+				ChangedAt:     types.UnixMilli(time.Now()),
+				Deleted:       types.MakeBool(false),
+			}
+			id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, escalation, "id"), escalation)
+			require.NoError(t, err, "populating rule_escalation table should not fail")
 
-		// This is for the time-based escalation test.
-		incidentAgeEscalation := &rule.Escalation{
-			RuleID:        basicRule.ID,
-			Position:      types.MakeInt(1),
-			ConditionExpr: types.MakeString("incident_age>=1h"),
-			ChangedAt:     types.UnixMilli(time.Now()),
-			Deleted:       types.MakeBool(false),
+			escalationRecipient := &rule.EscalationRecipient{
+				EscalationID: id,
+				Recipient:    contact,
+				ContactID:    types.MakeInt(contact.ID),
+				ChangedAt:    types.UnixMilli(time.Now()),
+				Deleted:      types.MakeBool(false),
+			}
+			_, err = tx.NamedExecContext(ctx, database.BuildInsertStmtWithout(db, escalationRecipient, "id"), escalationRecipient)
+			require.NoError(t, err, "populating rule_escalation_recipient table should not fail")
+
+			return id
 		}
-		_, err = tx.NamedExecContext(ctx, database.BuildInsertStmtWithout(db, incidentAgeEscalation, "id"), incidentAgeEscalation)
-		assert.NoError(t, err)
+
+		insertEscalation(2, basicRule.ID, "incident_severity>=ok")
+		insertEscalation(1, basicRule.ID, "incident_age>=1h")
+
+		unmanagedEscalationID = insertEscalation(1, managedRule.ID, "is_managed=n")
+		managedEscalationID = insertEscalation(2, managedRule.ID, "is_managed=y")
 
 		return nil
 	})
 	require.NoError(t, err)
-	cleaner.Add("rule", fmt.Sprintf("id = %d", basicRule.ID))
-	cleaner.Add("rule_escalation", fmt.Sprintf("rule_id = %d", basicRule.ID))
-	cleaner.Add("rule_escalation_recipient", fmt.Sprintf("rule_escalation_id IN (SELECT id FROM rule_escalation WHERE rule_id = %d)", basicRule.ID))
+	for _, ruleID := range []int64{basicRule.ID, managedRule.ID} {
+		cleaner.Add("rule", fmt.Sprintf("id = %d", ruleID))
+		cleaner.Add("rule_escalation", fmt.Sprintf("rule_id = %d", ruleID))
+		cleaner.Add("rule_escalation_recipient", fmt.Sprintf("rule_escalation_id IN (SELECT id FROM rule_escalation WHERE rule_id = %d)", ruleID))
+	}
 
 	runtimeConfig := config.NewRuntimeConfig(logs, db)
 	require.NoError(t, runtimeConfig.UpdateFromDatabase(t.Context()))
+
+	require.NotNil(t, runtimeConfig.Rules[basicRule.ID])
+	require.NotNil(t, runtimeConfig.Rules[managedRule.ID])
+	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 2)
 
 	t.Run("YieldIncidents", func(t *testing.T) {
 		testData := make(map[string]*Incident, 64)
@@ -367,15 +386,6 @@ func TestIncidents(t *testing.T) {
 	t.Run("QuickAction", func(t *testing.T) {
 		t.Parallel()
 
-		reloadRelated := func(t *testing.T, i *Incident) *Incident {
-			reloaded := reloadIncident(t, db, i)
-			err := db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
-				return reloaded.restoreRelatedState(ctx, tx)
-			})
-			require.NoError(t, err)
-			return reloaded
-		}
-
 		ev := makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityWarning), withMsg("Something went wrong!"))
 		i := makeIncident(db, logs, runtimeConfig, t, ev)
 
@@ -391,7 +401,7 @@ func TestIncidents(t *testing.T) {
 
 			// Recipient is not yet known to the runtime config, so nothing should happen here.
 			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
-			i = reloadRelated(t, i)
+			i = reloadIncidentRecursive(t, db, i)
 			assert.Len(t, i.Recipients, 1)
 			assert.Equal(t, i.Recipients[recipient.ToKey(contact)].Role, recipient.RoleRecipient)
 			assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleNone)
@@ -404,7 +414,7 @@ func TestIncidents(t *testing.T) {
 			}
 
 			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
-			i = reloadRelated(t, i)
+			i = reloadIncidentRecursive(t, db, i)
 			assert.Len(t, i.Recipients, 2)
 			if action == event.ActionManage {
 				assert.True(t, i.HasManager())
@@ -420,7 +430,7 @@ func TestIncidents(t *testing.T) {
 
 			// Now, unsubscribe/unmanage the recipient from that very same incident.
 			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
-			i = reloadRelated(t, i)
+			i = reloadIncidentRecursive(t, db, i)
 			if action == event.ActionManage { // Managers get first demoted to subscribers.
 				assert.False(t, i.HasManager())
 				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleSubscriber)
@@ -431,14 +441,14 @@ func TestIncidents(t *testing.T) {
 
 				qa.Kind = event.ActionUnsubscribe
 				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
-				i = reloadRelated(t, i)
+				i = reloadIncidentRecursive(t, db, i)
 			}
 			assert.Len(t, i.Recipients, 1)
 
 			// Unsubscribing an already unsubscribed contact makes no sense, so it should fail.
 			require.Error(t, Process(t.Context(), db, logs, runtimeConfig, qa))
 			assert.Len(t, i.Recipients, 1)
-			i = reloadRelated(t, i)
+			i = reloadIncidentRecursive(t, db, i)
 		}
 	})
 
@@ -451,30 +461,62 @@ func TestIncidents(t *testing.T) {
 		assert.NotZero(t, i.NextEscalationCheckAt)
 		assert.WithinDuration(t, i.StartedAt.Time().Add(time.Hour), i.NextEscalationCheckAt.Time(), time.Second)
 
-		selectStates := func() (states []*EscalationState) {
-			assert.NoError(t, db.SelectContext(
-				t.Context(),
-				&states,
-				db.Rebind(db.BuildSelectStmt(new(EscalationState), new(EscalationState))+` WHERE "incident_id" = ?`),
-				i.Id))
-			return
-		}
+		i = reloadIncidentRecursive(t, db, i)
 		// We will find a single escalation state for the incident, because the condition of the escalation defined
 		// outside this function is met immediately.
-		assert.Len(t, selectStates(), 1)
-
-		var ruleRows []*RuleRow
-		assert.NoError(t, db.SelectContext(t.Context(), &ruleRows,
-			db.Rebind(db.BuildSelectStmt(new(RuleRow), new(RuleRow))+` WHERE "incident_id" = ?`), i.Id))
-		assert.Len(t, ruleRows, 1)
+		assert.Len(t, i.EscalationState, 1)
+		assert.Len(t, i.Rules, 1)
 
 		assert.NoError(t, ReevaluateEscalations(t.Context(), db, logs.GetChildLogger("incident"), runtimeConfig))
+		i = reloadIncidentRecursive(t, db, i)
 
 		// After reevaluating the escalations, we should find two escalation states for the incident,
 		// because the second escalation's condition is now met.
-		assert.Len(t, selectStates(), 2)
+		assert.Len(t, i.EscalationState, 2)
 		i = reloadIncident(t, db, i)
 		assert.Zero(t, i.NextEscalationCheckAt)
+	})
+
+	t.Run("Managed Escalation", func(t *testing.T) {
+		t.Parallel()
+
+		relations := map[string]any{"host": map[string]string{"name": "managed_escalations"}}
+		ev := makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityCrit), withRelations(relations))
+		i := reloadIncidentRecursive(t, db, makeIncident(db, logs, runtimeConfig, t, ev))
+		require.NotNil(t, i)
+
+		// Nobody has taken over the responsibility for the incident yet, so only the first escalation is triggered.
+		require.Len(t, i.Rules, 1)
+		_, exists := i.Rules[managedRule.ID]
+		require.True(t, exists)
+		require.Len(t, i.EscalationState, 1)
+		assert.NotNil(t, i.EscalationState[unmanagedEscalationID])
+		assert.False(t, i.HasManager())
+
+		// As long as the incident remains unmanaged, the second escalation isn't reached.
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, ev))
+		i = reloadIncidentRecursive(t, db, i)
+		require.Len(t, i.EscalationState, 1)
+		assert.NotNil(t, i.EscalationState[unmanagedEscalationID])
+		assert.False(t, i.HasManager())
+
+		// Let someone take over the responsibility for the incident.
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, &event.QuickAction{
+			ID:         types.MakeUUID(uuid.New()),
+			Time:       time.Now(),
+			Kind:       event.ActionManage,
+			ContactID:  incidentManager.ID,
+			ObjectTags: ev.Tags,
+		}))
+
+		// The next event evaluates the escalations again, this time on a managed incident.
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, ev))
+
+		i = reloadIncidentRecursive(t, db, i)
+		require.Len(t, i.EscalationState, 2)
+		assert.NotNil(t, i.EscalationState[unmanagedEscalationID])
+		assert.NotNil(t, i.EscalationState[managedEscalationID])
+		assert.True(t, i.HasManager())
 	})
 
 	t.Run("Notification History", func(t *testing.T) {
@@ -483,6 +525,10 @@ func TestIncidents(t *testing.T) {
 		tags := map[string]string{"notification_history_test": "true"}
 		msg := testutils.MakeRandomString(t)
 		ev := makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityDebug), withTags(tags), withMsg(msg))
+		// Otherwise, it will race with the time-based escalation test, which calls ReevaluateEscalations and causes
+		// the escalation to match on this incident as well, which would cause the notification history to contain
+		// two entries instead of one.
+		ev.Time = time.Now()
 		assert.NotZero(t, ev.ID)
 		i := makeIncident(db, logs, runtimeConfig, t, ev)
 		assert.NotZero(t, i.ID())
@@ -590,6 +636,17 @@ func reloadIncident(t *testing.T, db *database.DB, i *Incident) *Incident {
 	return reloaded
 }
 
+// reloadIncidentRecursive reloads the given Incident from the database recursively and returns a new one.
+func reloadIncidentRecursive(t *testing.T, db *database.DB, i *Incident) *Incident {
+	reloaded := &Incident{ObjectID: i.ObjectID}
+	reloaded.initializeFields(db, i.runtimeConfig, i.logger)
+	err := db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
+		return reloaded.RestoreState(ctx, tx, true)
+	})
+	require.NoError(t, err)
+	return reloaded
+}
+
 // mustIncidentObject returns the object.Object of the given incident, or fails the test.
 func mustIncidentObject(t *testing.T, i *Incident) *object.Object {
 	obj, err := i.Object(t.Context())
@@ -631,6 +688,9 @@ func makeEvent(t *testing.T, sourceID int64, opts ...eventOption) *event.Event {
 			"service": testutils.MakeRandomString(t),
 		}
 	}
+	if ev.Relations == nil {
+		ev.Relations = map[string]any{"host": map[string]string{"name": testutils.MakeRandomString(t)}}
+	}
 
 	if ev.Muted.Valid {
 		ev.MutedReason = "You're gonna have a bad time!"
@@ -649,6 +709,9 @@ func withTags(tags map[string]string) eventOption { return func(ev *event.Event)
 func withMsg(msg string) eventOption              { return func(ev *event.Event) { ev.Message = msg } }
 func withSeverity(sev baseEv.Severity) eventOption {
 	return func(ev *event.Event) { ev.Severity = sev }
+}
+func withRelations(relations map[string]any) eventOption {
+	return func(ev *event.Event) { ev.Relations = relations }
 }
 
 // makeTestChannel creates a new Channel instance with the provided name, type, and config for testing purposes.

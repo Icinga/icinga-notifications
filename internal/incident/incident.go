@@ -641,7 +641,11 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 		i.EscalationState = make(map[int64]*EscalationState)
 	}
 
-	filterContext := &rule.EscalationFilter{IncidentAge: eventTime.Sub(i.StartedAt.Time()), IncidentSeverity: i.Severity}
+	filterContext := &rule.EscalationFilter{
+		IncidentAge:      eventTime.Sub(i.StartedAt.Time()),
+		IncidentSeverity: i.Severity,
+		IsManaged:        i.HasManager(),
+	}
 
 	var escalations []*rule.Escalation
 	retryAfter := rule.RetryNever
