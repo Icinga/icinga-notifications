@@ -149,9 +149,8 @@ func newPluginSupervisor(ctx context.Context, db *database.DB, logger *zap.Sugar
 func (p *pluginSupervisor) Stop() {
 	p.logger.Debug("Stopping channel plugin process")
 
-	// Give the plugin a chance to clean up its resources and exit gracefully with the two friendly
-	// requests below (RPC-conn close and SIGTERM) before we forcefully kill it after a timeout.
-	_ = p.rpc.Conn().Close()
+	// Give the plugin a chance to clean up its resources and exit gracefully with the friendly
+	// request (SIGTERM) before we forcefully kill it after a timeout.
 	_ = p.cmd.Process.Signal(syscall.SIGTERM)
 
 	const timeout = 5 * time.Second
@@ -165,6 +164,7 @@ func (p *pluginSupervisor) Stop() {
 	} else {
 		p.logger.Infow("Channel plugin stopped successfully")
 	}
+	_ = p.rpc.Conn().Close()
 	p.cancel()
 	timer.Stop()
 }
