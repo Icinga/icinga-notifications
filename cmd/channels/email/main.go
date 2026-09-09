@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/mail"
+	"strconv"
 	"sync"
 
 	"github.com/emersion/go-sasl"
@@ -33,6 +34,8 @@ const (
 	EncryptionNone     = "none"
 	EncryptionStartTLS = "starttls"
 	EncryptionTLS      = "tls"
+
+	AuthMethodNone = "none"
 )
 
 type Email struct {
@@ -43,6 +46,8 @@ type Email struct {
 	User       string `json:"user"`
 	Password   string `json:"password"` // #nosec G117 -- exported password field
 	Encryption string `json:"encryption"`
+	// AuthMethod is a SASL Authentication Mechanism.
+	AuthMethod string `json:"auth_method"`
 
 	mu sync.Mutex // Protects access to the above fields.
 
@@ -147,6 +152,29 @@ func (ch *Email) GetInfo() *plugin.Info {
 				EncryptionTLS:      "TLS",
 			},
 		},
+		{
+			Name:     "auth_method",
+			Type:     "option",
+			Required: true,
+			Label: map[string]string{
+				"en_US": "SMTP Authentication Method",
+				"de_DE": "SMTP Authentifizierungsmethode",
+			},
+			Help: map[string]string{
+				"en_US": "The method has to be supported by the SMTP server. PLAIN and LOGIN require the SMTP user " +
+					"and password, while OAUTHBEARER expects a bearer token in the SMTP password field. " +
+					"If the NONE method is chosen, the SMTP server will be contacted without authentication.",
+				"de_DE": "Die Methode muss vom SMTP Server unterstützt werden. PLAIN und LOGIN benötigen den SMTP " +
+					"Benutzer und das Passwort, während OAUTHBEARER ein Bearer Token im SMTP Passwortfeld erwartet. " +
+					"Ist die NONE Methode gewählt, wird der SMTP Server ohne Authentifizierung kontaktiert.",
+			},
+			Options: map[string]string{
+				AuthMethodNone:   "NONE",
+				sasl.Plain:       sasl.Plain,
+				sasl.Login:       sasl.Login,
+				sasl.OAuthBearer: sasl.OAuthBearer,
+			},
+		},
 	}
 
 	return &plugin.Info{
@@ -169,8 +197,24 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 		return fmt.Errorf("failed to load config: %s %w", jsonStr, err)
 	}
 
-	if (tmpEm.User == "") != (tmpEm.Password == "") {
-		return fmt.Errorf("user and password fields must both be set or empty")
+	// Channels configured before the authentication method became selectable carry no auth_method field and were
+	// authenticated with PLAIN whenever an SMTP password was set.
+	if tmpEm.AuthMethod == "" && (tmpEm.User != "" || tmpEm.Password != "") {
+		tmpEm.AuthMethod = sasl.Plain
+	}
+
+	if tmpEm.AuthMethod != "" {
+		switch tmpEm.AuthMethod {
+		case AuthMethodNone:
+			// Nothing to validate for this method.
+		case sasl.Plain, sasl.Login, sasl.OAuthBearer:
+			// All three carry a username and a secret, the latter being a bearer token for OAUTHBEARER.
+			if tmpEm.User == "" || tmpEm.Password == "" {
+				return fmt.Errorf("user and password fields are required for the %s authentication method", tmpEm.AuthMethod)
+			}
+		default:
+			return fmt.Errorf("unsupported SMTP authentication method %q", tmpEm.AuthMethod)
+		}
 	}
 
 	ch.mu.Lock()
@@ -183,6 +227,7 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 	ch.User = tmpEm.User
 	ch.Password = tmpEm.Password
 	ch.Encryption = tmpEm.Encryption
+	ch.AuthMethod = tmpEm.AuthMethod
 
 	return nil
 }
@@ -253,10 +298,12 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	)
 
 	ch.mu.Lock()
-	serverAddr := net.JoinHostPort(ch.Host, ch.Port)
+	host, port := ch.Host, ch.Port
+	serverAddr := net.JoinHostPort(host, port)
 	encryption := ch.Encryption
 	password := ch.Password
 	username := ch.User
+	authMethod := ch.AuthMethod
 	ch.mu.Unlock()
 
 	switch encryption {
@@ -274,8 +321,30 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	}
 	defer func() { _ = client.Close() }()
 
-	if password != "" {
-		if err = client.Auth(sasl.NewPlainClient("", username, password)); err != nil {
+	if authMethod != "" && authMethod != AuthMethodNone {
+		var auth sasl.Client
+		switch authMethod {
+		case sasl.Plain:
+			auth = sasl.NewPlainClient("", username, password)
+		case sasl.Login:
+			auth = sasl.NewLoginClient(username, password)
+		case sasl.OAuthBearer:
+			smtpPort, err := strconv.Atoi(port)
+			if err != nil {
+				return fmt.Errorf("invalid SMTP port %q: %w", port, err)
+			}
+
+			auth = sasl.NewOAuthBearerClient(&sasl.OAuthBearerOptions{
+				Username: username,
+				Token:    password,
+				Host:     host,
+				Port:     smtpPort,
+			})
+		default:
+			return fmt.Errorf("unsupported SMTP authentication method %q", authMethod)
+		}
+
+		if err := client.Auth(auth); err != nil {
 			return err
 		}
 	}
