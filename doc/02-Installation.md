@@ -70,7 +70,7 @@ To apply these changes, run `systemctl reload postgresql`.
 After creating the database, import the Icinga Notifications schema using the following command:
 
 ```
-psql -U notifications notifications < /usr/share/icinga-notifications/schema/pgsql/schema.sql
+psql -v ON_ERROR_STOP=1 -U notifications notifications < /usr/share/icinga-notifications/schema/pgsql/schema.sql
 ```
 
 ## Configuring Icinga Notifications

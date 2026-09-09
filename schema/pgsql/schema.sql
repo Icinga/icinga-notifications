@@ -31,17 +31,23 @@ CREATE OR REPLACE FUNCTION anynonarrayliketext(anynonarray, text)
     $$;
 CREATE OPERATOR ~~ (LEFTARG=anynonarray, RIGHTARG=text, PROCEDURE=anynonarrayliketext);
 
--- This procedure can be used in upgrade scripts to assert that the schema version in the database matches the
+-- This function can be used in upgrade scripts to assert that the schema version in the database matches the
 -- expected version before applying the upgrade. This is important to prevent users from accidentally skipping
 -- intermediate upgrade scripts, which could lead to an inconsistent database state. For instance, since every
--- upgrade script knows its predecessor's version, we can just do "CALL assert_correct_schema_version('v1.0')"
+-- upgrade script knows its predecessor's version, we can just do "SELECT assert_correct_schema_version('v1.0');"
 -- at the beginning of the 1.x upgrade scripts to ensure that the 1.0 script has been applied before.
-CREATE OR REPLACE PROCEDURE assert_correct_schema_version(expected_version text)
+CREATE OR REPLACE FUNCTION assert_correct_schema_version(expected_version text)
+    RETURNS void
     LANGUAGE plpgsql
+    STABLE
+    STRICT
+    PARALLEL RESTRICTED
 AS $$
 DECLARE
-    actual_version text := (SELECT version FROM notifications_schema ORDER BY timestamp DESC LIMIT 1);
+    actual_version text;
 BEGIN
+    SELECT version INTO actual_version FROM notifications_schema ORDER BY timestamp DESC LIMIT 1;
+
     IF actual_version IS NULL THEN
         RAISE 'Schema version not found in notifications_schema table.';
     ELSIF actual_version != expected_version THEN
@@ -49,7 +55,6 @@ BEGIN
     END IF;
 END;
 $$;
-COMMENT ON PROCEDURE assert_correct_schema_version IS 'Asserts that the schema version in the database matches the expected version and raises an error if not.';
 
 CREATE TABLE available_channel_type (
     type varchar(255) NOT NULL,
