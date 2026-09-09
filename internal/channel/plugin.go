@@ -143,15 +143,16 @@ func newPluginSupervisor(ctx context.Context, db *database.DB, logger *zap.Sugar
 
 // Stop stops the plugin process and cleans up resources.
 //
-// It first attempts to close the RPC connection and send a SIGTERM signal to the process, allowing it to
-// exit gracefully. If the process does not terminate within a specified timeout, it forcefully kills the
-// process. It should be called only once, and after calling Stop, the pluginSupervisor should not be used again.
+// It first sends a SIGTERM signal to the process, allowing it to exit gracefully. If the process does not
+// terminate within a specified timeout, it forcefully kills the process. Afterward, it closes the JSON-RPC
+// connection and cancels the context to clean up any remaining resources.
+//
+// It should be called only once, and after calling Stop, the pluginSupervisor should not be used again.
 func (p *pluginSupervisor) Stop() {
 	p.logger.Debug("Stopping channel plugin process")
 
-	// Give the plugin a chance to clean up its resources and exit gracefully with the two friendly
-	// requests below (RPC-conn close and SIGTERM) before we forcefully kill it after a timeout.
-	_ = p.rpc.Conn().Close()
+	// Give the plugin a chance to clean up its resources and exit gracefully with the friendly
+	// request (SIGTERM) before we forcefully kill it after a timeout.
 	_ = p.cmd.Process.Signal(syscall.SIGTERM)
 
 	const timeout = 5 * time.Second
@@ -165,6 +166,7 @@ func (p *pluginSupervisor) Stop() {
 	} else {
 		p.logger.Infow("Channel plugin stopped successfully")
 	}
+	_ = p.rpc.Conn().Close()
 	p.cancel()
 	timer.Stop()
 }
