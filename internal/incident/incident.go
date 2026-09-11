@@ -9,11 +9,11 @@ import (
 
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
-	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -83,16 +83,8 @@ func (i *Incident) Object(ctx context.Context) (*object.Object, error) {
 	return obj, nil
 }
 
-func (i *Incident) IncidentSeverity() baseEv.Severity {
-	return i.Severity
-}
-
 func (i *Incident) String() string {
 	return fmt.Sprintf("#%d", i.Id)
-}
-
-func (i *Incident) ID() int64 {
-	return i.Id
 }
 
 // IsMuted returns whether this incident is currently muted.
@@ -440,7 +432,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			}
 
 			query := `DELETE FROM incident_contact WHERE incident_id = :incident_id AND contact_id = :contact_id`
-			if _, err := tx.NamedExecContext(ctx, query, &ContactRow{Key: recipientKey, IncidentID: i.ID()}); err != nil {
+			if _, err := tx.NamedExecContext(ctx, query, &ContactRow{Key: recipientKey, IncidentID: i.Id}); err != nil {
 				return fmt.Errorf("cannot remove recipient %q from incident: %w", r, err)
 			}
 			return i.recordRecipientRoleChange(ctx, tx, r, state.Role, recipient.RoleNone)
@@ -812,7 +804,9 @@ func (i *Incident) notifyContact(
 ) error {
 	i.logger.Infof("Notifying contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type)
 
-	if err := ch.Notify(contact, i, obj, ev); err != nil {
+	var incidentPlugin *plugin.Incident
+	incidentPlugin = &plugin.Incident{Id: i.Id, Severity: i.Severity}
+	if err := ch.Notify(contact, incidentPlugin, obj, ev); err != nil {
 		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
 		return err
 	}
@@ -969,7 +963,3 @@ type RecipientState struct {
 	// added in Incident.AddRecipient due to the ongoing event, IsNew is set true.
 	IsNew bool
 }
-
-var (
-	_ contracts.Incident = (*Incident)(nil)
-)

@@ -598,7 +598,7 @@ func TestIncidents(t *testing.T) {
 		ev.Time = time.Now()
 		assert.NotZero(t, ev.ID)
 		i := makeIncident(db, logs, runtimeConfig, t, ev)
-		assert.NotZero(t, i.ID())
+		assert.NotZero(t, i.Id)
 		assert.Zero(t, i.RecoveredAt)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
 
