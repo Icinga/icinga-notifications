@@ -118,12 +118,8 @@ func (e *Escalation) TableName() string {
 }
 
 type EscalationRecipient struct {
-	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
-
-	EscalationID  int64         `db:"rule_escalation_id"`
-	ChannelID     sql.NullInt64 `db:"channel_id"`
-	recipient.Key `db:",inline"`
-	Recipient     recipient.Recipient `db:"-"`
+	recipient.CommonRecipient
+	EscalationID int64 `db:"rule_escalation_id"`
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.

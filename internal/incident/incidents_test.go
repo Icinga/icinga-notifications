@@ -137,6 +137,7 @@ func TestIncidents(t *testing.T) {
 				ObjectFilterExpr: types.MakeString(filter),
 				ChangedAt:        source.ChangedAt,
 				Deleted:          source.Deleted,
+				Type:             rule.TypeEscalation,
 			}
 			id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, r, "id"), r)
 			assert.NoError(t, err)

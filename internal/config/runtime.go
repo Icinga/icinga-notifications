@@ -71,6 +71,7 @@ type ConfigSet struct {
 	scheduleRotationMembers  map[int64]*recipient.RotationMember
 	ruleEscalations          map[int64]*rule.Escalation
 	ruleEscalationRecipients map[int64]*rule.EscalationRecipient
+	ruleRecipients           map[int64]*rule.NotificationRecipient
 }
 
 func (r *RuntimeConfig) UpdateFromDatabase(ctx context.Context) error {
@@ -260,6 +261,7 @@ func (r *RuntimeConfig) fetchFromDatabase(ctx context.Context) error {
 		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.Rules) },
 		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.ruleEscalations) },
 		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.ruleEscalationRecipients) },
+		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.ruleRecipients) },
 		func() error { return incrementalFetch(ctx, tx, r, &r.configChange.Sources) },
 	}
 	for _, f := range fetchFns {

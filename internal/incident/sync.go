@@ -172,11 +172,15 @@ func (i *Incident) generateNotifications(
 	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
 ) ([]*NotificationEntry, error) {
 	var notificationState source.NotificationState
-	suppress := i.IsMuted()
-	if suppress {
-		notificationState = source.NotificationStateSuppressed
-	} else {
-		notificationState = source.NotificationStatePending
+	suppress := false
+	notifyOnly := ev.JustNotify()
+	if !notifyOnly {
+		suppress = i.IsMuted()
+		if suppress {
+			notificationState = source.NotificationStateSuppressed
+		} else {
+			notificationState = source.NotificationStatePending
+		}
 	}
 
 	var notifications []*NotificationEntry
@@ -190,28 +194,31 @@ func (i *Incident) generateNotifications(
 		for _, origin := range channelOrigins {
 			if lastChannelID != origin.ChannelID {
 				lastChannelID = origin.ChannelID
-				hr := &HistoryRow{
-					IncidentID:        i.Id,
-					Key:               recipient.ToKey(contact),
-					Time:              types.UnixMilli(time.Now()),
-					Type:              Notified,
-					ChannelID:         types.MakeInt(origin.ChannelID, types.TransformZeroIntToNull),
-					NotificationState: notificationState,
-					Message:           types.MakeString(ev.Message, types.TransformEmptyStringToNull),
-				}
+				var hr *HistoryRow
+				if ev.JustNotify() {
+					hr = &HistoryRow{
+						IncidentID:        i.Id,
+						Key:               recipient.ToKey(contact),
+						Time:              types.UnixMilli(time.Now()),
+						Type:              Notified,
+						ChannelID:         types.MakeInt(origin.ChannelID, types.TransformZeroIntToNull),
+						NotificationState: notificationState,
+						Message:           types.MakeString(ev.Message, types.TransformEmptyStringToNull),
+					}
 
-				if err := hr.Sync(ctx, i.db, tx); err != nil {
-					i.logger.Errorw("Failed to insert incident notification history",
-						zap.String("contact", contact.FullName),
-						zap.Bool("incident_muted", i.IsMuted()),
-						zap.Error(err))
-					return nil, err
-				}
+					if err := hr.Sync(ctx, i.db, tx); err != nil {
+						i.logger.Errorw("Failed to insert incident notification history",
+							zap.String("contact", contact.FullName),
+							zap.Bool("incident_muted", i.IsMuted()),
+							zap.Error(err))
+						return nil, err
+					}
 
-				if suppress {
-					// If the incident is muted, we don't need to create a pending notification entry,
-					// so we can skip to the next origin.
-					continue
+					if suppress {
+						// If the incident is muted, we don't need to create a pending notification entry,
+						// so we can skip to the next origin.
+						continue
+					}
 				}
 
 				notificationHistory := NotificationHistory{
@@ -226,11 +233,14 @@ func (i *Incident) generateNotifications(
 				}
 
 				notificationOfCurrentChannel = &NotificationEntry{
-					HistoryRowID: hr.ID,
 					ContactID:    contact.ID,
 					ChannelID:    origin.ChannelID,
 					State:        source.NotificationStatePending,
 					HistoryEntry: notificationHistory,
+				}
+
+				if !notifyOnly && hr != nil {
+					notificationOfCurrentChannel.HistoryRowID = hr.ID
 				}
 
 				notifications = append(notifications, notificationOfCurrentChannel)
@@ -239,7 +249,7 @@ func (i *Incident) generateNotifications(
 					notificationOfCurrentChannel.SkippedHistoryEntries,
 					SkippedNotificationHistory{
 						RuleID:           origin.RuleID,
-						RuleEscalationID: origin.RuleEscalationID,
+						RuleEscalationID: origin.RuleEscalationID.Int64,
 						ContactgroupID:   types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
 						ScheduleID:       types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
 					},

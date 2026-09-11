@@ -162,4 +162,35 @@ func (r *RuntimeConfig) applyPendingRules() {
 			})
 			return nil
 		})
+
+	incrementalApplyPending(
+		r,
+		&r.ruleRecipients, &r.configChange.ruleRecipients,
+		func(newElement *rule.NotificationRecipient) error {
+			newElement.Recipient = r.GetRecipient(newElement.Key)
+			if newElement.Recipient == nil {
+				return fmt.Errorf("rule escalation recipient is missing or unknown")
+			}
+
+			ru, ok := r.Rules[newElement.RuleID]
+			if !ok || ru.Type != rule.TypeNotification {
+				return fmt.Errorf("rule notification recipient refers to unknown or non-notification rule %d", newElement.RuleID)
+			}
+
+			ru.NotificationRecipients = append(ru.NotificationRecipients, newElement)
+
+			return nil
+		},
+		nil,
+		func(delElement *rule.NotificationRecipient) error {
+			ru, ok := r.Rules[delElement.RuleID]
+			if !ok || ru.Type != rule.TypeNotification {
+				return nil
+			}
+
+			ru.NotificationRecipients = slices.DeleteFunc(ru.NotificationRecipients, func(recipient *rule.NotificationRecipient) bool {
+				return recipient.ID == delElement.ID
+			})
+			return nil
+		})
 }
