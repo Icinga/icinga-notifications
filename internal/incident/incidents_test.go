@@ -262,7 +262,7 @@ func TestIncidents(t *testing.T) {
 		t.Parallel()
 
 		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityDebug)))
-		assert.NotZero(t, i.ID())
+		assert.NotZero(t, i.Id)
 		assert.Zero(t, i.RecoveredAt)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
 
@@ -282,7 +282,7 @@ func TestIncidents(t *testing.T) {
 		t.Parallel()
 
 		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityDebug)))
-		assert.NotZero(t, i.ID())
+		assert.NotZero(t, i.Id)
 		assert.Zero(t, i.RecoveredAt)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
 
@@ -292,7 +292,7 @@ func TestIncidents(t *testing.T) {
 
 		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
 			withIncident(), withSeverity(baseEv.SeverityEmerg), withMsg("Incident opened!")))
-		assert.NotZero(t, i.ID())
+		assert.NotZero(t, i.Id)
 		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
 		assert.Equal(t, "Incident opened!", i.Message.String)
 
@@ -531,7 +531,7 @@ func TestIncidents(t *testing.T) {
 		ev.Time = time.Now()
 		assert.NotZero(t, ev.ID)
 		i := makeIncident(db, logs, runtimeConfig, t, ev)
-		assert.NotZero(t, i.ID())
+		assert.NotZero(t, i.Id)
 		assert.Zero(t, i.RecoveredAt)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
 
