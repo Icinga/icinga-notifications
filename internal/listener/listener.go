@@ -26,6 +26,7 @@ import (
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
+	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )
@@ -440,8 +441,13 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	// Submitting an event without the "incident" field won't cause any new event rules to be evaluated or
 	// escalations to be triggered, but only updates the state of an existing incident without a severity change.
-	if ev.OpenOrEscalate() {
-		filterColumns, hasRulesWithoutFilter := l.runtimeConfig.GetRulesFilterColumnsForSource(src)
+	if ev.Incident.Valid {
+		ruleType := rule.TypeEscalation
+		if ev.NotificationOnly() {
+			ruleType = rule.TypeNotification
+		}
+
+		filterColumns, hasRulesWithoutFilter := l.runtimeConfig.GetRulesFilterColumnsForSource(src, ruleType)
 		missingRelations := ev.ExtractMissingRelations(filterColumns...)
 		if len(missingRelations) > 0 && ShouldRejectRequestOnIncompleteRelations(r, hasRulesWithoutFilter) {
 			l.sendMissingAttrsError(w, src, missingRelations)

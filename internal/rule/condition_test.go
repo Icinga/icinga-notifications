@@ -102,3 +102,99 @@ func TestEscalationFilter(t *testing.T) {
 		assert.False(t, unmanaged.EvalExists([]string{"is_muted"}))
 	})
 }
+
+func TestNotificationFilter(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		expr        string
+		expected    map[string]bool
+		expectedErr string
+	}{
+		{
+			name:     "equal",
+			expr:     `{"op":"=","attributes":["event_type"],"value":"valid_type"}`,
+			expected: map[string]bool{"valid_type": true, "invalid_type": false},
+		},
+		{
+			name:     "equal OR combined",
+			expr:     `{"op":"|","rules":[{"op":"=","attributes":["event_type"],"value":"valid_type"},{"op":"=","attributes":["event_type"],"value":"valid_type_2"}]}`,
+			expected: map[string]bool{"valid_type": true, "valid_type_2": true, "invalid_type": false},
+		},
+		{
+			name:     "unequal AND combined",
+			expr:     `{"op":"&","rules":[{"op":"!=","attributes":["event_type"],"value":"invalid_type"},{"op":"!=","attributes":["event_type"],"value":"invalid_type_2"}]}`,
+			expected: map[string]bool{"valid_type": true, "invalid_type": false, "invalid_type_2": false},
+		},
+		{
+			name:        "empty condition",
+			expr:        `{}`,
+			expected:    map[string]bool{"valid_type": true, "valid_type_2": true},
+			expectedErr: "missing required field",
+		},
+		{
+			name:     "impossible",
+			expr:     `{"op":"&","rules":[{"op":"=","attributes":["event_type"],"value":"invalid_type"},{"op":"!=","attributes":["event_type"],"value":"invalid_type"}]}`,
+			expected: map[string]bool{"invalid_type": false, "invalid_type_2": false},
+		},
+		{
+			name:        "less matches",
+			expr:        `{"op":"<","attributes":["event_type"],"value":"invalid_type"}`,
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification rule filter does not support 'less' matches",
+		},
+		{
+			name:        "lessOrEqual matches",
+			expr:        `{"op":"<=","attributes":["event_type"],"value":"invalid_type"}`,
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification rule filter does not support 'less or equal' matches",
+		},
+		{
+			name:        "greater or equal matches",
+			expr:        `{"op":">=","attributes":["event_type"],"value":"invalid_type"}`,
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification rule filter does not support 'less' matches",
+		},
+		{
+			name:        "greater matches",
+			expr:        `{"op":">","attributes":["event_type"],"value":"invalid_type"}`,
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification rule filter does not support 'less or equal' matches",
+		},
+		{
+			name:        "like matches",
+			expr:        `{"op":"=","attributes":["event_type"],"regex":"^.*valid_type.*$"}`,
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification rule filter does not support wildcard matches",
+		},
+		{
+			name:        "unlike matches",
+			expr:        `{"op":"!=","attributes":["event_type"],"regex":"^.*valid_type.*$"}`,
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification rule filter does not support wildcard matches",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			f, err := filter.UnmarshalJSON([]byte(tt.expr))
+			if err != nil {
+				require.ErrorContains(t, err, tt.expectedErr)
+				return
+			}
+
+			require.NoError(t, err, "escalation condition should be parsable")
+			for eventType, expected := range tt.expected {
+				nf := &NotificationFilter{EventType: eventType}
+				matched, err := f.Eval(nf)
+				if err != nil {
+					assert.ErrorContains(t, err, tt.expectedErr)
+				}
+				assert.Equal(t, expected, matched)
+			}
+		})
+	}
+}

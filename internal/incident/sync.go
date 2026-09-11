@@ -60,12 +60,12 @@ func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, stat
 	return err
 }
 
-// AddEscalationRecipients adds the recipients of the given *rule.Escalation to the incident's recipients list.
+// AddEscalationRecipients adds the recipients of the given *rule.Entry to the incident's recipients list.
 //
 // Each recipient is added to the incident's recipients list with the role RoleRecipient, and a new ContactRow
 // is inserted into the incident_contact table. If a recipient already exists in the incident's recipients list,
 // it is skipped and no new ContactRow is inserted for that recipient.
-func (i *Incident) AddEscalationRecipients(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation) error {
+func (i *Incident) AddEscalationRecipients(ctx context.Context, tx *sqlx.Tx, escalation *rule.Entry) error {
 	for _, escalationRecipient := range escalation.Recipients {
 		r := escalationRecipient.Recipient
 		recipientKey := recipient.ToKey(r)
@@ -105,7 +105,7 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 // If the recipient already exists in the incident's recipients list, their role is updated to the new role and a
 // history entry is created to record the change. If the recipient does not exist, they are added to the list with
 // the specified role and a new ContactRow is inserted.
-func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Recipient, role recipient.Role) error {
+func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Recipient, role recipient.Role, eventTypes types.StringList) error {
 	recipientKey := recipient.ToKey(r)
 	state, exists := i.Recipients[recipientKey]
 	if exists && state.Role == role {
@@ -114,9 +114,10 @@ func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Re
 
 	oldRole := state.Role
 	if !exists {
-		i.Recipients[recipientKey] = RecipientState{Role: role, IsNew: true}
+		i.Recipients[recipientKey] = RecipientState{Role: role, IsNew: true, EventTypes: eventTypes}
 	} else {
 		state.Role = role
+		state.EventTypes = eventTypes
 		i.Recipients[recipientKey] = state
 	}
 
@@ -126,7 +127,7 @@ func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Re
 		return err
 	}
 
-	cr := &ContactRow{IncidentID: i.Id, Key: recipientKey, Role: role, ChangedAt: types.UnixMilli(time.Now())}
+	cr := &ContactRow{IncidentID: i.Id, Key: recipientKey, Role: role, EventTypes: eventTypes, ChangedAt: types.UnixMilli(time.Now())}
 	stmt, _ := i.db.BuildUpsertStmt(cr, "id")
 	if _, err := tx.NamedExecContext(ctx, stmt, cr); err != nil {
 		return fmt.Errorf("failed to upsert contact: %w", err)
@@ -158,7 +159,7 @@ func (i *Incident) recordRecipientRoleChange(ctx context.Context, tx *sqlx.Tx, r
 	return nil
 }
 
-// generateNotifications generates incident notification histories of the given recipients.
+// generateNotifications generates incident notification histories for the given contactChannels.
 //
 // This function will just insert NotificationStateSuppressed incident histories and return an empty slice if
 // the incident is muted, otherwise a slice of pending *NotificationEntry(ies) that can be used to update
@@ -172,7 +173,10 @@ func (i *Incident) recordRecipientRoleChange(ctx context.Context, tx *sqlx.Tx, r
 // Note: handleUnmute clears i.MuteReason before this function runs, and handleMute sets it after, so a single
 // i.IsMuted() check captures the correct transitional state for mute/unmute and steady-state events alike.
 func (i *Incident) generateNotifications(
-	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
+	ctx context.Context,
+	tx *sqlx.Tx,
+	ev *event.Event,
+	contactChannels rule.ContactChannels,
 ) ([]*NotificationEntry, error) {
 	var notificationState NotificationState
 	suppress := i.IsMuted()
@@ -188,33 +192,43 @@ func (i *Incident) generateNotifications(
 			return cmp.Compare(a.ChannelID, b.ChannelID)
 		})
 
+		// Determine if the notification is incident-related. A notification is considered incident-related if
+		// the event is an open or escalate event, or if any of the contact's channel origins are derived from
+		// an incident-related context (e.g., subscribers, escalation recipients, etc.).
+		isIncidentRelated := ev.OpenOrEscalate() || slices.ContainsFunc(channelOrigins, func(origin rule.ChannelOrigin) bool {
+			return origin.IncidentRelated
+		})
+
 		var lastChannelID int64
 		var notificationOfCurrentChannel *NotificationEntry
 		for _, origin := range channelOrigins {
 			if lastChannelID != origin.ChannelID {
 				lastChannelID = origin.ChannelID
-				hr := &HistoryRow{
-					IncidentID:        i.Id,
-					Key:               recipient.ToKey(contact),
-					Time:              types.UnixMilli(time.Now()),
-					Type:              Notified,
-					ChannelID:         types.MakeInt(origin.ChannelID, types.TransformZeroIntToNull),
-					NotificationState: notificationState,
-					Message:           types.MakeString(ev.Message, types.TransformEmptyStringToNull),
-				}
+				var hr *HistoryRow
+				if isIncidentRelated {
+					hr = &HistoryRow{
+						IncidentID:        i.Id,
+						Key:               recipient.ToKey(contact),
+						Time:              types.UnixMilli(time.Now()),
+						Type:              Notified,
+						ChannelID:         types.MakeInt(origin.ChannelID, types.TransformZeroIntToNull),
+						NotificationState: notificationState,
+						Message:           types.MakeString(ev.Message, types.TransformEmptyStringToNull),
+					}
 
-				if err := hr.Sync(ctx, i.db, tx); err != nil {
-					i.logger.Errorw("Failed to insert incident notification history",
-						zap.String("contact", contact.FullName),
-						zap.Bool("incident_muted", i.IsMuted()),
-						zap.Error(err))
-					return nil, err
-				}
+					if err := hr.Sync(ctx, i.db, tx); err != nil {
+						i.logger.Errorw("Failed to insert incident notification history",
+							zap.String("contact", contact.FullName),
+							zap.Bool("incident_muted", i.IsMuted()),
+							zap.Error(err))
+						return nil, err
+					}
 
-				if suppress {
-					// If the incident is muted, we don't need to create a pending notification entry,
-					// so we can skip to the next origin.
-					continue
+					if suppress {
+						// If the incident is muted, we don't need to create a pending notification entry,
+						// so we can skip to the next origin.
+						continue
+					}
 				}
 
 				notificationHistory := NotificationHistory{
@@ -224,17 +238,21 @@ func (i *Incident) generateNotifications(
 					ContactgroupID: types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
 					ScheduleID:     types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
 					ChannelID:      origin.ChannelID,
-					IncidentID:     types.MakeInt(i.Id),
 					EventMessage:   ev.Message,
 					IncidentClosed: types.MakeBool(ev.CloseIncident()),
+					IncidentID:     types.MakeInt(i.Id, types.TransformZeroIntToNull),
 				}
 
 				notificationOfCurrentChannel = &NotificationEntry{
-					HistoryRowID: hr.ID,
-					ContactID:    contact.ID,
-					ChannelID:    origin.ChannelID,
-					State:        NotificationStatePending,
-					HistoryEntry: notificationHistory,
+					ContactID:         contact.ID,
+					ChannelID:         origin.ChannelID,
+					State:             NotificationStatePending,
+					HistoryEntry:      notificationHistory,
+					IsIncidentRelated: isIncidentRelated,
+				}
+
+				if hr != nil {
+					notificationOfCurrentChannel.HistoryRowID = hr.ID
 				}
 
 				notifications = append(notifications, notificationOfCurrentChannel)
@@ -242,10 +260,10 @@ func (i *Incident) generateNotifications(
 				notificationOfCurrentChannel.SkippedHistoryEntries = append(
 					notificationOfCurrentChannel.SkippedHistoryEntries,
 					SkippedNotificationHistory{
-						RuleID:           origin.RuleID,
-						RuleEscalationID: origin.RuleEscalationID,
-						ContactgroupID:   types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
-						ScheduleID:       types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
+						RuleID:         origin.RuleID,
+						RuleEntryID:    origin.RuleEntryID,
+						ContactgroupID: types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
+						ScheduleID:     types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
 					},
 				)
 			}
