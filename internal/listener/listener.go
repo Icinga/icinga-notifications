@@ -439,7 +439,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	// Submitting an event without the "incident" field won't cause any new event rules to be evaluated or
 	// escalations to be triggered, but only updates the state of an existing incident without a severity change.
-	if ev.OpenOrEscalate() {
+	if ev.Incident.Valid {
 		filterColumns, hasRulesWithoutFilter := l.runtimeConfig.GetRulesFilterColumnsForSource(src)
 		missingRelations := ev.ExtractMissingRelations(filterColumns...)
 		if len(missingRelations) > 0 && ShouldRejectRequestOnIncompleteRelations(r, hasRulesWithoutFilter) {

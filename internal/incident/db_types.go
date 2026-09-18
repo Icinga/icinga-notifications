@@ -8,6 +8,7 @@ import (
 	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -110,6 +111,7 @@ type NotificationEntry struct {
 
 	HistoryEntry          NotificationHistory          `db:"-"`
 	SkippedHistoryEntries []SkippedNotificationHistory `db:"-"`
+	RuleType              rule.Type                    `db:"-"`
 }
 
 // TableName implements the contracts.TableNamer interface.

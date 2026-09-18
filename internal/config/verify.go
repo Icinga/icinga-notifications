@@ -343,6 +343,47 @@ func (r *RuntimeConfig) debugVerifyRule(id int64, rule *rule.Rule) error {
 		}
 	}
 
+	for i, notificationRecipient := range rule.NotificationRecipients {
+		if notificationRecipient == nil {
+			return fmt.Errorf("rule.NotificationRecipients[%d] is nil", i)
+		}
+
+		switch rec := notificationRecipient.Recipient.(type) {
+		case *recipient.Contact:
+			if rec == nil {
+				return fmt.Errorf("rule.NotificationRecipients[%d].Recipient (Contact) is nil", i)
+			}
+
+			err := r.debugVerifyContact(notificationRecipient.ContactID.Int64, rec)
+			if err != nil {
+				return fmt.Errorf("rule.NotificationRecipients[%d].Recipient (Contact): %w", i, err)
+			}
+
+		case *recipient.Group:
+			if rec == nil {
+				return fmt.Errorf("rule.NotificationRecipients[%d].Recipient (Group) is nil", i)
+			}
+
+			err := r.debugVerifyGroup(notificationRecipient.GroupID.Int64, rec)
+			if err != nil {
+				return fmt.Errorf("rule.NotificationRecipients[%d].Recipient (Group): %w", i, err)
+			}
+
+		case *recipient.Schedule:
+			if rec == nil {
+				return fmt.Errorf("rule.NotificationRecipients[%d].Recipient (Schedule) is nil", i)
+			}
+
+			err := r.debugVerifySchedule(notificationRecipient.ScheduleID.Int64, rec)
+			if err != nil {
+				return fmt.Errorf("rule.NotificationRecipients[%d].Recipient (Schedule): %w", i, err)
+			}
+
+		default:
+			return fmt.Errorf("rule.NotificationRecipients[%d].Recipient has invalid type %T", i, rec)
+		}
+	}
+
 	return nil
 }
 

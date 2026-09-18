@@ -147,98 +147,133 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 
 	var triggerNotifications bool
 	isNew := i.IsNew()
-	if isNew {
-		if !ev.OpenOrEscalate() {
-			// There is no active incident and the event cannot open one, so nothing to process. Returning rolls the
-			// transaction back, so the object sync from above is also not persisted.
-			return nil
-		}
-
-		if ev.Severity == baseEv.SeverityNone {
-			return ErrOpenIncidentWithoutSeverity
-		}
-
-		if err := i.processIncidentOpenedEvent(ctx, tx, ev); err != nil {
-			return err
-		}
-
-		i.logger = i.logger.With(zap.String("incident", i.String()))
-	} else {
-		i.logger = i.logger.With(zap.String("incident", i.String()))
-		if sevChanged, err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
-			return err
-		} else if ev.OpenOrEscalate() {
-			triggerNotifications = sevChanged || ev.NotifyRecipients()
-		} else {
-			// Events that don't open or escalate an incident are allowed to generate notifications unconditionally.
-			triggerNotifications = true
-		}
-	}
-
 	var notifications []*NotificationEntry
-	err = func() error {
-		i.runtimeConfig.RLock()
-		defer i.runtimeConfig.RUnlock()
+	if ev.JustNotify() {
+		err = func() error {
+			i.runtimeConfig.RLock()
+			defer i.runtimeConfig.RUnlock()
 
-		if ev.OpenOrEscalate() {
-			if err := i.applyMatchingRules(ctx, tx, ev); err != nil {
-				return err
+			recipients, err := getRecipientsByMatchingRules(i.runtimeConfig, i.logger, ev)
+			if err != nil {
+				return fmt.Errorf("cannot get recipients for event %s: %w", ev.ID, err)
+			}
+			if len(recipients) == 0 {
+				return nil
 			}
 
-			// Re-evaluate escalations based on the newly evaluated rules.
-			escalations, err := i.evaluateEscalations(ev.Time)
+			chs := make(rule.ContactChannels)
+			chs.LoadFromNotificationRecipients(recipients, ev.Time, func(key recipient.Key) bool {
+				return i.runtimeConfig.GetRecipient(key) != nil
+			})
+
+			if !isNew {
+				chs = rule.MergeContactChannels(chs, i.getRecipientsChannel(ev.Time))
+			}
+
+			notifications, err = i.generateNotifications(ctx, tx, ev, chs)
 			if err != nil {
 				return err
 			}
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
+	} else {
+		if isNew {
+			if !ev.OpenOrEscalate() {
+				// There is no active incident and the event cannot open one, so nothing to process. Returning rolls the
+				// transaction back, so the object sync from above is also not persisted.
+				return nil
+			}
 
-			if err := i.triggerEscalations(ctx, tx, escalations); err != nil {
+			if ev.Severity == baseEv.SeverityNone {
+				return ErrOpenIncidentWithoutSeverity
+			}
+
+			if err := i.processIncidentOpenedEvent(ctx, tx, ev); err != nil {
 				return err
 			}
 
-			triggerNotifications = triggerNotifications || len(escalations) > 0
-
-			if !isNew {
-				// Even if the severity didn't change, we want to update the message nonetheless.
-				i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
+			i.logger = i.logger.With(zap.String("incident", i.String()))
+		} else {
+			i.logger = i.logger.With(zap.String("incident", i.String()))
+			if sevChanged, err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
+				return err
+			} else if ev.OpenOrEscalate() {
+				triggerNotifications = sevChanged || ev.NotifyRecipients()
+			} else {
+				// Events that don't open or escalate an incident are allowed to generate notifications unconditionally.
+				triggerNotifications = true
 			}
 		}
 
-		// The unmute history entry, on the other hand, must be inserted first, so that the notifications generated
-		// below appear logically after the unmute event. This way, when viewing the incident history in the UI, the
-		// unmute event will appear before the notifications that were sent after unmuting.
-		if err := i.handleUnmute(ctx, tx, ev); err != nil {
+		err = func() error {
+			i.runtimeConfig.RLock()
+			defer i.runtimeConfig.RUnlock()
+
+			if ev.OpenOrEscalate() {
+				if err := i.applyMatchingRules(ctx, tx, ev); err != nil {
+					return err
+				}
+
+				// Re-evaluate escalations based on the newly evaluated rules.
+				escalations, err := i.evaluateEscalations(ev.Time)
+				if err != nil {
+					return err
+				}
+
+				if err := i.triggerEscalations(ctx, tx, escalations); err != nil {
+					return err
+				}
+
+				// If we have managed to trigger any new escalations, we must trigger notifications as well,
+				// even if the event itself doesn't request it.
+				triggerNotifications = triggerNotifications || len(escalations) > 0
+
+				if !isNew {
+					// Even if the severity didn't change, we want to update the message nonetheless.
+					i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
+				}
+			}
+
+			// The unmute history entry, on the other hand, must be inserted first, so that the notifications generated
+			// below appear logically after the unmute event. This way, when viewing the incident history in the UI, the
+			// unmute event will appear before the notifications that were sent after unmuting.
+			if err := i.handleUnmute(ctx, tx, ev); err != nil {
+				i.logger.Errorw("Cannot insert incident muted history", zap.Error(err))
+				return err
+			}
+
+			if triggerNotifications {
+				notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
+
+		// So that the incident muted history appears logically after the just generated notifications, we must insert
+		// the muted history last. This way, the history entries will make sense when viewed in chronological order.
+		if err := i.handleMute(ctx, tx, ev); err != nil {
 			i.logger.Errorw("Cannot insert incident muted history", zap.Error(err))
 			return err
 		}
 
-		if triggerNotifications {
-			notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
-			if err != nil {
+		if ev.CloseIncident() {
+			if err := i.Close(ctx, tx); err != nil {
 				return err
 			}
 		}
-		return nil
-	}()
-	if err != nil {
-		return err
-	}
 
-	// So that the incident muted history appears logically after the just generated notifications, we must insert
-	// the muted history last. This way, the history entries will make sense when viewed in chronological order.
-	if err := i.handleMute(ctx, tx, ev); err != nil {
-		i.logger.Errorw("Cannot insert incident muted history", zap.Error(err))
-		return err
-	}
-
-	if ev.CloseIncident() {
-		if err := i.Close(ctx, tx); err != nil {
+		if err := i.Sync(ctx, tx); err != nil {
+			i.logger.Errorw("Failed to update incident", zap.Error(err))
 			return err
 		}
-	}
-
-	if err := i.Sync(ctx, tx); err != nil {
-		i.logger.Errorw("Failed to update incident", zap.Error(err))
-		return err
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -566,7 +601,7 @@ func (i *Incident) handleMute(ctx context.Context, tx *sqlx.Tx, ev *event.Event)
 	return hr.Sync(ctx, i.db, tx)
 }
 
-// applyMatchingRules walks through the rule IDs obtained from source and generates a RuleMatched history entry.
+// applyMatchingRules walks through the escalation rule IDs obtained from source and generates a RuleMatched history entry.
 func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
 	if i.Rules == nil {
 		i.Rules = make(map[int64]struct{})
@@ -580,25 +615,8 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 
 	for id := range src.RuleIDs() {
 		if _, ok := i.Rules[id]; !ok {
-			r, ok := i.runtimeConfig.Rules[id]
-			if !ok {
-				i.logger.Errorw("BUG: source references unknown event rule", zap.Object("source", src))
-				continue
-			}
-
-			if r.SourceType != src.Type {
-				i.logger.Errorw("BUG: source references event rule with mismatching source type",
-					zap.Object("source", src),
-					zap.Object("rule", r))
-				continue
-			}
-
-			matched, err := r.Eval(ev)
-			if err != nil {
-				i.logger.Errorw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
-			}
-
-			if err != nil || !matched {
+			r := i.runtimeConfig.EvaluateRule(src, ev, id, rule.TypeEscalation, i.logger)
+			if r == nil {
 				continue
 			}
 
@@ -757,7 +775,8 @@ func (i *Incident) notifyContacts(
 		}
 		i.runtimeConfig.RUnlock()
 
-		err := i.notifyContact(obj, contact, ev, ch)
+		isIncidentRelated := notification.RuleType == rule.TypeEscalation
+		err := i.notifyContact(obj, contact, ev, ch, isIncidentRelated)
 		if err != nil {
 			notification.State = source.NotificationStateFailed
 		} else {
@@ -768,12 +787,16 @@ func (i *Incident) notifyContacts(
 		notification.HistoryEntry.TriggeredAt = notification.SentAt
 		notification.HistoryEntry.State = notification.State
 
-		stmt, _ := i.db.BuildUpdateStmt(notification)
-		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
-			i.logger.Errorw(
-				"Failed to update contact notified incident history", zap.String("contact", contactName),
-				zap.Error(err),
-			)
+		if isIncidentRelated {
+			notification.HistoryEntry.IncidentID = types.MakeInt(i.Id)
+
+			stmt, _ := i.db.BuildUpdateStmt(notification)
+			if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
+				i.logger.Errorw(
+					"Failed to update contact notified incident history", zap.String("contact", contactName),
+					zap.Error(err),
+				)
+			}
 		}
 
 		if err := notification.HistoryEntry.Sync(ctx, i.db); err != nil {
@@ -801,11 +824,14 @@ func (i *Incident) notifyContact(
 	contact *recipient.Contact,
 	ev *event.Event,
 	ch *channel.Channel,
+	isIncidentRelated bool,
 ) error {
 	i.logger.Infof("Notifying contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type)
 
 	var incidentPlugin *plugin.Incident
-	incidentPlugin = &plugin.Incident{Id: i.Id, Severity: i.Severity}
+	if isIncidentRelated {
+		incidentPlugin = &plugin.Incident{Id: i.Id, Severity: i.Severity}
+	}
 	if err := ch.Notify(contact, incidentPlugin, obj, ev); err != nil {
 		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
 		return err
@@ -851,6 +877,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 						contactChs[contact] = []rule.ChannelOrigin{{
 							ChannelID: contact.DefaultChannelID,
 							Role:      state.Role,
+							RuleType:  rule.TypeEscalation,
 						}}
 					}
 				}
@@ -962,4 +989,22 @@ type RecipientState struct {
 	// Every recipient loaded from the database aren't new, so IsNew is false. For all other recipients
 	// added in Incident.AddRecipient due to the ongoing event, IsNew is set true.
 	IsNew bool
+}
+
+// getRecipientsByMatchingRules walks through the notification rule IDs obtained from source and returns all notification recipients of the matching rules.
+func getRecipientsByMatchingRules(rc *config.RuntimeConfig, l *zap.SugaredLogger, ev *event.Event) ([]*rule.NotificationRecipient, error) {
+	src, ok := rc.Sources[ev.SourceId]
+	if !ok {
+		l.Warnw("Received event from unknown source, might got deleted", zap.Int64("source_id", ev.SourceId))
+		return nil, nil
+	}
+
+	var recipients []*rule.NotificationRecipient
+	for id := range src.RuleIDs() {
+		if r := rc.EvaluateRule(src, ev, id, rule.TypeNotification, l); r != nil {
+			recipients = append(recipients, r.NotificationRecipients...)
+		}
+	}
+
+	return recipients, nil
 }

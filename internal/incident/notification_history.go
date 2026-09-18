@@ -118,7 +118,7 @@ func YieldNotificationHistory(
 type SkippedNotificationHistory struct {
 	NotificationID   int64     `db:"notification_history_id"`
 	RuleID           int64     `db:"rule_id"`
-	RuleEscalationID int64     `db:"rule_escalation_id"`
+	RuleEscalationID types.Int `db:"rule_escalation_id"`
 	ContactgroupID   types.Int `db:"contactgroup_id"`
 	ScheduleID       types.Int `db:"schedule_id"`
 }

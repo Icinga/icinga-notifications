@@ -350,6 +350,7 @@ CREATE TABLE object_source (
 CREATE INDEX idx_object_source_object_id ON object_source(object_id);
 
 CREATE TYPE severity AS ENUM ('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg');
+CREATE TYPE rule_type AS ENUM ('notification', 'escalation');
 
 CREATE TABLE rule (
     id bigserial,
@@ -357,6 +358,7 @@ CREATE TABLE rule (
     timeperiod_id bigint,
     object_filter text,
     source_type text NOT NULL, -- Which source type this rule is associated with, e.g. 'icinga2', 'custom', ...
+    type rule_type NOT NULL,
 
     changed_at bigint NOT NULL,
     deleted boolenum NOT NULL DEFAULT 'n',
@@ -413,6 +415,26 @@ CREATE TABLE rule_escalation_recipient (
 );
 
 CREATE INDEX idx_rule_escalation_recipient_changed_at ON rule_escalation_recipient(changed_at);
+
+CREATE TABLE rule_recipient (
+    id bigserial,
+    rule_id bigint NOT NULL,
+    contact_id bigint,
+    contactgroup_id bigint,
+    schedule_id bigint,
+    channel_id bigint,
+
+    changed_at bigint NOT NULL,
+    deleted boolenum NOT NULL DEFAULT 'n',
+
+    CONSTRAINT pk_rule_recipient PRIMARY KEY (id),
+    CONSTRAINT ck_rule_recipient_has_exactly_one_recipient CHECK (num_nonnulls(contact_id, contactgroup_id, schedule_id) = 1),
+    CONSTRAINT fk_rule_recipient_rule FOREIGN KEY (rule_id) REFERENCES rule(id),
+    CONSTRAINT fk_rule_recipient_contact FOREIGN KEY (contact_id) REFERENCES contact(id),
+    CONSTRAINT fk_rule_recipient_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
+    CONSTRAINT fk_rule_recipient_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id),
+    CONSTRAINT fk_rule_recipient_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
+);
 
 CREATE TABLE incident (
     id bigserial,
