@@ -119,26 +119,6 @@ func (ch *Email) GetInfo() *plugin.Info {
 			Required: true,
 		},
 		{
-			Name: "user",
-			Type: "string",
-			Label: map[string]string{
-				"en_US": "SMTP User",
-				"de_DE": "SMTP Benutzer",
-			},
-			Help: map[string]string{
-				"en_US": "When configuring an SMTP user, an SMTP password must also be set.",
-				"de_DE": "Das Setzen eines SMTP Benutzers erfordert ebenfalls ein SMTP Passwort.",
-			},
-		},
-		{
-			Name: "password",
-			Type: "secret",
-			Label: map[string]string{
-				"en_US": "SMTP Password",
-				"de_DE": "SMTP Passwort",
-			},
-		},
-		{
 			Name:     "encryption",
 			Type:     "option",
 			Required: true,
@@ -173,6 +153,32 @@ func (ch *Email) GetInfo() *plugin.Info {
 				sasl.Plain:       sasl.Plain,
 				sasl.Login:       sasl.Login,
 				sasl.OAuthBearer: sasl.OAuthBearer,
+			},
+			Children: []plugin.ChildOption{
+				{
+					Name:     "user",
+					Type:     "string",
+					Required: true,
+					Label: map[string]string{
+						"en_US": "SMTP User",
+						"de_DE": "SMTP Benutzer",
+					},
+					Help: map[string]string{
+						"en_US": "When configuring an SMTP user, an SMTP password must also be set.",
+						"de_DE": "Das Setzen eines SMTP Benutzers erfordert ebenfalls ein SMTP Passwort.",
+					},
+					ParentValues: []any{sasl.Plain, sasl.Login, sasl.OAuthBearer},
+				},
+				{
+					Name:     "password",
+					Type:     "secret",
+					Required: true,
+					Label: map[string]string{
+						"en_US": "SMTP Password",
+						"de_DE": "SMTP Passwort",
+					},
+					ParentValues: []any{sasl.Plain, sasl.Login, sasl.OAuthBearer},
+				},
 			},
 		},
 	}
