@@ -1,0 +1,9 @@
+name: AUTHORS file
+
+on:
+  pull_request: { }
+
+jobs:
+  authors-file:
+    name: AUTHORS file
+    uses: Icinga/github-actions/.github/workflows/authors.yml@main
