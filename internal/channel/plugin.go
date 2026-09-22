@@ -305,9 +305,11 @@ func (h rpcHandler) Handle(ctx context.Context, conn *jsonrpc.Conn, req *jsonrpc
 // appropriate error reply to the plugin.
 func (h rpcHandler) verifyCommon(ctx context.Context, conn *jsonrpc.Conn, req *jsonrpc.Request, requireParams bool) bool {
 	if requireParams && req.Params == nil {
-		h.ps.logger.Warnw("Plugin sent invalid request parameters", zap.String("method", req.Method))
-		if err := jsonrpc.ReplyMissingParams(ctx, conn, req.ID); err != nil {
-			h.ps.logger.Warnw("Failed to send missing params error reply", zap.Error(err))
+		h.ps.logger.Warnw("Plugin sent a request without any parameters", zap.String("method", req.Method))
+		if !req.Notif {
+			if err := jsonrpc.ReplyMissingParams(ctx, conn, req.ID); err != nil {
+				h.ps.logger.Warnw("Failed to send missing params error reply", zap.Error(err))
+			}
 		}
 		return false
 	}
