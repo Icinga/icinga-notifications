@@ -20,6 +20,7 @@ func (r *RuntimeConfig) applyPendingChannels(ctx context.Context) {
 			curElement.Name = update.Name
 			curElement.Type = update.Type
 			curElement.Config = update.Config
+			curElement.ValidationResult = update.ValidationResult
 			curElement.Restart(r.logs.GetChildLogger("channel").SugaredLogger)
 			return nil
 		},
