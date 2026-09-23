@@ -44,9 +44,15 @@ object in the web interface of the source that submitted the event. Icinga Notif
 interface lives and therefore cannot complete a relative reference, so events carrying one are rejected with a
 `400 Bad Request` status code.
 
-Events sent to Icinga Notifications are expected to match rules that describe further event escalations.
-These rules can be configured in Icinga Notifications Web and should be designed to match the `relations` of the
-submitted events. When submitting an event without the expected relations to evaluate the rules, Icinga Notifications
+Events sent to Icinga Notifications are expected to match rules that describe further event escalations or direct
+notifications. These rules can be configured in Icinga Notifications Web and should be designed to match the
+`relations` of the submitted events. Whether escalation or notification rules are evaluated for an event is controlled
+by the event's `incident` field: setting it to `true` opens or escalates an incident, matching escalation rules along
+the way; setting it to `false` matches notification rules and notifies their recipients directly, without opening or
+otherwise touching any incident; omitting it only updates an already open incident's state (e.g. its message) without
+evaluating any rules at all.
+
+When submitting an event without the expected relations to evaluate the rules, Icinga Notifications
 will reject the request with a `422 Unprocessable Entity` status code and a message describing the missing relations
 when the `X-Icinga-Reject-If-Relations-Incomplete` header is set to `true`. Otherwise, the request will be accepted
 nonetheless, when either there's an existing incident for the event's objects, the ongoing event causes a new incident
