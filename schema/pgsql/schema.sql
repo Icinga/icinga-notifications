@@ -78,6 +78,11 @@ CREATE TABLE channel (
     changed_at bigint NOT NULL,
     deleted boolenum NOT NULL DEFAULT 'n',
 
+    -- The result of the last config validation performed by the channel type implementation.
+    -- This is used to provide feedback to the user about the validity of the channel configuration.
+    -- NULL if the channel has not been validated yet, or the last validation was successful.
+    validation_result text,
+
     CONSTRAINT pk_channel PRIMARY KEY (id),
     CONSTRAINT uk_channel_external_uuid UNIQUE (external_uuid),
     CONSTRAINT fk_channel_available_channel_type FOREIGN KEY (type) REFERENCES available_channel_type(type),

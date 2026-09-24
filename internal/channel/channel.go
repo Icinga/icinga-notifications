@@ -5,9 +5,11 @@ import (
 	"errors"
 	"time"
 
+	"github.com/icinga/icinga-go-library/backoff"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
+	"github.com/icinga/icinga-go-library/retry"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/icinga/icinga-notifications/internal/contracts"
@@ -31,6 +33,8 @@ type Channel struct {
 	Name         string     `db:"name"`
 	Type         string     `db:"type"`
 	Config       string     `db:"config" json:"-"` // excluded from JSON config dump as this may contain sensitive information
+
+	ValidationResult types.String `db:"validation_result" json:"-"` // excluded from JSON dump for the same reason as Config.
 
 	Logger *zap.SugaredLogger `db:"-"`
 	db     *database.DB
@@ -57,8 +61,9 @@ func (c *Channel) IncrementalInitAndValidate() error {
 
 // newConfig helps to store the channel's updated properties
 type newConfig struct {
-	ctype  string
-	config string
+	ctype            string
+	config           string
+	validationResult types.String
 }
 
 // Start initializes the channel and starts the plugin control loop in a separate goroutine.
@@ -74,23 +79,30 @@ func (c *Channel) Start(ctx context.Context, db *database.DB, logger *zap.Sugare
 	c.pluginCtx, c.pluginCtxCancel = context.WithCancelCause(ctx)
 
 	// #nosec G118 -- The goroutine uses a background ctx with timeout after c.pluginCtx is canceled to perform a DB cleanup.
-	go c.pluginControlLoop(newConfig{c.Type, c.Config})
+	go c.pluginControlLoop(newConfig{c.Type, c.Config, c.ValidationResult})
 }
 
 // instantiatePluginSupervisor initializes a new pluginSupervisor for the channel's plugin type and configuration.
-func (c *Channel) instantiatePluginSupervisor(cType string, config string) *pluginSupervisor {
+func (c *Channel) instantiatePluginSupervisor(conf newConfig) *pluginSupervisor {
 	c.Logger.Debug("Initializing channel plugin")
 
-	p, err := newPluginSupervisor(c.pluginCtx, c.db, c.Logger, cType, c.ID)
+	p, err := newPluginSupervisor(c.pluginCtx, c.db, c.Logger, conf.ctype, c.ID)
 	if err != nil {
 		c.Logger.Errorw("Failed to initialize channel plugin", zap.Error(err))
 		return nil
 	}
 
-	if err := p.SetConfig(c.pluginCtx, config); err != nil {
+	if err := p.SetConfig(c.pluginCtx, conf.config); err != nil {
 		c.Logger.Errorw("Failed to set channel plugin config, terminating the plugin", zap.Error(err))
 		p.Stop()
+		if rpcErr, ok := errors.AsType[*jsonrpc.Error](err); ok {
+			c.persistValidationError(c.pluginCtx, rpcErr.Message)
+		} else {
+			c.persistValidationError(c.pluginCtx, err.Error())
+		}
 		return nil
+	} else if conf.validationResult.Valid {
+		c.persistValidationError(c.pluginCtx, "")
 	}
 
 	p.logger.Info("Successfully started channel plugin")
@@ -122,7 +134,7 @@ func (c *Channel) pluginControlLoop(currentConfig newConfig) {
 
 	for {
 		if current == nil {
-			current = c.instantiatePluginSupervisor(currentConfig.ctype, currentConfig.config)
+			current = c.instantiatePluginSupervisor(currentConfig)
 		}
 
 		select {
@@ -152,12 +164,15 @@ func (c *Channel) pluginControlLoop(currentConfig newConfig) {
 					// If we got a JSON-RPC error, then it's because the plugin rejected the new config for some
 					// reason, so we can just keep the plugin running with the old config. Otherwise, the plugin is
 					// probably already gone, so call stopReset() to clean up and prepare for a new plugin instance.
-					if _, ok := errors.AsType[*jsonrpc.Error](err); !ok {
+					if rpcErr, ok := errors.AsType[*jsonrpc.Error](err); !ok {
 						c.Logger.Warnw("Failed to reload plugin config, restarting the plugin", zap.Error(err))
 						stopReset()
 					} else {
+						c.persistValidationError(c.pluginCtx, rpcErr.Message)
 						c.Logger.Warnw("Failed to reload plugin config, continuing with the old config", zap.Error(err))
 					}
+				} else if newConf.validationResult.Valid {
+					c.persistValidationError(c.pluginCtx, "")
 				}
 			} else {
 				stopReset()
@@ -213,7 +228,7 @@ func (c *Channel) Stop(chDeleted bool) {
 func (c *Channel) Restart(logger *zap.SugaredLogger) {
 	c.Logger = logger.With(zap.Object("channel", c))
 	c.Logger.Info("Restarting the channel plugin due to a config change")
-	c.restartCh <- newConfig{c.Type, c.Config}
+	c.restartCh <- newConfig{c.Type, c.Config, c.ValidationResult}
 }
 
 // Notify prepares and sends the notification request, returns a non-error on fails, nil on success
@@ -246,4 +261,20 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, o *ob
 	}
 
 	return p.SendNotification(c.pluginCtx, req)
+}
+
+// persistValidationError persists the validation error in the database for the channel.
+//
+// If the validation result is empty, it will be transformed to SQL NULL to indicate that there is no validation error.
+func (c *Channel) persistValidationError(ctx context.Context, result string) {
+	query := `UPDATE channel SET validation_result = ? WHERE id = ?`
+	_ = retry.WithBackoff(
+		ctx,
+		func(ctx context.Context) error {
+			_, err := c.db.ExecContext(ctx, c.db.Rebind(query), types.MakeString(result, types.TransformEmptyStringToNull), c.ID)
+			return err
+		},
+		retry.Retryable,
+		backoff.DefaultBackoff,
+		c.db.GetDefaultRetrySettings())
 }
