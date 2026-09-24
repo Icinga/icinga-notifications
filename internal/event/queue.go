@@ -412,7 +412,9 @@ func startClaiming(
 						logger.Errorw("Failed to claim job queue entry for processing, retrying",
 							zap.Duration("elapsed", elapsed),
 							zap.Uint64("attempt", attempt),
-							zap.Error(err))
+							zap.String("error", err.Error()))
+
+						logger.Debugw("Failed to claim job queue entry for processing, retrying", zap.Error(err))
 					}
 				},
 				OnSuccess: func(elapsed time.Duration, attempt uint64, lastErr error) {
@@ -420,7 +422,7 @@ func startClaiming(
 						logger.Debugw("Successfully claimed job queue entry for processing after retries",
 							zap.Duration("elapsed", elapsed),
 							zap.Uint64("attempt", attempt),
-							zap.Error(lastErr))
+							zap.String("last_error", lastErr.Error()))
 					}
 				},
 			})
