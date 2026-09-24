@@ -96,7 +96,6 @@ func YieldNotificationHistory(
 				}
 			}
 			nh.Object = obj
-			nh.ObjectTags = obj.Tags
 
 			select {
 			case valueCh <- *nh:
