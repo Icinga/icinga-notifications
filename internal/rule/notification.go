@@ -10,5 +10,5 @@ type NotificationRecipient struct {
 }
 
 func (r *NotificationRecipient) TableName() string {
-	return "rule_recipient"
+	return "rule_entry_recipient"
 }

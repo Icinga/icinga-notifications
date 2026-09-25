@@ -116,11 +116,11 @@ func YieldNotificationHistory(
 // SkippedNotificationHistory represents a single skipped_notification_history database entry, recording the path
 // a notification was skipped for a given incident history entry.
 type SkippedNotificationHistory struct {
-	NotificationID   int64     `db:"notification_history_id"`
-	RuleID           int64     `db:"rule_id"`
-	RuleEscalationID types.Int `db:"rule_escalation_id"`
-	ContactgroupID   types.Int `db:"contactgroup_id"`
-	ScheduleID       types.Int `db:"schedule_id"`
+	NotificationID int64     `db:"notification_history_id"`
+	RuleID         int64     `db:"rule_id"`
+	RuleEntryID    int64     `db:"rule_entry_id"`
+	ContactgroupID types.Int `db:"contactgroup_id"`
+	ScheduleID     types.Int `db:"schedule_id"`
 }
 
 type NotificationHistoryPair struct {

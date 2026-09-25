@@ -134,9 +134,9 @@ var dbPruners = []Pruner{
 		Referrers: []ReferencingRowPruner{
 			{Table: "incident_contact", PKorFK: "incident_id"},
 			{Table: "incident_rule", PKorFK: "incident_id"},
-			// Incident history references `incident_rule_escalation_state` too, so must appear before it in the cascade.
+			// Incident history references `incident_rule_entry_state` too, so must appear before it in the cascade.
 			{Table: "incident_history", PKorFK: "incident_id"},
-			{Table: "incident_rule_escalation_state", PKorFK: "incident_id"},
+			{Table: "incident_rule_entry_state", PKorFK: "incident_id"},
 		},
 	},
 	// Extra pruners for the job_queue.

@@ -40,7 +40,7 @@ func TestIncidents(t *testing.T) {
 
 	cleaner := testutils.NewDBCleaner(
 		"incident_history",
-		"incident_rule_escalation_state",
+		"incident_rule_entry_state",
 		"incident_rule",
 		"incident_contact",
 		"incident",
@@ -49,9 +49,9 @@ func TestIncidents(t *testing.T) {
 		"object_id_tag",
 		"object_source",
 		"object",
-		"rule_escalation_recipient",
-		"rule_escalation",
-		"rule_recipient",
+		"rule_entry_recipient",
+		"rule_entry",
+		"rule_entry_recipient",
 		"rule",
 		"contact",
 		"channel",
@@ -87,7 +87,7 @@ func TestIncidents(t *testing.T) {
 	cleaner.Add("skipped_notification_history", fmt.Sprintf("notification_history_id IN (SELECT id FROM notification_history WHERE %s)", objectIDInQuery))
 	cleaner.Add("incident_contact", byIncidentIDSubquery)
 	cleaner.Add("incident_rule", byIncidentIDSubquery)
-	cleaner.Add("incident_rule_escalation_state", byIncidentIDSubquery)
+	cleaner.Add("incident_rule_entry_state", byIncidentIDSubquery)
 	cleaner.Add("incident_history", byIncidentIDSubquery)
 	// The object table is a bit special, as we don't track all the created objects by this test suite, we are only
 	// allowed to clean it up filtered by the source_id in the object_source table. However, since the object_source
@@ -161,8 +161,8 @@ func TestIncidents(t *testing.T) {
 		managedRule = insertRule("Managed Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"managed_escalations"}}`, rule.TypeEscalation)
 		triggerNotificationsRule = insertRule("Trigger Notifications Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"trigger_notifications*"}}`, rule.TypeEscalation)
 
-		insertEscalation := func(c *recipient.Contact, position, ruleID int64, condition string) int64 {
-			escalation := &rule.Escalation{
+		insertEntry := func(c *recipient.Contact, position, ruleID int64, condition string) int64 {
+			escalation := &rule.Entry{
 				RuleID:        ruleID,
 				Position:      types.MakeInt(position),
 				ConditionExpr: types.MakeString(condition),
@@ -170,18 +170,18 @@ func TestIncidents(t *testing.T) {
 				Deleted:       types.MakeBool(false),
 			}
 			id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, escalation, "id"), escalation)
-			require.NoError(t, err, "populating rule_escalation table should not fail")
+			require.NoError(t, err, "populating rule_entry table should not fail")
 
 			if c == nil {
 				c = makeContact(t, db, cleaner, testutils.MakeRandomString(t), testutils.MakeRandomString(t), ch.ID)
 			}
 
-			escalationRecipient := &rule.EscalationRecipient{
-				EscalationID: id,
-				Recipient:    c,
-				ContactID:    types.MakeInt(c.ID),
-				ChangedAt:    types.UnixMilli(time.Now()),
-				Deleted:      types.MakeBool(false),
+			escalationRecipient := &rule.EntryRecipient{
+				EntryID:   id,
+				Recipient: c,
+				ContactID: types.MakeInt(c.ID),
+				ChangedAt: types.UnixMilli(time.Now()),
+				Deleted:   types.MakeBool(false),
 			}
 			_, err = tx.NamedExecContext(ctx, database.BuildInsertStmtWithout(db, escalationRecipient, "id"), escalationRecipient)
 			require.NoError(t, err, "populating rule_escalation_recipient table should not fail")
@@ -189,29 +189,17 @@ func TestIncidents(t *testing.T) {
 			return id
 		}
 
-		insertEscalation(contact, 2, basicRule.ID, "incident_severity>=ok")
-		insertEscalation(contact, 1, basicRule.ID, "incident_age>=1h")
+		insertEntry(contact, 2, basicRule.ID, "incident_severity>=ok")
+		insertEntry(contact, 1, basicRule.ID, "incident_age>=1h")
 
-		unmanagedEscalationID = insertEscalation(contact, 1, managedRule.ID, "is_managed=n")
-		managedEscalationID = insertEscalation(contact, 2, managedRule.ID, "is_managed=y")
+		unmanagedEscalationID = insertEntry(contact, 1, managedRule.ID, "is_managed=n")
+		managedEscalationID = insertEntry(contact, 2, managedRule.ID, "is_managed=y")
 
-		insertEscalation(nil, 1, triggerNotificationsRule.ID, "incident_severity>=info")
-		insertEscalation(nil, 2, triggerNotificationsRule.ID, "incident_severity>=warning")
+		insertEntry(nil, 1, triggerNotificationsRule.ID, "incident_severity>=info")
+		insertEntry(nil, 2, triggerNotificationsRule.ID, "incident_severity>=warning")
 
 		notificationRule = insertRule("Notification Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"notification_rule"}}`, rule.TypeNotification)
-		insertRuleRecipient := func(ruleID int64) {
-			ruleRecipient := &rule.NotificationRecipient{
-				RuleID:    ruleID,
-				Recipient: contact,
-				ContactID: types.MakeInt(contact.ID),
-				ChangedAt: types.UnixMilli(time.Now()),
-				Deleted:   types.MakeBool(false),
-			}
-			_, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, ruleRecipient, "id"), ruleRecipient)
-			require.NoError(t, err, "populating rule_escalation table should not fail")
-		}
-
-		insertRuleRecipient(notificationRule.ID)
+		insertEntry(contact, 1, notificationRule.ID, "event_type=test-type")
 
 		return nil
 	})
@@ -219,13 +207,8 @@ func TestIncidents(t *testing.T) {
 	for _, r := range []*rule.Rule{basicRule, managedRule, notificationRule, triggerNotificationsRule} {
 		ruleID := r.ID
 		cleaner.Add("rule", fmt.Sprintf("id = %d", ruleID))
-		switch r.Type {
-		case rule.TypeEscalation:
-			cleaner.Add("rule_escalation", fmt.Sprintf("rule_id = %d", ruleID))
-			cleaner.Add("rule_escalation_recipient", fmt.Sprintf("rule_escalation_id IN (SELECT id FROM rule_escalation WHERE rule_id = %d)", ruleID))
-		case rule.TypeNotification:
-			cleaner.Add("rule_recipient", fmt.Sprintf("rule_id = %d", ruleID))
-		}
+		cleaner.Add("rule_entry", fmt.Sprintf("rule_id = %d", ruleID))
+		cleaner.Add("rule_entry_recipient", fmt.Sprintf("rule_entry_id IN (SELECT id FROM rule_entry WHERE rule_id = %d)", ruleID))
 	}
 
 	runtimeConfig := config.NewRuntimeConfig(logs, db)
@@ -235,7 +218,7 @@ func TestIncidents(t *testing.T) {
 	require.NotNil(t, runtimeConfig.Rules[managedRule.ID])
 	require.NotNil(t, runtimeConfig.Rules[notificationRule.ID])
 	require.NotNil(t, runtimeConfig.Rules[triggerNotificationsRule.ID])
-	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 3)
+	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 4)
 
 	t.Run("YieldIncidents", func(t *testing.T) {
 		testData := make(map[string]*Incident, 64)
@@ -377,14 +360,19 @@ func TestIncidents(t *testing.T) {
 	})
 
 	t.Run("Incident False Flag", func(t *testing.T) {
-		msg := "Notify Event!"
+		msg := "Non-State Notification Event: OK"
 		relations := map[string]any{"host": map[string]string{"name": "notification_rule"}}
-		ev := makeEvent(t, source.ID, withIncident(false), withMsg(msg), withRelations(relations))
+		ev := makeEvent(t, source.ID, withIncident(false), withMsg(msg), withRelations(relations), withEventType("test-type"))
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, ev))
 
-		msgNotMatching := "Notify Event Not Matching!"
+		msgNotMatching := "Non-State Notification Event: Relations Not Matching!"
 		relationsNotMatching := map[string]any{"host": map[string]string{"name": "not_matching_name"}}
-		evNotMatching := makeEvent(t, source.ID, withIncident(false), withMsg(msgNotMatching), withRelations(relationsNotMatching))
+		evNotMatching := makeEvent(t, source.ID, withIncident(false), withMsg(msgNotMatching), withRelations(relationsNotMatching), withEventType("test-type"))
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, evNotMatching))
+
+		msgNotMatching = "Non-State Notification Event: Entry Rule Condition Not Matching!"
+		relationsNotMatching = map[string]any{"host": map[string]string{"name": "notification_rule"}}
+		evNotMatching = makeEvent(t, source.ID, withIncident(false), withMsg(msgNotMatching), withRelations(relationsNotMatching), withEventType("not-matching-type"))
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, evNotMatching))
 
 		entryCh, errCh := YieldNotificationHistory(t.Context(), db, 1)
@@ -839,6 +827,9 @@ func withTags(tags map[string]string) eventOption { return func(ev *event.Event)
 func withMsg(msg string) eventOption              { return func(ev *event.Event) { ev.Message = msg } }
 func withSeverity(sev baseEv.Severity) eventOption {
 	return func(ev *event.Event) { ev.Severity = sev }
+}
+func withEventType(eventType string) eventOption {
+	return func(ev *event.Event) { ev.Type = eventType }
 }
 func withRelations(relations map[string]any) eventOption {
 	return func(ev *event.Event) { ev.Relations = relations }

@@ -27,15 +27,14 @@ const (
 type Rule struct {
 	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
 
-	Name                   string                   `db:"name"`
-	TimePeriod             *timeperiod.TimePeriod   `db:"-"`
-	TimePeriodID           types.Int                `db:"timeperiod_id"`
-	ObjectFilter           filter.Filter            `db:"-"`
-	ObjectFilterExpr       types.String             `db:"object_filter"`
-	SourceType             string                   `db:"source_type"`
-	Type                   Type                     `db:"type"`
-	Escalations            map[int64]*Escalation    `db:"-"`
-	NotificationRecipients []*NotificationRecipient `db:"-"`
+	Name             string                 `db:"name"`
+	TimePeriod       *timeperiod.TimePeriod `db:"-"`
+	TimePeriodID     types.Int              `db:"timeperiod_id"`
+	ObjectFilter     filter.Filter          `db:"-"`
+	ObjectFilterExpr types.String           `db:"object_filter"`
+	SourceType       string                 `db:"source_type"`
+	Type             Type                   `db:"type"`
+	Entries          map[int64]*Entry       `db:"-"`
 
 	// FilterColumns is a set of all filter columns used in the rule's ObjectFilter.
 	//
@@ -108,13 +107,13 @@ func (r *Rule) Eval(filterable filter.Filterable) (bool, error) {
 // A zero value denotes a contact that was added without any rule involvement,
 // e.g. a recipient that subscribed to or manages an incident via the UI.
 type ChannelOrigin struct {
-	ChannelID        int64
-	RuleID           int64     // Zero if the contact subscribed via web-gui
-	RuleEscalationID types.Int // Zero if the contact subscribed via web-gui
-	ContactGroupID   int64     // Non-zero if the contact was resolved from a contact group.
-	ScheduleID       int64     // Non-zero if the contact was resolved from a schedule.
-	Role             recipient.Role
-	RuleType         Type
+	ChannelID      int64
+	RuleID         int64 // Zero if the contact subscribed via web-gui
+	RuleEntryID    int64 // Zero if the contact subscribed via web-gui
+	ContactGroupID int64 // Non-zero if the contact was resolved from a contact group.
+	ScheduleID     int64 // Non-zero if the contact was resolved from a schedule.
+	Role           recipient.Role
+	RuleType       Type
 }
 
 // ContactChannels stores, per contact and channel ID, the origins that selected this channel.
@@ -124,18 +123,12 @@ type ChannelOrigin struct {
 // duplicates that would have notified the same contact via the same channel.
 type ContactChannels map[*recipient.Contact][]ChannelOrigin
 
-// LoadFromEscalationRecipients loads recipients channel of the specified escalation to the current map.
+// LoadFromEntryRecipients loads recipients channel of the specified Entry to the current map.
 // You can provide this method a callback to control whether the channel of a specific contact should
 // be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
-func (ch ContactChannels) LoadFromEscalationRecipients(escalation *Escalation, t time.Time, isNotifiable func(recipient.Key) bool) {
-	for _, er := range escalation.Recipients {
-		ch.LoadRecipientChannel(er.CommonRecipient, er.EscalationID, escalation.RuleID, t, TypeEscalation, isNotifiable)
-	}
-}
-
-func (ch ContactChannels) LoadFromNotificationRecipients(nr []*NotificationRecipient, t time.Time, isNotifiable func(recipient.Key) bool) {
-	for _, r := range nr {
-		ch.LoadRecipientChannel(r.CommonRecipient, 0, r.RuleID, t, TypeNotification, isNotifiable)
+func (ch ContactChannels) LoadFromEntryRecipients(entry *Entry, t time.Time, ruleType Type, isNotifiable func(recipient.Key) bool) {
+	for _, er := range entry.Recipients {
+		ch.LoadRecipientChannel(er, entry.RuleID, t, ruleType, isNotifiable)
 	}
 }
 
@@ -143,20 +136,20 @@ func (ch ContactChannels) LoadFromNotificationRecipients(nr []*NotificationRecip
 // You can provide this method a callback to control whether the channel of a specific contact should
 // be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
 func (ch ContactChannels) LoadRecipientChannel(
-	r recipient.CommonRecipient,
-	escalationID, ruleID int64,
+	r *EntryRecipient,
+	ruleID int64,
 	t time.Time,
 	ruleType Type,
 	isNotifiable func(recipient.Key) bool) {
 	if isNotifiable(r.Key) {
 		origin := ChannelOrigin{
-			ChannelID:        r.ChannelID.Int64,
-			RuleID:           ruleID,
-			RuleEscalationID: types.MakeInt(escalationID, types.TransformZeroIntToNull),
-			ContactGroupID:   r.GroupID.Int64,
-			ScheduleID:       r.ScheduleID.Int64,
-			Role:             recipient.RoleRecipient,
-			RuleType:         ruleType,
+			ChannelID:      r.ChannelID.Int64,
+			RuleID:         ruleID,
+			RuleEntryID:    r.EntryID,
+			ContactGroupID: r.GroupID.Int64,
+			ScheduleID:     r.ScheduleID.Int64,
+			Role:           recipient.RoleRecipient,
+			RuleType:       ruleType,
 		}
 
 		for _, c := range r.Recipient.GetContactsAt(t) {
@@ -182,7 +175,7 @@ func MergeContactChannels(dst, src ContactChannels) ContactChannels {
 }
 
 // AlwaysNotifiable (checks) whether the given recipient is notifiable and returns always true.
-// This function is usually passed as an argument to ContactChannels.LoadFromEscalationRecipients whenever you do
+// This function is usually passed as an argument to ContactChannels.LoadFromEntryRecipients whenever you do
 // not want to perform any custom actions.
 func AlwaysNotifiable(_ recipient.Key) bool {
 	return true

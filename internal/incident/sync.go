@@ -61,12 +61,12 @@ func (i *Incident) AddEscalationTriggered(ctx context.Context, tx *sqlx.Tx, stat
 	return err
 }
 
-// AddEscalationRecipients adds the recipients of the given *rule.Escalation to the incident's recipients list.
+// AddEscalationRecipients adds the recipients of the given *rule.Entry to the incident's recipients list.
 //
 // Each recipient is added to the incident's recipients list with the role RoleRecipient, and a new ContactRow
 // is inserted into the incident_contact table. If a recipient already exists in the incident's recipients list,
 // it is skipped and no new ContactRow is inserted for that recipient.
-func (i *Incident) AddEscalationRecipients(ctx context.Context, tx *sqlx.Tx, escalation *rule.Escalation) error {
+func (i *Incident) AddEscalationRecipients(ctx context.Context, tx *sqlx.Tx, escalation *rule.Entry) error {
 	for _, escalationRecipient := range escalation.Recipients {
 		r := escalationRecipient.Recipient
 		recipientKey := recipient.ToKey(r)
@@ -228,7 +228,6 @@ func (i *Incident) generateNotifications(
 					ContactgroupID: types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
 					ScheduleID:     types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
 					ChannelID:      origin.ChannelID,
-					IncidentID:     types.MakeInt(i.Id),
 					EventMessage:   ev.Message,
 				}
 
@@ -242,6 +241,7 @@ func (i *Incident) generateNotifications(
 
 				if hr != nil {
 					notificationOfCurrentChannel.HistoryRowID = hr.ID
+					notificationOfCurrentChannel.HistoryEntry.IncidentID = types.MakeInt(i.Id)
 				}
 
 				notifications = append(notifications, notificationOfCurrentChannel)
@@ -249,10 +249,10 @@ func (i *Incident) generateNotifications(
 				notificationOfCurrentChannel.SkippedHistoryEntries = append(
 					notificationOfCurrentChannel.SkippedHistoryEntries,
 					SkippedNotificationHistory{
-						RuleID:           origin.RuleID,
-						RuleEscalationID: origin.RuleEscalationID,
-						ContactgroupID:   types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
-						ScheduleID:       types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
+						RuleID:         origin.RuleID,
+						RuleEntryID:    origin.RuleEntryID,
+						ContactgroupID: types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
+						ScheduleID:     types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
 					},
 				)
 			}
