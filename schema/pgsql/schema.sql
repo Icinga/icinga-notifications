@@ -448,6 +448,7 @@ CREATE TABLE incident_contact (
     contactgroup_id bigint,
     schedule_id bigint,
     role incident_contact_role NOT NULL,
+    event_type_whitelist text,
     changed_at bigint NOT NULL, -- used only by Notifications Web to show when the recipients role was last changed.
 
     CONSTRAINT pk_incident_contact PRIMARY KEY (id),
