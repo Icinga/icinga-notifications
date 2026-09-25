@@ -5,15 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
-	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -83,16 +84,8 @@ func (i *Incident) Object(ctx context.Context) (*object.Object, error) {
 	return obj, nil
 }
 
-func (i *Incident) IncidentSeverity() baseEv.Severity {
-	return i.Severity
-}
-
 func (i *Incident) String() string {
 	return fmt.Sprintf("#%d", i.Id)
-}
-
-func (i *Incident) ID() int64 {
-	return i.Id
 }
 
 // IsMuted returns whether this incident is currently muted.
@@ -155,98 +148,123 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 
 	var triggerNotifications bool
 	isNew := i.IsNew()
-	if isNew {
-		if !ev.OpenOrEscalate() {
-			// There is no active incident and the event cannot open one, so nothing to process. Returning rolls the
-			// transaction back, so the object sync from above is also not persisted.
-			return nil
-		}
-
-		if ev.Severity == baseEv.SeverityNone {
-			return ErrOpenIncidentWithoutSeverity
-		}
-
-		if err := i.processIncidentOpenedEvent(ctx, tx, ev); err != nil {
-			return err
-		}
-
-		i.logger = i.logger.With(zap.String("incident", i.String()))
-	} else {
-		i.logger = i.logger.With(zap.String("incident", i.String()))
-		if sevChanged, err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
-			return err
-		} else if ev.OpenOrEscalate() {
-			triggerNotifications = sevChanged || ev.NotifyRecipients()
-		} else {
-			// Events that don't open or escalate an incident are allowed to generate notifications unconditionally.
-			triggerNotifications = true
-		}
-	}
-
 	var notifications []*NotificationEntry
-	err = func() error {
-		i.runtimeConfig.RLock()
-		defer i.runtimeConfig.RUnlock()
+	if ev.JustNotify() {
+		err = func() error {
+			i.runtimeConfig.RLock()
+			defer i.runtimeConfig.RUnlock()
 
-		if ev.OpenOrEscalate() {
-			if err := i.applyMatchingRules(ctx, tx, ev); err != nil {
-				return err
-			}
-
-			// Re-evaluate escalations based on the newly evaluated rules.
-			escalations, err := i.evaluateEscalations(ev.Time)
-			if err != nil {
-				return err
-			}
-
-			if err := i.triggerEscalations(ctx, tx, escalations); err != nil {
-				return err
-			}
-
-			triggerNotifications = triggerNotifications || len(escalations) > 0
-
+			chs := getNonStateNotificationRecipientsChannel(i.runtimeConfig, i.logger, ev)
 			if !isNew {
-				// Even if the severity didn't change, we want to update the message nonetheless.
-				i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
+				chs = rule.MergeContactChannels(chs, i.getRecipientsChannel(ev.Time, func(rs RecipientState) bool {
+					if slices.Contains(rs.EventTypeWhitelist.Elements, ev.Type) {
+						return i.IsNotifiable(rs)
+					}
+					return false
+				}))
+			}
+
+			notifications, err = i.generateNotifications(ctx, tx, ev, chs)
+			return err
+		}()
+		if err != nil {
+			return err
+		}
+	} else {
+		if isNew {
+			if !ev.OpenOrEscalate() {
+				// There is no active incident and the event cannot open one, so nothing to process. Returning rolls the
+				// transaction back, so the object sync from above is also not persisted.
+				return nil
+			}
+
+			if ev.Severity == baseEv.SeverityNone {
+				return ErrOpenIncidentWithoutSeverity
+			}
+
+			if err := i.processIncidentOpenedEvent(ctx, tx, ev); err != nil {
+				return err
+			}
+
+			i.logger = i.logger.With(zap.String("incident", i.String()))
+		} else {
+			i.logger = i.logger.With(zap.String("incident", i.String()))
+			if sevChanged, err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
+				return err
+			} else if ev.OpenOrEscalate() {
+				triggerNotifications = sevChanged || ev.NotifyRecipients()
+			} else {
+				// Events that don't open or escalate an incident are allowed to generate notifications unconditionally.
+				triggerNotifications = true
 			}
 		}
 
-		// The unmute history entry, on the other hand, must be inserted first, so that the notifications generated
-		// below appear logically after the unmute event. This way, when viewing the incident history in the UI, the
-		// unmute event will appear before the notifications that were sent after unmuting.
-		if err := i.handleUnmute(ctx, tx, ev); err != nil {
+		err = func() error {
+			i.runtimeConfig.RLock()
+			defer i.runtimeConfig.RUnlock()
+
+			if ev.OpenOrEscalate() {
+				if err := i.applyMatchingRules(ctx, tx, ev); err != nil {
+					return err
+				}
+
+				// Re-evaluate escalations based on the newly evaluated rules.
+				escalations, err := i.evaluateEscalations(ev.Time)
+				if err != nil {
+					return err
+				}
+
+				if err := i.triggerEscalations(ctx, tx, escalations); err != nil {
+					return err
+				}
+
+				// If we have managed to trigger any new escalations, we must trigger notifications as well,
+				// even if the event itself doesn't request it.
+				triggerNotifications = triggerNotifications || len(escalations) > 0
+
+				if !isNew {
+					// Even if the severity didn't change, we want to update the message nonetheless.
+					i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
+				}
+			}
+
+			// The unmute history entry, on the other hand, must be inserted first, so that the notifications generated
+			// below appear logically after the unmute event. This way, when viewing the incident history in the UI, the
+			// unmute event will appear before the notifications that were sent after unmuting.
+			if err := i.handleUnmute(ctx, tx, ev); err != nil {
+				i.logger.Errorw("Cannot insert incident muted history", zap.Error(err))
+				return err
+			}
+
+			if triggerNotifications {
+				notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time, i.IsNotifiable))
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
+
+		// So that the incident muted history appears logically after the just generated notifications, we must insert
+		// the muted history last. This way, the history entries will make sense when viewed in chronological order.
+		if err := i.handleMute(ctx, tx, ev); err != nil {
 			i.logger.Errorw("Cannot insert incident muted history", zap.Error(err))
 			return err
 		}
 
-		if triggerNotifications {
-			notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
-			if err != nil {
+		if ev.CloseIncident() {
+			if err := i.Close(ctx, tx); err != nil {
 				return err
 			}
 		}
-		return nil
-	}()
-	if err != nil {
-		return err
-	}
 
-	// So that the incident muted history appears logically after the just generated notifications, we must insert
-	// the muted history last. This way, the history entries will make sense when viewed in chronological order.
-	if err := i.handleMute(ctx, tx, ev); err != nil {
-		i.logger.Errorw("Cannot insert incident muted history", zap.Error(err))
-		return err
-	}
-
-	if ev.CloseIncident() {
-		if err := i.Close(ctx, tx); err != nil {
+		if err := i.Sync(ctx, tx); err != nil {
+			i.logger.Errorw("Failed to update incident", zap.Error(err))
 			return err
 		}
-	}
-
-	if err := i.Sync(ctx, tx); err != nil {
-		i.logger.Errorw("Failed to update incident", zap.Error(err))
-		return err
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -300,7 +318,7 @@ func (i *Incident) RetriggerEscalations(ctx context.Context, o *object.Object, e
 
 			channels := make(rule.ContactChannels)
 			for _, escalation := range escalations {
-				channels.LoadFromEscalationRecipients(escalation, ev.Time, i.isRecipientNotifiable)
+				channels.LoadFromEntryRecipients(escalation, ev.Time, rule.TypeEscalation, i.isRecipientNotifiable())
 			}
 
 			eventIDQuery := `
@@ -407,7 +425,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				return fmt.Errorf("incident already has a manager, cannot add recipient %q as manager", r)
 			}
 
-			if err := i.addRecipient(ctx, tx, r, recipient.RoleManager); err != nil {
+			if err := i.addRecipient(ctx, tx, r, recipient.RoleManager, qa.EventTypeWhitelist); err != nil {
 				return fmt.Errorf("cannot add recipient %q as manager: %w", r, err)
 			}
 			// Remove the recipient from the incident's recipients list for now, so that we don't notify him about his
@@ -417,7 +435,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			var err error
 			message := fmt.Sprintf("Recipient %s has been added as the new incident manager", r.String())
 			ev = &event.Event{ID: qa.ID, Time: qa.Time, Message: message}
-			notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time))
+			notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time, i.IsNotifiable))
 			return err
 
 		case event.ActionUnmanage, event.ActionSubscribe:
@@ -428,7 +446,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				return fmt.Errorf("incident has no manager, cannot demote recipient %q", r)
 			}
 
-			if err := i.addRecipient(ctx, tx, r, recipient.RoleSubscriber); err != nil {
+			if err := i.addRecipient(ctx, tx, r, recipient.RoleSubscriber, qa.EventTypeWhitelist); err != nil {
 				return fmt.Errorf("cannot add recipient %q as subscriber: %w", r, err)
 			}
 			return nil
@@ -440,7 +458,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			}
 
 			query := `DELETE FROM incident_contact WHERE incident_id = :incident_id AND contact_id = :contact_id`
-			if _, err := tx.NamedExecContext(ctx, query, &ContactRow{Key: recipientKey, IncidentID: i.ID()}); err != nil {
+			if _, err := tx.NamedExecContext(ctx, query, &ContactRow{Key: recipientKey, IncidentID: i.Id}); err != nil {
 				return fmt.Errorf("cannot remove recipient %q from incident: %w", r, err)
 			}
 			return i.recordRecipientRoleChange(ctx, tx, r, state.Role, recipient.RoleNone)
@@ -574,7 +592,7 @@ func (i *Incident) handleMute(ctx context.Context, tx *sqlx.Tx, ev *event.Event)
 	return hr.Sync(ctx, i.db, tx)
 }
 
-// applyMatchingRules walks through the rule IDs obtained from source and generates a RuleMatched history entry.
+// applyMatchingRules walks through the escalation rule IDs obtained from source and generates a RuleMatched history entry.
 func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
 	if i.Rules == nil {
 		i.Rules = make(map[int64]struct{})
@@ -588,25 +606,8 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 
 	for id := range src.RuleIDs() {
 		if _, ok := i.Rules[id]; !ok {
-			r, ok := i.runtimeConfig.Rules[id]
-			if !ok {
-				i.logger.Errorw("BUG: source references unknown event rule", zap.Object("source", src))
-				continue
-			}
-
-			if r.SourceType != src.Type {
-				i.logger.Errorw("BUG: source references event rule with mismatching source type",
-					zap.Object("source", src),
-					zap.Object("rule", r))
-				continue
-			}
-
-			matched, err := r.Eval(ev)
-			if err != nil {
-				i.logger.Errorw("Failed to evaluate object filter", zap.Object("rule", r), zap.Error(err))
-			}
-
-			if err != nil || !matched {
+			r := i.runtimeConfig.EvaluateRule(src, ev, id, rule.TypeEscalation, i.logger)
+			if r == nil {
 				continue
 			}
 
@@ -636,7 +637,7 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 
 // evaluateEscalations evaluates this incidents rule escalations to be triggered if they aren't already.
 // Returns the newly evaluated escalations to be triggered or an error on database failure.
-func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation, error) {
+func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Entry, error) {
 	if i.EscalationState == nil {
 		i.EscalationState = make(map[int64]*EscalationState)
 	}
@@ -647,7 +648,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 		IsManaged:        i.HasManager(),
 	}
 
-	var escalations []*rule.Escalation
+	var escalations []*rule.Entry
 	retryAfter := rule.RetryNever
 
 	for rID := range i.Rules {
@@ -658,7 +659,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 		}
 
 		// Check if new escalation stages are reached
-		for _, escalation := range r.Escalations {
+		for _, escalation := range r.Entries {
 			if _, ok := i.EscalationState[escalation.ID]; !ok {
 				matched, err := escalation.Eval(filterContext)
 				if err != nil {
@@ -694,7 +695,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 
 // triggerEscalations triggers the given escalations and generates incident history items for each of them.
 // Returns an error on database failure.
-func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, escalations []*rule.Escalation) error {
+func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, escalations []*rule.Entry) error {
 	for _, escalation := range escalations {
 		r := i.runtimeConfig.Rules[escalation.RuleID]
 		if r == nil {
@@ -704,7 +705,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, escalati
 
 		i.logger.Infow("Rule reached escalation", zap.Object("rule", r), zap.Object("escalation", escalation))
 
-		state := &EscalationState{RuleEscalationID: escalation.ID, TriggeredAt: types.UnixMilli(time.Now())}
+		state := &EscalationState{RuleEntryID: escalation.ID, TriggeredAt: types.UnixMilli(time.Now())}
 		i.EscalationState[escalation.ID] = state
 
 		if err := i.AddEscalationTriggered(ctx, tx, state); err != nil {
@@ -716,11 +717,11 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, escalati
 		}
 
 		hr := &HistoryRow{
-			IncidentID:       i.Id,
-			Time:             state.TriggeredAt,
-			RuleEscalationID: types.MakeInt(state.RuleEscalationID, types.TransformZeroIntToNull),
-			RuleID:           types.MakeInt(r.ID, types.TransformZeroIntToNull),
-			Type:             EscalationTriggered,
+			IncidentID:  i.Id,
+			Time:        state.TriggeredAt,
+			RuleEntryID: types.MakeInt(state.RuleEntryID, types.TransformZeroIntToNull),
+			RuleID:      types.MakeInt(r.ID, types.TransformZeroIntToNull),
+			Type:        EscalationTriggered,
 		}
 
 		if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -765,7 +766,8 @@ func (i *Incident) notifyContacts(
 		}
 		i.runtimeConfig.RUnlock()
 
-		err := i.notifyContact(obj, contact, ev, ch)
+		isIncidentRelated := notification.RuleType == rule.TypeEscalation
+		err := i.notifyContact(obj, contact, ev, ch, isIncidentRelated)
 		if err != nil {
 			notification.State = source.NotificationStateFailed
 		} else {
@@ -775,13 +777,16 @@ func (i *Incident) notifyContacts(
 		notification.SentAt = types.UnixMilli(time.Now())
 		notification.HistoryEntry.TriggeredAt = notification.SentAt
 		notification.HistoryEntry.State = notification.State
+		notification.HistoryEntry.IncidentID = types.MakeInt(i.Id)
 
-		stmt, _ := i.db.BuildUpdateStmt(notification)
-		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
-			i.logger.Errorw(
-				"Failed to update contact notified incident history", zap.String("contact", contactName),
-				zap.Error(err),
-			)
+		if isIncidentRelated {
+			stmt, _ := i.db.BuildUpdateStmt(notification)
+			if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
+				i.logger.Errorw(
+					"Failed to update contact notified incident history", zap.String("contact", contactName),
+					zap.Error(err),
+				)
+			}
 		}
 
 		if err := notification.HistoryEntry.Sync(ctx, i.db); err != nil {
@@ -809,10 +814,15 @@ func (i *Incident) notifyContact(
 	contact *recipient.Contact,
 	ev *event.Event,
 	ch *channel.Channel,
+	isIncidentRelated bool,
 ) error {
 	i.logger.Infof("Notifying contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type)
 
-	if err := ch.Notify(contact, i, obj, ev); err != nil {
+	var incidentPlugin *plugin.Incident
+	if isIncidentRelated {
+		incidentPlugin = &plugin.Incident{Id: i.Id, Severity: i.Severity}
+	}
+	if err := ch.Notify(contact, incidentPlugin, obj, ev); err != nil {
 		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
 		return err
 	}
@@ -823,17 +833,17 @@ func (i *Incident) notifyContact(
 }
 
 // getRecipientsChannel returns all the configured channels of the current incident and escalation recipients.
-func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
+func (i *Incident) getRecipientsChannel(t time.Time, isNotifiable func(rs RecipientState) bool) rule.ContactChannels {
 	contactChs := make(rule.ContactChannels)
 	// Load all escalations recipients channels
 	for escalationID := range i.EscalationState {
-		escalation := i.runtimeConfig.GetRuleEscalation(escalationID)
+		escalation := i.runtimeConfig.GetRuleEntry(escalationID)
 		if escalation == nil {
 			i.logger.Debugw("Incident refers unknown escalation, might got deleted", zap.Int64("escalation_id", escalationID))
 			continue
 		}
 
-		contactChs.LoadFromEscalationRecipients(escalation, t, i.isRecipientNotifiable)
+		contactChs.LoadFromEntryRecipients(escalation, t, rule.TypeEscalation, i.isRecipientNotifiable(isNotifiable))
 	}
 
 	// Check whether all the incident recipients do have an appropriate contact channel configured.
@@ -845,7 +855,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 			continue
 		}
 
-		if i.IsNotifiable(state) {
+		if isNotifiable(state) {
 			contacts := r.GetContactsAt(t)
 			if len(contacts) > 0 {
 				i.logger.Debugw("Expanded recipient to contacts",
@@ -857,6 +867,7 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 						contactChs[contact] = []rule.ChannelOrigin{{
 							ChannelID: contact.DefaultChannelID,
 							Role:      state.Role,
+							RuleType:  rule.TypeEscalation,
 						}}
 					}
 				}
@@ -910,12 +921,12 @@ func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
 
 	i.EscalationState = make(map[escalationID]*EscalationState)
 	err = utils.ForEachRow(ctx, i.db, tx, "incident_id", []int64{i.Id}, func(es *EscalationState) {
-		i.EscalationState[es.RuleEscalationID] = es
+		i.EscalationState[es.RuleEntryID] = es
 
 		i.runtimeConfig.RLock()
 		defer i.runtimeConfig.RUnlock()
 
-		if escalation := i.runtimeConfig.GetRuleEscalation(es.RuleEscalationID); escalation != nil {
+		if escalation := i.runtimeConfig.GetRuleEntry(es.RuleEntryID); escalation != nil {
 			i.Rules[escalation.RuleID] = struct{}{}
 		}
 	})
@@ -940,28 +951,41 @@ func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
 //
 // If the specified recipient is not part of the incident, this returns false. Otherwise, it checks whether
 // the recipient state is eligible to be notified via the [Incident.IsNotifiable] method.
-func (i *Incident) isRecipientNotifiable(key recipient.Key) bool {
-	state, exists := i.Recipients[key]
-	if !exists {
-		return false
-	}
+func (i *Incident) isRecipientNotifiable(cbs ...func(rs RecipientState) bool) func(recipient.Key) bool {
+	return func(key recipient.Key) bool {
+		state, exists := i.Recipients[key]
 
-	return i.IsNotifiable(state)
+		if !exists {
+			return false
+		}
+
+		if len(cbs) > 0 {
+			for _, cb := range cbs {
+				if !cb(state) {
+					return false
+				}
+			}
+			return true
+		}
+
+		return i.IsNotifiable(state)
+	}
 }
 
 type EscalationState struct {
-	IncidentID       int64           `db:"incident_id"`
-	RuleEscalationID int64           `db:"rule_escalation_id"`
-	TriggeredAt      types.UnixMilli `db:"triggered_at"`
+	IncidentID  int64           `db:"incident_id"`
+	RuleEntryID int64           `db:"rule_entry_id"`
+	TriggeredAt types.UnixMilli `db:"triggered_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.
 func (e *EscalationState) TableName() string {
-	return "incident_rule_escalation_state"
+	return "incident_rule_entry_state"
 }
 
 type RecipientState struct {
-	Role recipient.Role
+	Role               recipient.Role
+	EventTypeWhitelist types.StringList
 
 	// IsNew defines whether the associated recipient was added to the incident during the current transaction.
 	//
@@ -970,6 +994,32 @@ type RecipientState struct {
 	IsNew bool
 }
 
-var (
-	_ contracts.Incident = (*Incident)(nil)
-)
+// getNonStateNotificationRecipientsChannel walks through the notification rule IDs obtained from source,
+// evaluates the non-state notification conditions on applying rules and returns all matching recipients.
+func getNonStateNotificationRecipientsChannel(rc *config.RuntimeConfig, l *zap.SugaredLogger, ev *event.Event) rule.ContactChannels {
+	src, ok := rc.Sources[ev.SourceId]
+	if !ok {
+		l.Warnw("Received event from unknown source, might got deleted", zap.Int64("source_id", ev.SourceId))
+		return nil
+	}
+	if ev.Type == "" {
+		l.Warnw("Event type of a non-state event isn't set", zap.Object("event", ev))
+	}
+
+	filterContext := &rule.NotificationTypeFilter{NotificationType: ev.Type}
+	recipientChannels := make(rule.ContactChannels)
+	for id := range src.RuleIDs() {
+		if r := rc.EvaluateRule(src, ev, id, rule.TypeNotification, l); r != nil {
+			for _, entry := range r.Entries {
+				if matched, err := entry.Eval(filterContext); err != nil {
+					l.Debugw("Evaluating of event type of stateless event", zap.Object("rule", r), zap.Error(err))
+				} else if matched {
+					recipientChannels.LoadFromEntryRecipients(entry, ev.Time, rule.TypeNotification,
+						func(key recipient.Key) bool { return rc.GetRecipient(key) != nil })
+				}
+			}
+		}
+	}
+
+	return recipientChannels
+}

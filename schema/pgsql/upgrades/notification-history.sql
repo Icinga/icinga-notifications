@@ -43,7 +43,7 @@ CREATE TABLE skipped_notification_history (
     id bigserial,
     notification_history_id bigint NOT NULL, -- The actual notification due to which the notification was skipped.
     rule_id bigint NOT NULL,
-    rule_escalation_id bigint NOT NULL,
+    rule_entry_id bigint NOT NULL,
     contactgroup_id bigint,
     schedule_id bigint,
 

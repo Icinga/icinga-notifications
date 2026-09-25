@@ -8,16 +8,18 @@ import (
 	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/recipient"
+	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/jmoiron/sqlx"
 )
 
 // ContactRow represents a single incident contact database entry.
 type ContactRow struct {
-	ID            int64 `db:"id"`
-	IncidentID    int64 `db:"incident_id"`
-	recipient.Key `db:",inline"`
-	Role          recipient.Role  `db:"role"`
-	ChangedAt     types.UnixMilli `db:"changed_at"`
+	ID                 int64 `db:"id"`
+	IncidentID         int64 `db:"incident_id"`
+	recipient.Key      `db:",inline"`
+	Role               recipient.Role   `db:"role"`
+	EventTypeWhitelist types.StringList `db:"event_type_whitelist"`
+	ChangedAt          types.UnixMilli  `db:"changed_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.
@@ -62,7 +64,7 @@ type HistoryRow struct {
 	ID                int64      `db:"id"`
 	IncidentID        int64      `db:"incident_id"`
 	EventID           types.UUID `db:"event_id"`
-	RuleEscalationID  types.Int  `db:"rule_escalation_id"`
+	RuleEntryID       types.Int  `db:"rule_entry_id"`
 	recipient.Key     `db:",inline"`
 	RuleID            types.Int                `db:"rule_id"`
 	Time              types.UnixMilli          `db:"time"`
@@ -110,6 +112,7 @@ type NotificationEntry struct {
 
 	HistoryEntry          NotificationHistory          `db:"-"`
 	SkippedHistoryEntries []SkippedNotificationHistory `db:"-"`
+	RuleType              rule.Type                    `db:"-"`
 }
 
 // TableName implements the contracts.TableNamer interface.
