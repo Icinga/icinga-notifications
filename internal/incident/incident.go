@@ -153,7 +153,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 	i.logger = i.logger.With(zap.String("object", obj.DisplayName()))
 
-	triggerNotifications := true
+	var triggerNotifications bool
 	isNew := i.IsNew()
 	if isNew {
 		if !ev.OpenOrEscalate() {
@@ -175,9 +175,11 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		i.logger = i.logger.With(zap.String("incident", i.String()))
 		if sevChanged, err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
 			return err
+		} else if ev.OpenOrEscalate() {
+			triggerNotifications = sevChanged || ev.NotifyRecipients()
 		} else {
-			// In case the severity didn't change, we need to check whether we can trigger notifications nonetheless.
-			triggerNotifications = sevChanged || ev.NotifyRecipients() || (ev.Muted.Valid && ev.IsMuted() != i.IsMuted())
+			// Events that don't open or escalate an incident are allowed to generate notifications unconditionally.
+			triggerNotifications = true
 		}
 	}
 
@@ -201,8 +203,6 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 				return err
 			}
 
-			// If we have managed to trigger any new escalations, we must trigger notifications as well,
-			// even if the event itself doesn't request it.
 			triggerNotifications = triggerNotifications || len(escalations) > 0
 
 			if !isNew {
