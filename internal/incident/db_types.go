@@ -14,11 +14,12 @@ import (
 
 // ContactRow represents a single incident contact database entry.
 type ContactRow struct {
-	ID            int64 `db:"id"`
-	IncidentID    int64 `db:"incident_id"`
-	recipient.Key `db:",inline"`
-	Role          recipient.Role  `db:"role"`
-	ChangedAt     types.UnixMilli `db:"changed_at"`
+	ID                 int64 `db:"id"`
+	IncidentID         int64 `db:"incident_id"`
+	recipient.Key      `db:",inline"`
+	Role               recipient.Role   `db:"role"`
+	EventTypeWhitelist types.StringList `db:"event_type_whitelist"`
+	ChangedAt          types.UnixMilli  `db:"changed_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.

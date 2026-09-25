@@ -157,7 +157,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 			chs := getNonStateNotificationRecipientsChannel(i.runtimeConfig, i.logger, ev)
 			if !isNew {
 				chs = rule.MergeContactChannels(chs, i.getRecipientsChannel(ev.Time, func(rs RecipientState) bool {
-					if slices.Contains(rs.NonStateNotificationWhitelist, ev.Type) {
+					if slices.Contains(rs.EventTypeWhitelist.Elements, ev.Type) {
 						return i.IsNotifiable(rs)
 					}
 					return false
@@ -425,7 +425,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				return fmt.Errorf("incident already has a manager, cannot add recipient %q as manager", r)
 			}
 
-			if err := i.addRecipient(ctx, tx, r, recipient.RoleManager); err != nil {
+			if err := i.addRecipient(ctx, tx, r, recipient.RoleManager, qa.EventTypeWhitelist); err != nil {
 				return fmt.Errorf("cannot add recipient %q as manager: %w", r, err)
 			}
 			// Remove the recipient from the incident's recipients list for now, so that we don't notify him about his
@@ -446,7 +446,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				return fmt.Errorf("incident has no manager, cannot demote recipient %q", r)
 			}
 
-			if err := i.addRecipient(ctx, tx, r, recipient.RoleSubscriber); err != nil {
+			if err := i.addRecipient(ctx, tx, r, recipient.RoleSubscriber, qa.EventTypeWhitelist); err != nil {
 				return fmt.Errorf("cannot add recipient %q as subscriber: %w", r, err)
 			}
 			return nil
@@ -984,8 +984,8 @@ func (e *EscalationState) TableName() string {
 }
 
 type RecipientState struct {
-	Role                          recipient.Role
-	NonStateNotificationWhitelist []string
+	Role               recipient.Role
+	EventTypeWhitelist types.StringList
 
 	// IsNew defines whether the associated recipient was added to the incident during the current transaction.
 	//

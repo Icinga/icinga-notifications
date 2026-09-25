@@ -106,7 +106,7 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 // If the recipient already exists in the incident's recipients list, their role is updated to the new role and a
 // history entry is created to record the change. If the recipient does not exist, they are added to the list with
 // the specified role and a new ContactRow is inserted.
-func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Recipient, role recipient.Role) error {
+func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Recipient, role recipient.Role, eventTypeWhitelist types.StringList) error {
 	recipientKey := recipient.ToKey(r)
 	state, exists := i.Recipients[recipientKey]
 	if exists && state.Role == role {
@@ -114,12 +114,13 @@ func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Re
 	}
 
 	if !exists {
-		i.Recipients[recipientKey] = RecipientState{Role: role, IsNew: true}
+		i.Recipients[recipientKey] = RecipientState{Role: role, IsNew: true, EventTypeWhitelist: eventTypeWhitelist}
 	} else {
 		if err := i.recordRecipientRoleChange(ctx, tx, r, state.Role, role); err != nil {
 			return err
 		}
 		state.Role = role
+		state.EventTypeWhitelist = eventTypeWhitelist
 		i.Recipients[recipientKey] = state
 	}
 
