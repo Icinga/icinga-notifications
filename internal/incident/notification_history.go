@@ -63,7 +63,7 @@ func YieldNotificationHistory(
     LEFT JOIN channel ch ON nh.channel_id = ch.id
 	LEFT JOIN contactgroup cg ON nh.contactgroup_id = cg.id
 	LEFT JOIN schedule s ON nh.schedule_id = s.id
-    WHERE nh.triggered_at >= ?`
+    WHERE nh.triggered_at >= ? ORDER BY nh.triggered_at`
 
 	valueCh := make(chan NotificationHistoryPair)
 	errCh := make(chan error, 1) // buffered to avoid goroutine leak if the receiver is not ready to receive errors.
