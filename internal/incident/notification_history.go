@@ -57,12 +57,14 @@ func YieldNotificationHistory(
 		ch.name AS channel_name,
 		nh.event_message,
 		nh.state,
-		nh.object_id
+		nh.object_id,
+		CASE WHEN i.severity IS NULL OR i.recovered_at IS NOT NULL THEN true ELSE false END AS incident_closed
     FROM notification_history nh
     LEFT JOIN contact c ON nh.contact_id = c.id AND c.deleted = 'n'
     LEFT JOIN channel ch ON nh.channel_id = ch.id
 	LEFT JOIN contactgroup cg ON nh.contactgroup_id = cg.id
 	LEFT JOIN schedule s ON nh.schedule_id = s.id
+    LEFT JOIN incident i ON nh.incident_id = i.id
     WHERE nh.triggered_at >= ? ORDER BY nh.triggered_at`
 
 	valueCh := make(chan NotificationHistoryPair)

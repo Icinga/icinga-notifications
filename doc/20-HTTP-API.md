@@ -265,6 +265,7 @@ the following attributes for each notification history entry:
 | channel_name      | Name of the channel used to deliver the notification.                                      |
 | event_message     | The message of the event that triggered the notification.                                  |
 | state             | The state of the notification attempt, either `sent` or `failed`.                          |
+| incident_closed   | A boolean indicating whether the incident associated with the notification was closed.     |
 
 In error cases, the response result will contain the following attributes:
 
@@ -282,8 +283,8 @@ The following example shows how to retrieve all notification history entries rec
 ```
 $ curl -u 'example:insecureinsecure' 'http://localhost:5680/notification-history?since=1767225600000' -G --data-urlencode 'filter={"host":"test-host"}'
 ...
-{"status":"success","result":{"event_id":"b56665fc-70f1-48b9-a19c-b15beeb0152e","triggered_at":1788518901863,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"PING OK - Packet loss = 0%, RTA = 0.09 ms","state":"sent"}}
-{"status":"success","result":{"event_id":"48bb1a43-4066-4b69-a14f-7d3d1fd76927","triggered_at":1788518901865,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"LOAD OK - total load average: 1.93, 0.98, 0.66","state":"sent"}}
+{"status":"success","result":{"event_id":"b56665fc-70f1-48b9-a19c-b15beeb0152e","triggered_at":1788518901863,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"PING OK - Packet loss = 0%, RTA = 0.09 ms","state":"sent","incident_closed":false}}
+{"status":"success","result":{"event_id":"48bb1a43-4066-4b69-a14f-7d3d1fd76927","triggered_at":1788518901865,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"LOAD OK - total load average: 1.93, 0.98, 0.66","state":"sent","incident_closed":false}}
 ```
 
 ## API Filtering
