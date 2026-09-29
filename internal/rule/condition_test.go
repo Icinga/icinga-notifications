@@ -77,3 +77,89 @@ func TestEscalationFilter(t *testing.T) {
 		assert.False(t, unmanaged.EvalExists("is_muted"))
 	})
 }
+
+func TestNotificationFilter(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		expr        string
+		expected    map[string]bool
+		expectedErr string
+	}{
+		{
+			name:     "equal",
+			expr:     "event_type=valid_type",
+			expected: map[string]bool{"valid_type": true, "invalid_type": false},
+		},
+		{
+			name:     "equal OR combined",
+			expr:     "event_type=valid_type||event_type=valid_type_2",
+			expected: map[string]bool{"valid_type": true, "valid_type_2": true, "invalid_type": false},
+		},
+		{
+			name:     "unequal AND combined",
+			expr:     "event_type!=invalid_type&event_type!=invalid_type_2",
+			expected: map[string]bool{"valid_type": true, "invalid_type": false, "invalid_type_2": false},
+		},
+		{
+			name:     "empty condition",
+			expr:     "",
+			expected: map[string]bool{"valid_type": true, "valid_type_2": true},
+		},
+		{
+			name:     "impossible",
+			expr:     "event_type=invalid_type&event_type!=invalid_type",
+			expected: map[string]bool{"invalid_type": false, "invalid_type_2": false},
+		},
+		{
+			name:        "less matches",
+			expr:        "event_type<invalid_type",
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification filter does not support 'less' matches",
+		},
+		{
+			name:        "lessOrEqual matches",
+			expr:        "event_type<=invalid_type",
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification filter does not support 'less or equal' matches",
+		},
+		{
+			name:        "greater or equal matches",
+			expr:        "event_type>=invalid_type",
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification filter does not support 'less' matches",
+		},
+		{
+			name:        "greater matches",
+			expr:        "event_type>invalid_type",
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification filter does not support 'less or equal' matches",
+		},
+		{
+			name:        "like matches",
+			expr:        "event_type=valid_type*",
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification filter does not support wildcard matches",
+		},
+		{
+			name:        "unlike matches",
+			expr:        "event_type!=valid_type*",
+			expected:    map[string]bool{"invalid_type": false},
+			expectedErr: "notification filter does not support wildcard matches",
+		},
+	}
+
+	for _, tt := range tests {
+		f, err := filter.Parse(tt.expr)
+		require.NoError(t, err, "escalation condition should be parsable")
+		for eventType, expected := range tt.expected {
+			nf := &NotificationFilter{EventType: eventType}
+			matched, err := f.Eval(nf)
+			if err != nil {
+				assert.ErrorContains(t, err, tt.expectedErr)
+			}
+			assert.Equal(t, expected, matched)
+		}
+	}
+}

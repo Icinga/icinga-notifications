@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -157,10 +156,12 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 			chs := getNonStateNotificationRecipientsChannel(i.runtimeConfig, i.logger, ev)
 			if !isNew {
 				chs = rule.MergeContactChannels(chs, i.getRecipientsChannel(ev.Time, func(rs RecipientState) bool {
-					if slices.Contains(rs.EventTypeWhitelist.Elements, ev.Type) {
-						return i.IsNotifiable(rs)
-					}
-					return false
+					// TODO: Enable the gate if the web is able to handle the whitelisting on subscribe, manage, ...
+					//if rs.Role == recipient.RoleRecipient || slices.Contains(rs.EventTypeWhitelist.Elements, ev.Type) {
+					//	return i.IsNotifiable(rs)
+					//}
+					//return false
+					return i.IsNotifiable(rs)
 				}))
 			}
 
@@ -1006,7 +1007,7 @@ func getNonStateNotificationRecipientsChannel(rc *config.RuntimeConfig, l *zap.S
 		l.Warnw("Event type of a non-state event isn't set", zap.Object("event", ev))
 	}
 
-	filterContext := &rule.NotificationTypeFilter{NotificationType: ev.Type}
+	filterContext := &rule.NotificationFilter{EventType: ev.Type}
 	recipientChannels := make(rule.ContactChannels)
 	for id := range src.RuleIDs() {
 		if r := rc.EvaluateRule(src, ev, id, rule.TypeNotification, l); r != nil {

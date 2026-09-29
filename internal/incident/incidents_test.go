@@ -128,9 +128,11 @@ func TestIncidents(t *testing.T) {
 	_ = makeContact(t, db, cleaner, "testuser_not_notifiable", "testuser_not_notifiable", ch.ID)
 	incidentManager := makeContact(t, db, cleaner, "Thomas A. Anderson", "neo", ch.ID)
 	incidentSubscriber := makeContact(t, db, cleaner, "Agent Smith", "smith", ch.ID)
+	notificationContact := makeContact(t, db, cleaner, "notification_testuser", "notification_testuser", ch.ID)
+	passiveNotificationContact := makeContact(t, db, cleaner, "passive_notification_testuser", "passive_notification_testuser", ch.ID)
 
 	var unmanagedEscalationID, managedEscalationID int64
-	var basicRule, managedRule, notificationRule, triggerNotificationsRule *rule.Rule
+	var basicRule, managedRule, notificationRule, triggerNotificationsRule, escalationsPassivelyNotifiedRule *rule.Rule
 	err = db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
 		insertRule := func(name, filter string, ruleType rule.Type) *rule.Rule {
 			r := &rule.Rule{
@@ -154,12 +156,15 @@ func TestIncidents(t *testing.T) {
 		"op":"&",
 		"rules":[
 			{"op":"!=","attributes":["$.host.name"],"value":"managed_escalations"},
-			{"op":"!=","attributes":["$.host.name"],"regex":"trigger_notifications*"}
+			{"op":"!=","attributes":["$.host.name"],"value":"notification_rule"},
+			{"op":"!=","attributes":["$.host.name"],"regex":"trigger_notifications*"},
+			{"op":"!=","attributes":["$.host.name"],"regex":"passive_notifications*"}
 		]
 	}
 }`, rule.TypeEscalation)
 		managedRule = insertRule("Managed Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"managed_escalations"}}`, rule.TypeEscalation)
 		triggerNotificationsRule = insertRule("Trigger Notifications Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"trigger_notifications*"}}`, rule.TypeEscalation)
+		escalationsPassivelyNotifiedRule = insertRule("Passively Notify Escalation Recipients Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"passive_notifications*"}}`, rule.TypeEscalation)
 
 		insertEntry := func(c *recipient.Contact, position, ruleID int64, condition string) int64 {
 			escalation := &rule.Entry{
@@ -199,12 +204,14 @@ func TestIncidents(t *testing.T) {
 		insertEntry(nil, 2, triggerNotificationsRule.ID, "incident_severity>=warning")
 
 		notificationRule = insertRule("Notification Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"notification_rule"}}`, rule.TypeNotification)
-		insertEntry(contact, 1, notificationRule.ID, "event_type=test-type")
+		insertEntry(notificationContact, 1, notificationRule.ID, "event_type=test-type")
+		insertEntry(notificationContact, 1, escalationsPassivelyNotifiedRule.ID, "incident_severity>=info")
+		insertEntry(passiveNotificationContact, 2, escalationsPassivelyNotifiedRule.ID, "incident_severity>=info")
 
 		return nil
 	})
 	require.NoError(t, err)
-	for _, r := range []*rule.Rule{basicRule, managedRule, notificationRule, triggerNotificationsRule} {
+	for _, r := range []*rule.Rule{basicRule, managedRule, notificationRule, triggerNotificationsRule, escalationsPassivelyNotifiedRule} {
 		ruleID := r.ID
 		cleaner.Add("rule", fmt.Sprintf("id = %d", ruleID))
 		cleaner.Add("rule_entry", fmt.Sprintf("rule_id = %d", ruleID))
@@ -218,7 +225,7 @@ func TestIncidents(t *testing.T) {
 	require.NotNil(t, runtimeConfig.Rules[managedRule.ID])
 	require.NotNil(t, runtimeConfig.Rules[notificationRule.ID])
 	require.NotNil(t, runtimeConfig.Rules[triggerNotificationsRule.ID])
-	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 4)
+	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 5)
 
 	t.Run("YieldIncidents", func(t *testing.T) {
 		testData := make(map[string]*Incident, 64)
@@ -385,7 +392,7 @@ func TestIncidents(t *testing.T) {
 			count++
 			assert.Equal(t, ev.Tags, entry.Object.Tags)
 			assert.Equal(t, types.MakeString(ch.Name), entry.ChannelName)
-			assert.Equal(t, types.MakeString(contact.FullName), entry.ContactName)
+			assert.Equal(t, types.MakeString(notificationContact.FullName), entry.ContactName)
 			assert.Equal(t, types.MakeString(msg), entry.EventMessage)
 			assert.False(t, entry.ContactgroupName.Valid, "contactgroup_name must be an empty string, not null, when there's no contactgroup")
 			assert.False(t, entry.ScheduleName.Valid, "schedule_name must be an empty string, not null, when there's no schedule")
@@ -683,6 +690,100 @@ func TestIncidents(t *testing.T) {
 			assert.Equal(t, count, 0, "there must be no notification history entries since a future timestamp")
 		})
 
+	})
+
+	t.Run("Generate Notifications", func(t *testing.T) {
+		t.Parallel()
+		logger := logs.GetChildLogger("incident").SugaredLogger
+
+		t.Run("Notification Without Incident", func(t *testing.T) {
+			tags := map[string]string{"generate_notification_test": "without-incident"}
+			relations := map[string]any{"host": map[string]string{"name": "notification_rule"}}
+			msg := testutils.MakeRandomString(t)
+			ev := makeEvent(t, source.ID, withIncident(false), withEventType("test-type"), withRelations(relations), withTags(tags), withMsg(msg))
+
+			var notifications []*NotificationEntry
+			err = db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
+				i := new(Incident)
+				i.initializeFields(db, runtimeConfig, logger)
+				i.runtimeConfig.RLock()
+				defer i.runtimeConfig.RUnlock()
+
+				notifications, err = i.generateNotifications(ctx, tx, ev, getNonStateNotificationRecipientsChannel(i.runtimeConfig, i.logger, ev))
+				require.NoError(t, err)
+
+				return nil
+			})
+			require.NoError(t, err)
+			assert.NotNil(t, notifications)
+
+			for _, notification := range notifications {
+				assert.Equal(t, rule.TypeNotification, notification.RuleType)
+				assert.Equal(t, notificationContact.ID, notification.ContactID)
+				assert.Equal(t, ch.ID, notification.ChannelID)
+				assert.Equal(t, msg, notification.HistoryEntry.EventMessage)
+			}
+		})
+
+		t.Run("Notification With Incident", func(t *testing.T) {
+			tags := map[string]string{"generate_notification_test": "with-incident"}
+			msg := testutils.MakeRandomString(t)
+			relations := map[string]any{"host": map[string]string{"name": "passive_notifications_by_non_state_event"}}
+			i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(true), withTags(tags), withRelations(relations), withSeverity(baseEv.SeverityCrit)))
+			err = db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
+				return i.RestoreState(ctx, tx, true)
+			})
+
+			relations = map[string]any{"host": map[string]string{"name": "notification_rule"}}
+			ev := makeEvent(t, source.ID, withIncident(false), withEventType("test-type"), withRelations(relations), withTags(tags), withMsg(msg))
+
+			var notifications []*NotificationEntry
+			err = db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
+				i.runtimeConfig.RLock()
+				defer i.runtimeConfig.RUnlock()
+
+				chs := getNonStateNotificationRecipientsChannel(i.runtimeConfig, i.logger, ev)
+				assert.NotEmpty(t, chs)
+				chs = rule.MergeContactChannels(chs, i.getRecipientsChannel(ev.Time, func(rs RecipientState) bool {
+					if rs.Role == recipient.RoleRecipient || slices.Contains(rs.EventTypeWhitelist.Elements, ev.Type) {
+						return i.IsNotifiable(rs)
+					}
+					return false
+				}))
+				assert.NotEmpty(t, chs)
+
+				notifications, err = i.generateNotifications(ctx, tx, ev, chs)
+				require.NoError(t, err)
+
+				return nil
+			})
+			require.NoError(t, err)
+			assert.NotNil(t, notifications)
+
+			seen := make(map[int64]int64)
+			for _, notification := range notifications {
+				assert.NotEqual(t, seen[notification.ChannelID], notification.ContactID)
+
+				if notification.ContactID == notificationContact.ID {
+					assert.NotNil(t, notification.SkippedHistoryEntries)
+				}
+
+				switch notification.RuleType {
+				case rule.TypeEscalation:
+					assert.Equal(t, passiveNotificationContact.ID, notification.ContactID)
+				case rule.TypeNotification:
+					assert.Equal(t, notificationContact.ID, notification.ContactID)
+				default:
+					require.NotNil(t, notification.RuleType)
+					require.True(t, notification.RuleType == rule.TypeNotification || notification.RuleType == rule.TypeEscalation,
+						"The RuleType must be 'escalation' od 'notification'")
+				}
+
+				assert.Equal(t, ch.ID, notification.ChannelID)
+				assert.Equal(t, msg, notification.HistoryEntry.EventMessage)
+				seen[notification.ChannelID] = notification.ContactID
+			}
+		})
 	})
 }
 

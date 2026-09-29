@@ -243,6 +243,8 @@ func (i *Incident) generateNotifications(
 				if hr != nil {
 					notificationOfCurrentChannel.HistoryRowID = hr.ID
 					notificationOfCurrentChannel.HistoryEntry.IncidentID = types.MakeInt(i.Id)
+				} else {
+					notificationOfCurrentChannel.HistoryEntry.IncidentID = types.MakeInt(0, types.TransformZeroIntToNull)
 				}
 
 				notifications = append(notifications, notificationOfCurrentChannel)
