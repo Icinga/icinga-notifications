@@ -123,7 +123,7 @@ const (
 // check the available exported methods.
 type Condition struct {
 	op    CompOperator
-	attrs any
+	attrs []string
 	value any
 }
 
@@ -201,7 +201,7 @@ func (c *Condition) ExtractConditions() []*Condition {
 }
 
 // Attributes returns the list of attributes this condition refers to.
-func (c *Condition) Attributes() any { return c.attrs }
+func (c *Condition) Attributes() []string { return c.attrs }
 
 // Value returns the value of this Condition.
 func (c *Condition) Value() any {
@@ -226,7 +226,7 @@ func NewExists(column string) *Exists {
 }
 
 func (e *Exists) Eval(filterable Filterable) (bool, error) {
-	return filterable.EvalExists(e.column), nil
+	return filterable.EvalExists([]string{e.column}), nil
 }
 
 // String returns a string representation of this Exists filter for debugging purposes.
@@ -345,6 +345,23 @@ func UnmarshalJSON(data []byte) (Filter, error) {
 		return condition, nil
 	}
 	return nil, fmt.Errorf("unknown filter operator: %s", op)
+}
+
+// ParseASTExpr parses a filter expression stored as a JSON object with an `ast` field, i.e.
+// `{"ast": <filter JSON>}`, as produced for the rule object filter and escalation condition columns.
+//
+// Returns an error if expr isn't valid JSON or doesn't contain the required `ast` field.
+func ParseASTExpr(expr string) (Filter, error) {
+	data := map[string]json.RawMessage{}
+	if err := json.Unmarshal([]byte(expr), &data); err != nil {
+		return nil, err
+	}
+
+	astBytes, exists := data["ast"]
+	if !exists {
+		return nil, errors.New("missing 'ast' field in filter expression")
+	}
+	return UnmarshalJSON(astBytes)
 }
 
 // isLogicalOp checks if the provided operator is a valid logical operator.

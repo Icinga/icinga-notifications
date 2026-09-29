@@ -184,14 +184,14 @@ func TestIncidents(t *testing.T) {
 			return id
 		}
 
-		insertEscalation(contact, 2, basicRule.ID, "incident_severity>=ok")
-		insertEscalation(contact, 1, basicRule.ID, "incident_age>=1h")
+		insertEscalation(contact, 2, basicRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"ok"}}`)
+		insertEscalation(contact, 1, basicRule.ID, `{"ast":{"op":">=","attributes":["incident_age"],"value":"1h"}}`)
 
-		unmanagedEscalationID = insertEscalation(contact, 1, managedRule.ID, "is_managed=n")
-		managedEscalationID = insertEscalation(contact, 2, managedRule.ID, "is_managed=y")
+		unmanagedEscalationID = insertEscalation(contact, 1, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"n"}}`)
+		managedEscalationID = insertEscalation(contact, 2, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"y"}}`)
 
-		insertEscalation(nil, 1, triggerNotificationsRule.ID, "incident_severity>=info")
-		insertEscalation(nil, 2, triggerNotificationsRule.ID, "incident_severity>=warning")
+		insertEscalation(nil, 1, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"info"}}`)
+		insertEscalation(nil, 2, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"warning"}}`)
 
 		return nil
 	})

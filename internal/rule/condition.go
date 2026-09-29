@@ -30,7 +30,7 @@ type EscalationFilter struct {
 func (e *EscalationFilter) ReevaluateAfter(escalationCond filter.Filter) time.Duration {
 	retryAfter := RetryNever
 	for _, condition := range escalationCond.ExtractConditions() {
-		if condition.Attributes() == "incident_age" {
+		if keyString(condition.Attributes()) == "incident_age" {
 			v, err := time.ParseDuration(fmt.Sprint(condition.Value()))
 			if err == nil && v > e.IncidentAge {
 				// The incident age is compared with a value in the future. Once that age is
@@ -43,8 +43,8 @@ func (e *EscalationFilter) ReevaluateAfter(escalationCond filter.Filter) time.Du
 	return retryAfter
 }
 
-func (e *EscalationFilter) EvalEqual(key, value any) (bool, error) {
-	switch key {
+func (e *EscalationFilter) EvalEqual(key []string, value any) (bool, error) {
+	switch keyString(key) {
 	case "incident_age":
 		age, err := time.ParseDuration(fmt.Sprint(value))
 		if err != nil {
@@ -71,8 +71,8 @@ func (e *EscalationFilter) EvalEqual(key, value any) (bool, error) {
 	}
 }
 
-func (e *EscalationFilter) EvalLess(key, value any) (bool, error) {
-	switch key {
+func (e *EscalationFilter) EvalLess(key []string, value any) (bool, error) {
+	switch keyString(key) {
 	case "incident_age":
 		age, err := time.ParseDuration(fmt.Sprint(value))
 		if err != nil {
@@ -94,12 +94,12 @@ func (e *EscalationFilter) EvalLess(key, value any) (bool, error) {
 	}
 }
 
-func (e *EscalationFilter) EvalLike(_, _ any) (bool, error) {
+func (e *EscalationFilter) EvalLike(_ []string, _ any) (bool, error) {
 	return false, fmt.Errorf("escalation filter does not support wildcard matches")
 }
 
-func (e *EscalationFilter) EvalLessOrEqual(key, value any) (bool, error) {
-	switch key {
+func (e *EscalationFilter) EvalLessOrEqual(key []string, value any) (bool, error) {
+	switch keyString(key) {
 	case "incident_age":
 		age, err := time.ParseDuration(fmt.Sprint(value))
 		if err != nil {
@@ -121,8 +121,8 @@ func (e *EscalationFilter) EvalLessOrEqual(key, value any) (bool, error) {
 	}
 }
 
-func (e *EscalationFilter) EvalExists(key any) bool {
-	switch key {
+func (e *EscalationFilter) EvalExists(key []string) bool {
+	switch keyString(key) {
 	case "incident_age":
 		fallthrough
 	case "incident_severity":
@@ -144,4 +144,12 @@ func parseManagedValue(value any) (bool, error) {
 	default:
 		return false, fmt.Errorf(`invalid is_managed value %q, expected either "y" or "n"`, v)
 	}
+}
+
+// keyString returns the first element of the key slice, or an empty string if the slice is empty.
+func keyString(key []string) string {
+	if len(key) == 0 {
+		return ""
+	}
+	return key[0]
 }

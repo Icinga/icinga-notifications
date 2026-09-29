@@ -1,8 +1,6 @@
 package rule
 
 import (
-	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/icinga/icinga-go-library/types"
@@ -37,16 +35,7 @@ type FilterAttrsType [][]string
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
 func (r *Rule) IncrementalInitAndValidate() error {
 	if r.ObjectFilterExpr.Valid {
-		data := map[string]json.RawMessage{}
-		if err := json.Unmarshal([]byte(r.ObjectFilterExpr.String), &data); err != nil {
-			return err
-		}
-		filterBytes, exists := data["ast"]
-		if !exists {
-			return errors.New("missing 'ast' field in object filter expression")
-		}
-
-		f, err := filter.UnmarshalJSON(filterBytes)
+		f, err := filter.ParseASTExpr(r.ObjectFilterExpr.String)
 		if err != nil {
 			return err
 		}
@@ -54,9 +43,7 @@ func (r *Rule) IncrementalInitAndValidate() error {
 		r.ObjectFilter = f
 		if f != nil {
 			for _, condition := range f.ExtractConditions() {
-				if attrs, ok := condition.Attributes().([]string); ok {
-					r.FilterColumns = append(r.FilterColumns, attrs)
-				}
+				r.FilterColumns = append(r.FilterColumns, condition.Attributes())
 			}
 		}
 	}

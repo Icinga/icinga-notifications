@@ -30,12 +30,12 @@ type Escalation struct {
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
 func (e *Escalation) IncrementalInitAndValidate() error {
 	if e.ConditionExpr.Valid {
-		cond, err := filter.Parse(e.ConditionExpr.String)
+		f, err := filter.ParseASTExpr(e.ConditionExpr.String)
 		if err != nil {
 			return err
 		}
 
-		e.Condition = cond
+		e.Condition = f
 	}
 
 	if e.FallbackForID.Valid {
