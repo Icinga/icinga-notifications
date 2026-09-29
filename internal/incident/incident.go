@@ -778,9 +778,9 @@ func (i *Incident) notifyContacts(
 		notification.SentAt = types.UnixMilli(time.Now())
 		notification.HistoryEntry.TriggeredAt = notification.SentAt
 		notification.HistoryEntry.State = notification.State
-		notification.HistoryEntry.IncidentID = types.MakeInt(i.Id)
 
 		if isIncidentRelated {
+			notification.HistoryEntry.IncidentID = types.MakeInt(i.Id)
 			stmt, _ := i.db.BuildUpdateStmt(notification)
 			if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
 				i.logger.Errorw(
