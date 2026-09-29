@@ -72,6 +72,9 @@ func (r *Rule) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	if r.TimePeriodID.Valid && r.TimePeriodID.Int64 != 0 {
 		encoder.AddInt64("timeperiod_id", r.TimePeriodID.Int64)
 	}
+	if r.ObjectFilter != nil {
+		encoder.AddString("object_filter", r.ObjectFilter.String())
+	}
 
 	return nil
 }

@@ -56,8 +56,8 @@ func (e *Escalation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("rule_id", e.RuleID)
 	encoder.AddString("name", e.DisplayName())
 
-	if e.ConditionExpr.Valid && e.ConditionExpr.String != "" {
-		encoder.AddString("condition", e.ConditionExpr.String)
+	if e.Condition != nil {
+		encoder.AddString("condition", e.Condition.String())
 	}
 	if e.FallbackForID.Valid && e.FallbackForID.Int64 != 0 {
 		encoder.AddInt64("fallback_for", e.FallbackForID.Int64)

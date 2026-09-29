@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/pool"
@@ -85,6 +86,20 @@ func (c *Chain) ExtractConditions() []*Condition {
 	}
 
 	return conditions
+}
+
+// String returns a string representation of this Chain for debugging purposes.
+func (c *Chain) String() string {
+	var sb strings.Builder
+	sb.WriteString(`Chain{op: "` + string(c.op) + `", rules: [`)
+	for i, rule := range c.rules {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(rule.String())
+	}
+	sb.WriteString("]}")
+	return sb.String()
 }
 
 // CompOperator is a type used for grouping the individual comparison operators of a filter string.
@@ -193,6 +208,11 @@ func (c *Condition) Value() any {
 	return c.value
 }
 
+// String returns a string representation of this Condition for debugging purposes.
+func (c *Condition) String() string {
+	return `Condition{op: "` + string(c.op) + `", attrs: "` + fmt.Sprint(c.attrs) + `", value: "` + fmt.Sprint(c.value) + `"}`
+}
+
 type Exists struct {
 	column string
 }
@@ -207,6 +227,11 @@ func NewExists(column string) *Exists {
 
 func (e *Exists) Eval(filterable Filterable) (bool, error) {
 	return filterable.EvalExists(e.column), nil
+}
+
+// String returns a string representation of this Exists filter for debugging purposes.
+func (e *Exists) String() string {
+	return `Exists{column: "` + e.column + `"}`
 }
 
 var (
