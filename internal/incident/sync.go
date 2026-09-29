@@ -124,7 +124,7 @@ func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Re
 		i.Recipients[recipientKey] = state
 	}
 
-	cr := &ContactRow{IncidentID: i.Id, Key: recipientKey, Role: role, ChangedAt: types.UnixMilli(time.Now())}
+	cr := &ContactRow{IncidentID: i.Id, Key: recipientKey, Role: role, EventTypeWhitelist: eventTypeWhitelist, ChangedAt: types.UnixMilli(time.Now())}
 	stmt, _ := i.db.BuildUpsertStmt(cr, "id")
 	if _, err := tx.NamedExecContext(ctx, stmt, cr); err != nil {
 		return fmt.Errorf("failed to upsert contact: %w", err)
