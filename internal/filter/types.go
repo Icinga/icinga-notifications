@@ -213,30 +213,8 @@ func (c *Condition) String() string {
 	return `Condition{op: "` + string(c.op) + `", attrs: "` + fmt.Sprint(c.attrs) + `", value: "` + fmt.Sprint(c.value) + `"}`
 }
 
-type Exists struct {
-	column string
-}
-
-func (e *Exists) ExtractConditions() []*Condition {
-	return nil
-}
-
-func NewExists(column string) *Exists {
-	return &Exists{column: column}
-}
-
-func (e *Exists) Eval(filterable Filterable) (bool, error) {
-	return filterable.EvalExists([]string{e.column}), nil
-}
-
-// String returns a string representation of this Exists filter for debugging purposes.
-func (e *Exists) String() string {
-	return `Exists{column: "` + e.column + `"}`
-}
-
 var (
 	_ Filter = (*Chain)(nil)
-	_ Filter = (*Exists)(nil)
 	_ Filter = (*Condition)(nil)
 )
 
