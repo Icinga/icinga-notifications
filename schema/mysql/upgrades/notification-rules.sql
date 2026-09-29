@@ -2,6 +2,8 @@ ALTER TABLE rule ADD COLUMN type enum('notification', 'escalation') AFTER source
 UPDATE rule SET type = 'escalation' WHERE type IS NULL;
 ALTER TABLE rule ADD CONSTRAINT ck_rule_type_notnull CHECK (type IS NOT NULL);
 
+ALTER TABLE incident_contact ADD COLUMN event_type_whitelist text AFTER role;
+
 -- Rename rule_escalation to rule_entry.
 ALTER TABLE rule_escalation RENAME TO rule_entry;
 ALTER TABLE rule_entry

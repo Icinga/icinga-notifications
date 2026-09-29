@@ -3,6 +3,8 @@ ALTER TABLE rule ADD COLUMN type rule_type;
 UPDATE rule SET type = 'escalation' WHERE type IS NULL;
 ALTER TABLE rule ALTER COLUMN type SET NOT NULL;
 
+ALTER TABLE incident_contact ADD COLUMN event_type_whitelist text;
+
 -- Rename rule_escalation to rule_entry.
 ALTER TABLE rule_escalation RENAME TO rule_entry;
 ALTER SEQUENCE rule_escalation_id_seq RENAME TO rule_entry_id_seq;
