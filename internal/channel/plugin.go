@@ -40,6 +40,9 @@ type (
 		//
 		// It is used to associate the plugin's state with the correct channel in the database.
 		ChannelID int64
+
+		// pluginType is the type of the plugin associated with this supervisor.
+		pluginType string
 	}
 
 	// rpcHandler handles the JSON-RPC requests made by any channel plugins to Icinga Notifications.
@@ -139,7 +142,7 @@ func newPluginSupervisor(ctx context.Context, db *database.DB, logger *zap.Sugar
 		}(stderrR)
 	}
 
-	ps := &pluginSupervisor{cmd: cmd, db: db, logger: l, ctx: ctx, cancel: cancel, ChannelID: chID}
+	ps := &pluginSupervisor{cmd: cmd, db: db, logger: l, ctx: ctx, cancel: cancel, ChannelID: chID, pluginType: pluginType}
 	ps.rpc = jsonrpc.New(ctx, pr, pw, rpcHandler{ps: ps}, l)
 	return ps, nil
 }
