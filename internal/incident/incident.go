@@ -912,7 +912,7 @@ func (i *Incident) notifyContacts(
 		}
 		i.runtimeConfig.RUnlock()
 
-		err := i.notifyContact(obj, contact, ev, ch, notification, rctx)
+		err := i.notifyContact(ctx, obj, contact, ev, ch, notification, rctx)
 		if err != nil {
 			notification.State = NotificationStateFailed
 		} else {
@@ -954,6 +954,7 @@ func (i *Incident) notifyContacts(
 
 // notifyContact notifies the given recipient via a channel.
 func (i *Incident) notifyContact(
+	ctx context.Context,
 	obj *object.Object,
 	contact *recipient.Contact,
 	ev *event.Event,
@@ -987,7 +988,7 @@ func (i *Incident) notifyContact(
 	}
 
 	summary, body := renderNotification(reason, rctx)
-	if err := ch.Notify(contact, incidentPlugin, obj, ev, summary, body); err != nil {
+	if err := ch.Notify(ctx, contact, incidentPlugin, obj, ev, summary, body); err != nil {
 		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
 		return err
 	}
