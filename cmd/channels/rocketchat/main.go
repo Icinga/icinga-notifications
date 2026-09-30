@@ -86,28 +86,20 @@ func (ch *RocketChat) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
+	if len(req.Contact.Addresses) == 0 {
+		return fmt.Errorf("contact user %s does not specify a rocketchat channel or username", req.Contact.FullName)
+	}
+
 	var output bytes.Buffer
 	_, _ = fmt.Fprint(&output, plugin.FormatSubject(req)+"\n\n")
 
 	plugin.FormatMessage(&output, req)
 
-	var roomId string
-	for _, address := range req.Contact.Addresses {
-		if address.Type == "rocketchat" {
-			roomId = address.Address
-			break
-		}
-	}
-
-	if roomId == "" {
-		return fmt.Errorf("contact user %s does not specify a rocketchat channel or username", req.Contact.FullName)
-	}
-
 	message := struct {
 		Channel string `json:"channel"`
 		Text    string `json:"text"`
 	}{
-		Channel: roomId,
+		Channel: req.Contact.Addresses[0].Address,
 		Text:    output.String(),
 	}
 

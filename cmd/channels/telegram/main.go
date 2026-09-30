@@ -105,16 +105,10 @@ func (ch *Telegram) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *Telegram) SendNotification(req *plugin.NotificationRequest) error {
-	var chatID string
-	for _, address := range req.Contact.Addresses {
-		if address.Type == "telegram" {
-			chatID = address.Address
-			break
-		}
-	}
-	if chatID == "" {
+	if len(req.Contact.Addresses) == 0 {
 		return fmt.Errorf("contact %q has no Telegram address", req.Contact.FullName)
 	}
+	chatID := req.Contact.Addresses[0].Address
 
 	var output bytes.Buffer
 	_, _ = fmt.Fprint(&output, plugin.FormatSubject(req)+"\n\n")
