@@ -363,17 +363,10 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
-	var to *mail.Address
-	for _, address := range req.Contact.Addresses {
-		if address.Type == "email" {
-			to = &mail.Address{Name: req.Contact.FullName, Address: address.Address}
-			break
-		}
-	}
-
-	if to == nil {
+	if len(req.Contact.Addresses) == 0 {
 		return fmt.Errorf("contact user %s does not have an e-mail address", req.Contact.FullName)
 	}
+	to := &mail.Address{Name: req.Contact.FullName, Address: req.Contact.Addresses[0].Address}
 
 	var msg bytes.Buffer
 	plugin.FormatMessage(&msg, req)

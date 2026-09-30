@@ -240,6 +240,11 @@ func (c *Channel) Notify(ctx context.Context, contact *recipient.Contact, i cont
 
 	contactStruct := &plugin.Contact{FullName: contact.FullName}
 	for _, addr := range contact.Addresses {
+		// Not every plugin needs to know about every address that a contact has, so we filter
+		// the addresses by type to only include those that are relevant for the plugin.
+		if addr.Type != p.pluginType {
+			continue
+		}
 		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
 	}
 
