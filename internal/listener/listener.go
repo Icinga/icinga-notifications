@@ -20,6 +20,7 @@ import (
 	"github.com/icinga/icinga-go-library/notifications"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/notifications/source"
+	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
@@ -573,6 +574,7 @@ func (l *Listener) modifyIncidentsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	now := time.Now()
 	opts := []StreamOpt[incident.Pair]{
 		WithSendHeaderEarly[incident.Pair](),
 		WithOnError[incident.Pair](errF),
@@ -592,7 +594,7 @@ func (l *Listener) modifyIncidentsHandler(w http.ResponseWriter, r *http.Request
 							pair.Incident.Message = attrs.Message
 						}
 						if attrs.Close.Valid {
-							if err := pair.Incident.Close(ctx, tx); err != nil {
+							if err := pair.Incident.Close(ctx, tx, types.UnixMilli(now)); err != nil {
 								return err
 							}
 						}
