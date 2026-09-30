@@ -232,7 +232,7 @@ func (c *Channel) Restart(logger *zap.SugaredLogger) {
 }
 
 // Notify prepares and sends the notification request, returns a non-error on fails, nil on success
-func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, o *object.Object, ev *event.Event) error {
+func (c *Channel) Notify(ctx context.Context, contact *recipient.Contact, i contracts.Incident, o *object.Object, ev *event.Event) error {
 	p := c.getPlugin()
 	if p == nil {
 		return errors.New("plugin could not be started")
@@ -260,7 +260,13 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, o *ob
 		},
 	}
 
-	return p.SendNotification(c.pluginCtx, req)
+	// Abort the RPC call when either the plugin is stopped or ctx is done, whichever comes first.
+	rpcCtx, cancel := context.WithCancelCause(p.ctx)
+	stopAfterFunc := context.AfterFunc(ctx, func() { cancel(context.Cause(ctx)) })
+	defer stopAfterFunc()
+	defer cancel(nil)
+
+	return p.SendNotification(rpcCtx, req)
 }
 
 // persistValidationError persists the validation error in the database for the channel.
