@@ -239,7 +239,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 
 	if ev.CloseIncident() {
-		if err := i.Close(ctx, tx); err != nil {
+		if err := i.Close(ctx, tx, types.UnixMilli(ev.Time)); err != nil {
 			return err
 		}
 	}
@@ -350,9 +350,9 @@ func (i *Incident) RetriggerEscalations(ctx context.Context, o *object.Object, e
 //
 // If the incident is already recovered, this is a no-op. Returns an error if fails to insert the generated
 // history to the database. You must call [Sync] after this method to persist the incident's recovered state.
-func (i *Incident) Close(ctx context.Context, tx *sqlx.Tx) error {
+func (i *Incident) Close(ctx context.Context, tx *sqlx.Tx, recoveredAt types.UnixMilli) error {
 	if i.RecoveredAt.Time().IsZero() {
-		i.RecoveredAt = types.UnixMilli(time.Now())
+		i.RecoveredAt = recoveredAt
 		i.NextEscalationCheckAt = types.UnixMilli{}
 		i.logger.Info("Received request to close the incident, marking it as recovered")
 
@@ -482,7 +482,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 		hr := &HistoryRow{
 			IncidentID:  i.Id,
-			Time:        types.UnixMilli(time.Now()),
+			Time:        types.UnixMilli(ev.Time),
 			Type:        IncidentSeverityChanged,
 			NewSeverity: ev.Severity,
 			OldSeverity: i.Severity,
@@ -545,7 +545,7 @@ func (i *Incident) handleUnmute(ctx context.Context, tx *sqlx.Tx, ev *event.Even
 
 	hr := &HistoryRow{
 		IncidentID: i.Id,
-		Time:       types.UnixMilli(time.Now()),
+		Time:       types.UnixMilli(ev.Time),
 		Type:       Unmuted,
 		Message:    types.MakeString(ev.MutedReason, types.TransformEmptyStringToNull),
 	}
@@ -567,7 +567,7 @@ func (i *Incident) handleMute(ctx context.Context, tx *sqlx.Tx, ev *event.Event)
 
 	hr := &HistoryRow{
 		IncidentID: i.Id,
-		Time:       types.UnixMilli(time.Now()),
+		Time:       types.UnixMilli(ev.Time),
 		Type:       Muted,
 		Message:    i.MuteReason,
 	}
