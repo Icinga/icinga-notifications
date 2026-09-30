@@ -8,7 +8,7 @@ CREATE TABLE object_source (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 DELETE FROM incident_history;
-DELETE FROM incident_rule_escalation_state;
+DELETE FROM incident_rule_entry_state;
 DELETE FROM incident_rule;
 DELETE FROM incident_contact;
 DELETE FROM incident;

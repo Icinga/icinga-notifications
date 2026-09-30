@@ -145,3 +145,36 @@ func parseManagedValue(value any) (bool, error) {
 		return false, fmt.Errorf(`invalid is_managed value %q, expected either "y" or "n"`, v)
 	}
 }
+
+type NotificationFilter struct {
+	EventType string
+}
+
+func (n *NotificationFilter) EvalEqual(key, value any) (bool, error) {
+	if n.EvalExists(key) {
+		switch key {
+		case "event_type":
+			if s, ok := value.(string); ok && n.EventType == s {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func (n *NotificationFilter) EvalExists(key any) bool {
+	if s, ok := key.(string); ok && s == "event_type" {
+		return true
+	}
+	return false
+}
+
+func (n *NotificationFilter) EvalLike(key, value any) (bool, error) {
+	return false, fmt.Errorf("notification filter does not support wildcard matches")
+}
+func (n *NotificationFilter) EvalLess(key, value any) (bool, error) {
+	return false, fmt.Errorf("notification filter does not support 'less' matches")
+}
+func (n *NotificationFilter) EvalLessOrEqual(key, value any) (bool, error) {
+	return false, fmt.Errorf("notification filter does not support 'less or equal' matches")
+}

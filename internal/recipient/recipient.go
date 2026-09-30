@@ -1,10 +1,13 @@
 package recipient
 
 import (
+	"database/sql"
 	"fmt"
-	"github.com/icinga/icinga-go-library/types"
-	"go.uber.org/zap/zapcore"
 	"time"
+
+	"github.com/icinga/icinga-go-library/types"
+	"github.com/icinga/icinga-notifications/internal/config/baseconf"
+	"go.uber.org/zap/zapcore"
 )
 
 type Recipient interface {
@@ -62,4 +65,12 @@ func ToKey(r Recipient) Key {
 	default:
 		panic(fmt.Sprintf("unexpected recipient type: %T", r))
 	}
+}
+
+type CommonRecipient struct {
+	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+
+	ChannelID sql.NullInt64 `db:"channel_id"`
+	Key       `db:",inline"`
+	Recipient Recipient `db:"-"`
 }

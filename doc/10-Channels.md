@@ -440,6 +440,11 @@ If the channel is unable to send a notification, an `error` response must be rep
 and message. This may be due to channel-specific reasons, such as an email channel where the SMTP server is unavailable,
 or if the channel is missing required configuration values.
 
+The `incident` field is only present when the notification is tied to an incident, i.e. it was triggered by an
+escalation. Notifications triggered directly by a notification rule are not tied to any incident, so `incident` is
+`null` in that case. Channel plugins (and templates such as a `url_template` referencing `.Incident.Id`) must handle
+this `null` case explicitly.
+
 ##### Example SendNotification Request
 
 ```json
