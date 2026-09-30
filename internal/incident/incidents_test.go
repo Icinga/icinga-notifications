@@ -615,9 +615,9 @@ func TestIncidents(t *testing.T) {
 				count++
 				assert.Equal(t, i.ObjectID, entry.ObjectID)
 				assert.Equal(t, tags, entry.Object.Tags)
-				assert.Equal(t, types.MakeString(ch.Name), entry.ChannelName)
+				assert.Equal(t, ch.Name, entry.ChannelName)
 				assert.Equal(t, types.MakeString(contact.FullName), entry.ContactName)
-				assert.Equal(t, types.MakeString(msg), entry.EventMessage)
+				assert.Equal(t, msg, entry.EventMessage)
 				assert.False(t, entry.ContactgroupName.Valid, "contactgroup_name must be an empty string, not null, when there's no contactgroup")
 				assert.False(t, entry.ScheduleName.Valid, "schedule_name must be an empty string, not null, when there's no schedule")
 			}
