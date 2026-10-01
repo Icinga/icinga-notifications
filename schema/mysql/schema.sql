@@ -483,7 +483,7 @@ CREATE TABLE notification_history (
     schedule_id bigint,
     channel_id bigint NOT NULL,
     incident_id bigint,
-    event_message text NOT NULL,
+    event_message longtext NOT NULL,
     state enum('sent', 'failed'),
     triggered_at bigint NOT NULL,
 
