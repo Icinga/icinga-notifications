@@ -30,12 +30,12 @@ type Escalation struct {
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
 func (e *Escalation) IncrementalInitAndValidate() error {
 	if e.ConditionExpr.Valid {
-		cond, err := filter.Parse(e.ConditionExpr.String)
+		f, err := filter.ParseASTExpr(e.ConditionExpr.String)
 		if err != nil {
 			return err
 		}
 
-		e.Condition = cond
+		e.Condition = f
 	}
 
 	if e.FallbackForID.Valid {
@@ -56,8 +56,8 @@ func (e *Escalation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("rule_id", e.RuleID)
 	encoder.AddString("name", e.DisplayName())
 
-	if e.ConditionExpr.Valid && e.ConditionExpr.String != "" {
-		encoder.AddString("condition", e.ConditionExpr.String)
+	if e.Condition != nil {
+		encoder.AddString("condition", e.Condition.String())
 	}
 	if e.FallbackForID.Valid && e.FallbackForID.Int64 != 0 {
 		encoder.AddInt64("fallback_for", e.FallbackForID.Int64)

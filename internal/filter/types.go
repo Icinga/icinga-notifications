@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/pool"
@@ -87,6 +88,20 @@ func (c *Chain) ExtractConditions() []*Condition {
 	return conditions
 }
 
+// String returns a string representation of this Chain for debugging purposes.
+func (c *Chain) String() string {
+	var sb strings.Builder
+	sb.WriteString(`Chain{op: "` + string(c.op) + `", rules: [`)
+	for i, rule := range c.rules {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(rule.String())
+	}
+	sb.WriteString("]}")
+	return sb.String()
+}
+
 // CompOperator is a type used for grouping the individual comparison operators of a filter string.
 type CompOperator string
 
@@ -108,7 +123,7 @@ const (
 // check the available exported methods.
 type Condition struct {
 	op    CompOperator
-	attrs any
+	attrs []string
 	value any
 }
 
@@ -186,32 +201,20 @@ func (c *Condition) ExtractConditions() []*Condition {
 }
 
 // Attributes returns the list of attributes this condition refers to.
-func (c *Condition) Attributes() any { return c.attrs }
+func (c *Condition) Attributes() []string { return c.attrs }
 
 // Value returns the value of this Condition.
 func (c *Condition) Value() any {
 	return c.value
 }
 
-type Exists struct {
-	column string
-}
-
-func (e *Exists) ExtractConditions() []*Condition {
-	return nil
-}
-
-func NewExists(column string) *Exists {
-	return &Exists{column: column}
-}
-
-func (e *Exists) Eval(filterable Filterable) (bool, error) {
-	return filterable.EvalExists(e.column), nil
+// String returns a string representation of this Condition for debugging purposes.
+func (c *Condition) String() string {
+	return `Condition{op: "` + string(c.op) + `", attrs: "` + fmt.Sprint(c.attrs) + `", value: "` + fmt.Sprint(c.value) + `"}`
 }
 
 var (
 	_ Filter = (*Chain)(nil)
-	_ Filter = (*Exists)(nil)
 	_ Filter = (*Condition)(nil)
 )
 
@@ -320,6 +323,23 @@ func UnmarshalJSON(data []byte) (Filter, error) {
 		return condition, nil
 	}
 	return nil, fmt.Errorf("unknown filter operator: %s", op)
+}
+
+// ParseASTExpr parses a filter expression stored as a JSON object with an `ast` field, i.e.
+// `{"ast": <filter JSON>}`, as produced for the rule object filter and escalation condition columns.
+//
+// Returns an error if expr isn't valid JSON or doesn't contain the required `ast` field.
+func ParseASTExpr(expr string) (Filter, error) {
+	data := map[string]json.RawMessage{}
+	if err := json.Unmarshal([]byte(expr), &data); err != nil {
+		return nil, err
+	}
+
+	astBytes, exists := data["ast"]
+	if !exists {
+		return nil, errors.New("missing 'ast' field in filter expression")
+	}
+	return UnmarshalJSON(astBytes)
 }
 
 // isLogicalOp checks if the provided operator is a valid logical operator.

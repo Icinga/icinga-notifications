@@ -142,7 +142,7 @@ filterColumnsLoop:
 	return result
 }
 
-func (e *Event) EvalEqual(attrs, value any) (bool, error) {
+func (e *Event) EvalEqual(attrs []string, value any) (bool, error) {
 	return slices.ContainsFunc(e.retrieveValuesFor(attrs), func(v any) bool {
 		result, err := utils.CompareAny(v, value)
 		if err != nil {
@@ -152,7 +152,7 @@ func (e *Event) EvalEqual(attrs, value any) (bool, error) {
 	}), nil
 }
 
-func (e *Event) EvalLess(attrs, value any) (bool, error) {
+func (e *Event) EvalLess(attrs []string, value any) (bool, error) {
 	return slices.ContainsFunc(e.retrieveValuesFor(attrs), func(v any) bool {
 		result, err := utils.CompareAny(v, value)
 		if err != nil {
@@ -162,7 +162,7 @@ func (e *Event) EvalLess(attrs, value any) (bool, error) {
 	}), nil
 }
 
-func (e *Event) EvalLike(attrs, value any) (bool, error) {
+func (e *Event) EvalLike(attrs []string, value any) (bool, error) {
 	// Wildcard matching can't be implemented with types other than string, so convert it to a string unconditionally.
 	rgx, err := regexp.Compile(fmt.Sprint(value))
 	if err != nil {
@@ -180,7 +180,7 @@ func (e *Event) EvalLike(attrs, value any) (bool, error) {
 	}), nil
 }
 
-func (e *Event) EvalLessOrEqual(attrs, value any) (bool, error) {
+func (e *Event) EvalLessOrEqual(attrs []string, value any) (bool, error) {
 	return slices.ContainsFunc(e.retrieveValuesFor(attrs), func(v any) bool {
 		result, err := utils.CompareAny(v, value)
 		if err != nil {
@@ -190,29 +190,26 @@ func (e *Event) EvalLessOrEqual(attrs, value any) (bool, error) {
 	}), nil
 }
 
-func (e *Event) EvalExists(attrs any) bool { return len(e.retrieveValuesFor(attrs)) > 0 }
+func (e *Event) EvalExists(attrs []string) bool { return len(e.retrieveValuesFor(attrs)) > 0 }
 
 // retrieveValuesFor retrieves the values for the given key from the Relations field of this event.
-func (e *Event) retrieveValuesFor(attrs any) jsonpath.NodeList {
+func (e *Event) retrieveValuesFor(attrs []string) jsonpath.NodeList {
 	if e.evaluatedRelations == nil {
 		e.evaluatedRelations = make(map[string]jsonpath.NodeList)
 	}
 
-	if attrs, ok := attrs.([]string); ok {
-		jpp := pool.GetJSONPathParser()
-		defer pool.PutJSONPathParser(jpp)
+	jpp := pool.GetJSONPathParser()
+	defer pool.PutJSONPathParser(jpp)
 
-		for _, attr := range attrs {
-			attr := fmt.Sprint(attr)
-			nodes, cached := e.evaluatedRelations[attr]
-			if !cached {
-				path := jpp.MustParse(utils.PrefixWithJSONPathRootSelector(attr))
-				nodes = path.Select(e.Relations)
-				e.evaluatedRelations[attr] = nodes
-			}
-			if len(nodes) > 0 {
-				return nodes
-			}
+	for _, attr := range attrs {
+		nodes, cached := e.evaluatedRelations[attr]
+		if !cached {
+			path := jpp.MustParse(utils.PrefixWithJSONPathRootSelector(attr))
+			nodes = path.Select(e.Relations)
+			e.evaluatedRelations[attr] = nodes
+		}
+		if len(nodes) > 0 {
+			return nodes
 		}
 	}
 	return nil
