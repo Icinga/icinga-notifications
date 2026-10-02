@@ -584,7 +584,7 @@ func TestIncidents(t *testing.T) {
 		ev.Time = time.Now()
 		assert.NotZero(t, ev.ID)
 		i := makeIncident(db, logs, runtimeConfig, t, ev)
-		assert.NotZero(t, i.ID())
+		assert.NotZero(t, i.Id)
 		assert.Zero(t, i.RecoveredAt)
 		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
 
@@ -755,7 +755,7 @@ func assertHistoryNotified(t *testing.T, db *database.DB, i *Incident, expected 
 	require.NoError(t, db.GetContext(
 		t.Context(), &notifiedCount,
 		db.Rebind(`SELECT COUNT(*) FROM incident_history WHERE incident_id = ? AND type = 'notified'`),
-		i.ID()))
+		i.Id))
 	assert.Equal(t, int64(expected), notifiedCount)
 }
 

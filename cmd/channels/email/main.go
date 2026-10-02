@@ -3,11 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
 	"database/sql"
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -20,12 +17,12 @@ import (
 	"github.com/emersion/go-smtp"
 	"github.com/google/uuid"
 	"github.com/icinga/icinga-go-library/config"
-	"github.com/icinga/icinga-go-library/notifications"
 	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/jhillyerd/enmime"
+	"go.uber.org/zap/zapcore"
 )
 
 func main() {
@@ -362,16 +359,14 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 	return nil
 }
 
-func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
+func (ch *Email) SendNotification(req *plugin.NotificationRequest) (*plugin.DeliveryResult, error) {
 	if len(req.Contact.Addresses) == 0 {
-		return fmt.Errorf("contact user %s does not have an e-mail address", req.Contact.FullName)
+		return nil, fmt.Errorf("contact user %s does not have an e-mail address", req.Contact.FullName)
 	}
 	to := &mail.Address{Name: req.Contact.FullName, Address: req.Contact.Addresses[0].Address}
 
 	var msg bytes.Buffer
 	plugin.FormatMessage(&msg, req)
-
-	compositeKey := makeStateKey(to, req.Incident)
 
 	ch.mu.Lock()
 	messageID := fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail)
@@ -382,35 +377,30 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 		Header("Message-Id", messageID)
 	ch.mu.Unlock()
 
-	for _, ss := range req.States {
-		if ss.Key != compositeKey {
-			continue
-		}
+	if req.State.Value != "" {
 		var s state
-		if err := json.Unmarshal([]byte(ss.Value), &s); err != nil {
-			return err
+		if err := json.Unmarshal([]byte(req.State.Value), &s); err != nil {
+			ch.notifyLog(zapcore.WarnLevel, "Failed to unmarshal channel state",
+				"state_key", req.State.Key, "state_value", req.State.Value, "error", err)
+		} else {
+			b = b.Header("In-Reply-To", s.LastMessageID).Header("References", s.LastMessageID)
 		}
-		b = b.Header("In-Reply-To", s.LastMessageID).Header("References", s.LastMessageID)
 	}
 
 	if err := b.Text(msg.Bytes()).Send(ch); err != nil {
-		return err
+		return nil, err
 	}
 
-	if req.Incident != nil && req.Incident.IsRecovered {
-		if err := ch.rpcEp.Call(ch.rpcCtx, notifications.MethodDeleteState, []plugin.State{{Key: compositeKey}}, nil); err != nil {
-			slog.ErrorContext(ch.rpcCtx, "Failed to delete channel state", "error", err)
-		}
-	} else if req.Incident != nil {
-		ss := []plugin.State{
-			{Key: compositeKey, Value: state{LastMessageID: messageID}.String()},
-		}
-		if err := ch.rpcEp.Call(ch.rpcCtx, notifications.MethodUpsertState, ss, nil); err != nil {
-			slog.ErrorContext(ch.rpcCtx, "Failed to upsert channel state", "error", err)
-		}
+	if req.Incident != nil && !req.Incident.IsRecovered {
+		return &plugin.DeliveryResult{
+			State: plugin.State{
+				Key:   req.State.Key,
+				Value: state{LastMessageID: messageID}.String(),
+			},
+		}, nil
 	}
 
-	return nil
+	return nil, nil
 }
 
 // Send implements the enmime.Sender interface.
@@ -483,17 +473,13 @@ func (ch *Email) Send(reversePath string, recipients []string, msg []byte) error
 	return client.Quit()
 }
 
-// makeStateKey composes a unique key for the channel state based on the recipient's email address and the incident ID.
-func makeStateKey(to *mail.Address, i *plugin.Incident) string {
-	if i == nil {
-		return ""
+// notifyLog is a helper function to log messages via the RPC endpoint.
+func (ch *Email) notifyLog(lvl zapcore.Level, msg string, fields ...any) {
+	if ch.rpcEp == nil || ch.rpcCtx == nil {
+		slog.Error("RPC endpoint not available, cannot log notification message", "message", msg)
+		return
 	}
-	h := sha256.New()
-	if err := binary.Write(h, binary.BigEndian, i.Id); err != nil {
-		return ""
+	if err := ch.rpcEp.NotifyLog(ch.rpcCtx, lvl, msg, fields...); err != nil {
+		slog.ErrorContext(ch.rpcCtx, "Failed to notify log", "error", err)
 	}
-	if err := binary.Write(h, binary.BigEndian, []byte(to.Address)); err != nil {
-		return ""
-	}
-	return hex.EncodeToString(h.Sum(nil))
 }
