@@ -7,7 +7,7 @@ ALTER TABLE incident_contact ADD COLUMN event_type_whitelist text AFTER role;
 -- Rename rule_escalation to rule_entry.
 RENAME TABLE rule_escalation TO rule_entry;
 ALTER TABLE rule_entry
-    RENAME INDEX pk_rule_escalation TO pk_rule_entry,
+#     RENAME INDEX pk_rule_escalation TO pk_rule_entry,
     RENAME INDEX uk_rule_escalation_rule_id_position TO uk_rule_entry_rule_id_position,
     RENAME INDEX idx_rule_escalation_changed_at TO idx_rule_entry_changed_at,
     DROP FOREIGN KEY fk_rule_escalation_rule,
@@ -22,7 +22,7 @@ ALTER TABLE rule_entry
 -- Rename rule_escalation_recipient to rule_entry_recipient.
 RENAME TABLE rule_escalation_recipient TO rule_entry_recipient;
 ALTER TABLE rule_entry_recipient
-    RENAME INDEX pk_rule_escalation_recipient TO pk_rule_entry_recipient,
+#     RENAME INDEX pk_rule_escalation_recipient TO pk_rule_entry_recipient,
     RENAME COLUMN rule_escalation_id TO rule_entry_id,
     RENAME INDEX idx_rule_escalation_recipient_changed_at TO idx_rule_entry_recipient_changed_at,
     DROP FOREIGN KEY fk_rule_escalation_recipient_rule_escalation,
@@ -38,12 +38,19 @@ ALTER TABLE rule_entry_recipient
     ADD CONSTRAINT fk_rule_entry_recipient_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id),
     ADD CONSTRAINT fk_rule_entry_recipient_channel FOREIGN KEY (channel_id) REFERENCES channel(id);
 
+-- Rename incident_rule_escalation_state to incident_rule_entry_state.
+ALTER TABLE incident_rule_escalation_state
+    DROP FOREIGN KEY fk_incident_rule_escalation_state_rule_escalation,
+    ADD CONSTRAINT fk_incident_rule_escalation_state_rule_entry FOREIGN KEY (rule_escalation_id) REFERENCES rule_entry(id);
+
 -- Rename incident_history.rule_escalation_id to rule_entry_id.
 ALTER TABLE incident_history
     DROP FOREIGN KEY fk_incident_history_incident_rule_escalation_state,
-    DROP FOREIGN KEY fk_incident_history_rule_escalation,
+    DROP FOREIGN KEY fk_incident_history_rule_escalation;
+
+ALTER TABLE incident_history
     RENAME COLUMN rule_escalation_id TO rule_entry_id,
-    ADD CONSTRAINT fk_incident_history_incident_rule_entry_state FOREIGN KEY (incident_id, rule_entry_id) REFERENCES incident_rule_entry_state(incident_id, rule_entry_id),
+    ADD CONSTRAINT fk_incident_history_incident_rule_escalation_state FOREIGN KEY (incident_id, rule_entry_id) REFERENCES incident_rule_escalation_state(incident_id, rule_escalation_id),
     ADD CONSTRAINT fk_incident_history_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id);
 
 -- Rename skipped_notification_history.rule_escalation_id to rule_entry_id.
