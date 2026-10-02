@@ -18,7 +18,7 @@ type ContactRow struct {
 	IncidentID         int64 `db:"incident_id"`
 	recipient.Key      `db:",inline"`
 	Role               recipient.Role   `db:"role"`
-	EventTypeWhitelist types.StringList `db:"event_type_whitelist"`
+	EventTypeWhitelist types.StringList `db:"event_types"`
 	ChangedAt          types.UnixMilli  `db:"changed_at"`
 }
 

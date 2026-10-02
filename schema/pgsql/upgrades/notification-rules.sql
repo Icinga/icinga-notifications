@@ -3,7 +3,7 @@ ALTER TABLE rule ADD COLUMN type rule_type;
 UPDATE rule SET type = 'escalation' WHERE type IS NULL;
 ALTER TABLE rule ALTER COLUMN type SET NOT NULL;
 
-ALTER TABLE incident_contact ADD COLUMN event_type_whitelist text;
+ALTER TABLE incident_contact ADD COLUMN event_types text;
 
 -- Recreate rule_escalation as rule_entry, carrying over the existing rows and their ids.
 CREATE TABLE rule_entry (
