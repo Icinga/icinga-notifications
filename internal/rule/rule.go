@@ -102,7 +102,7 @@ func (r *Rule) Eval(filterable filter.Filterable) (bool, error) {
 	return r.ObjectFilter.Eval(filterable)
 }
 
-// ChannelOrigin identifies the escalation recipient through which a contact's channel was selected.
+// ChannelOrigin identifies the entry recipient through which a contact's channel was selected.
 //
 // A zero value denotes a contact that was added without any rule involvement,
 // e.g. a recipient that subscribed to or manages an incident via the UI.
@@ -118,7 +118,7 @@ type ChannelOrigin struct {
 
 // ContactChannels stores, per contact and channel ID, the origins that selected this channel.
 //
-// When multiple escalation recipients resolve to the same contact and channel, all their origins are
+// When multiple entry recipients resolve to the same contact and channel, all their origins are
 // recorded: the first origin is the one the notification is attributed to, any further ones denote
 // duplicates that would have notified the same contact via the same channel.
 type ContactChannels map[*recipient.Contact][]ChannelOrigin
@@ -140,26 +140,29 @@ func (ch ContactChannels) LoadRecipientChannel(
 	ruleID int64,
 	t time.Time,
 	ruleType Type,
-	isNotifiable func(recipient.Key) bool) {
-	if isNotifiable(r.Key) {
-		origin := ChannelOrigin{
-			ChannelID:      r.ChannelID.Int64,
-			RuleID:         ruleID,
-			RuleEntryID:    r.EntryID,
-			ContactGroupID: r.GroupID.Int64,
-			ScheduleID:     r.ScheduleID.Int64,
-			Role:           recipient.RoleRecipient,
-			RuleType:       ruleType,
-		}
+	isNotifiable func(recipient.Key) bool,
+) {
+	if !isNotifiable(r.Key) {
+		return
+	}
 
-		for _, c := range r.Recipient.GetContactsAt(t) {
-			if r.ChannelID.Valid {
-				origin.ChannelID = r.ChannelID.Int64
-			} else {
-				origin.ChannelID = c.DefaultChannelID
-			}
-			ch[c] = append(ch[c], origin)
+	origin := ChannelOrigin{
+		ChannelID:      r.ChannelID.Int64,
+		RuleID:         ruleID,
+		RuleEntryID:    r.EntryID,
+		ContactGroupID: r.GroupID.Int64,
+		ScheduleID:     r.ScheduleID.Int64,
+		Role:           recipient.RoleRecipient,
+		RuleType:       ruleType,
+	}
+
+	for _, c := range r.Recipient.GetContactsAt(t) {
+		if r.ChannelID.Valid {
+			origin.ChannelID = r.ChannelID.Int64
+		} else {
+			origin.ChannelID = c.DefaultChannelID
 		}
+		ch[c] = append(ch[c], origin)
 	}
 }
 

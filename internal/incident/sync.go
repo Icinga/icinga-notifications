@@ -174,7 +174,7 @@ func (i *Incident) generateNotifications(
 ) ([]*NotificationEntry, error) {
 	var notificationState source.NotificationState
 	suppress := false
-	notifyOnly := ev.JustNotify()
+	notifyOnly := ev.NotificationOnly()
 	if !notifyOnly || !i.IsNew() {
 		suppress = i.IsMuted()
 		if suppress {

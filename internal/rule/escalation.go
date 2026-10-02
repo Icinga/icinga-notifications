@@ -1,7 +1,6 @@
 package rule
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -48,7 +47,7 @@ func (e *Entry) IncrementalInitAndValidate() error {
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
 //
-// This allows us to use `zap.Inline(escalation)` or `zap.Object("rule_entry", escalation)` wherever
+// This allows us to use `zap.Inline(escalation)` or `zap.Object("rule_entry", entry)` wherever
 // fine-grained logging context is needed, without having to add all the individual fields ourselves each time.
 // https://pkg.go.dev/go.uber.org/zap/zapcore#ObjectMarshaler
 func (e *Entry) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
@@ -66,8 +65,8 @@ func (e *Entry) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	return nil
 }
 
-// Eval evaluates the configured escalation filter for the provided filter.
-// Returns always true if there are no configured escalation conditions.
+// Eval evaluates the configured entry filter for the provided filter.
+// Returns always true if there are no configured entry conditions.
 func (e *Entry) Eval(filterable filter.Filterable) (bool, error) {
 	if e.Condition == nil {
 		return true, nil
@@ -118,8 +117,12 @@ func (e *Entry) TableName() string {
 }
 
 type EntryRecipient struct {
-	recipient.CommonRecipient
-	EntryID int64 `db:"rule_entry_id"`
+	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
+
+	ChannelID     types.Int `db:"channel_id"`
+	recipient.Key `db:",inline"`
+	Recipient     recipient.Recipient `db:"-"`
+	EntryID       int64               `db:"rule_entry_id"`
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
@@ -138,5 +141,5 @@ func (r *EntryRecipient) TableName() string {
 
 type ContactChannelPair struct {
 	Contact   *recipient.Contact
-	ChannelID sql.NullInt64
+	ChannelID types.Int
 }

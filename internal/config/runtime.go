@@ -150,13 +150,15 @@ func (r *RuntimeConfig) GetRecipient(k recipient.Key) recipient.Recipient {
 	return nil
 }
 
-// GetRuleEntry returns a *rule.Entry by the given id.
+// GetRuleEscalation returns a *rule.Escalation by the given id.
 // Returns nil if there is no rule escalation with given id.
-func (r *RuntimeConfig) GetRuleEntry(escalationID int64) *rule.Entry {
+func (r *RuntimeConfig) GetRuleEscalation(escalationID int64) *rule.Entry {
 	for _, r := range r.Rules {
-		escalation, ok := r.Entries[escalationID]
-		if ok {
-			return escalation
+		if r.Type == rule.TypeEscalation {
+			escalation, ok := r.Entries[escalationID]
+			if ok {
+				return escalation
+			}
 		}
 	}
 

@@ -147,31 +147,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 
 	var triggerNotifications bool
 	isNew := i.IsNew()
-	var notifications []*NotificationEntry
-	if ev.JustNotify() {
-		err = func() error {
-			i.runtimeConfig.RLock()
-			defer i.runtimeConfig.RUnlock()
-
-			chs := getNonStateNotificationRecipientsChannel(i.runtimeConfig, i.logger, ev)
-			if !isNew {
-				chs = rule.MergeContactChannels(chs, i.getRecipientsChannel(ev.Time, func(rs RecipientState) bool {
-					// TODO: Enable the gate if the web is able to handle the whitelisting on subscribe, manage, ...
-					//if rs.Role == recipient.RoleRecipient || slices.Contains(rs.EventTypeWhitelist.Elements, ev.Type) {
-					//	return i.IsNotifiable(rs)
-					//}
-					//return false
-					return i.IsNotifiable(rs)
-				}))
-			}
-
-			notifications, err = i.generateNotifications(ctx, tx, ev, chs)
-			return err
-		}()
-		if err != nil {
-			return err
-		}
-	} else {
+	if !ev.NotificationOnly() {
 		if isNew {
 			if !ev.OpenOrEscalate() {
 				// There is no active incident and the event cannot open one, so nothing to process. Returning rolls the
@@ -199,56 +175,83 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 				triggerNotifications = true
 			}
 		}
+	}
 
-		err = func() error {
-			i.runtimeConfig.RLock()
-			defer i.runtimeConfig.RUnlock()
+	var notifications []*NotificationEntry
+	err = func() error {
+		i.runtimeConfig.RLock()
+		defer i.runtimeConfig.RUnlock()
 
-			if ev.OpenOrEscalate() {
-				if err := i.applyMatchingRules(ctx, tx, ev); err != nil {
-					return err
-				}
-
-				// Re-evaluate escalations based on the newly evaluated rules.
-				escalations, err := i.evaluateEscalations(ev.Time)
-				if err != nil {
-					return err
-				}
-
-				if err := i.triggerEscalations(ctx, tx, escalations); err != nil {
-					return err
-				}
-
-				// If we have managed to trigger any new escalations, we must trigger notifications as well,
-				// even if the event itself doesn't request it.
-				triggerNotifications = triggerNotifications || len(escalations) > 0
-
-				if !isNew {
-					// Even if the severity didn't change, we want to update the message nonetheless.
-					i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
-				}
-			}
-
-			// The unmute history entry, on the other hand, must be inserted first, so that the notifications generated
-			// below appear logically after the unmute event. This way, when viewing the incident history in the UI, the
-			// unmute event will appear before the notifications that were sent after unmuting.
-			if err := i.handleUnmute(ctx, tx, ev); err != nil {
-				i.logger.Errorw("Cannot insert incident muted history", zap.Error(err))
+		if ev.OpenOrEscalate() {
+			if err := i.applyMatchingRules(ctx, tx, ev); err != nil {
 				return err
 			}
 
-			if triggerNotifications {
-				notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time, i.IsNotifiable))
-				if err != nil {
-					return err
-				}
+			// Re-evaluate escalations based on the newly evaluated rules.
+			escalations, err := i.evaluateEscalations(ev.Time)
+			if err != nil {
+				return err
 			}
-			return nil
-		}()
-		if err != nil {
+
+			if err := i.triggerEscalations(ctx, tx, escalations); err != nil {
+				return err
+			}
+
+			triggerNotifications = triggerNotifications || len(escalations) > 0
+
+			if !isNew {
+				// Even if the severity didn't change, we want to update the message nonetheless.
+				i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
+			}
+		} else if ev.NotificationOnly() {
+			//chs := getNonStateNotificationRecipientsChannel(i.runtimeConfig, i.logger, ev)
+			//if !isNew {
+			//	chs = rule.MergeContactChannels(chs, i.getRecipientsChannel(ev.Time, func(rs RecipientState) bool {
+			//		// TODO: Enable the gate if the web is able to handle the whitelisting on subscribe, manage, ...
+			//		//if rs.Role == recipient.RoleRecipient || slices.Contains(rs.EventTypeWhitelist.Elements, ev.Type) {
+			//		//	return i.IsNotifiable(rs)
+			//		//}
+			//		//return false
+			//		return i.IsNotifiable(rs)
+			//	}))
+			//}
+			//
+			//notifications, err = i.generateNotifications(ctx, tx, ev, chs)
+			notifications, err = i.generateNotifications(ctx, tx, ev, rule.MergeContactChannels(
+				getNonStateNotificationRecipientsChannel(i.runtimeConfig, i.logger, ev),
+				i.getRecipientsChannel(ev.Time, func(rs RecipientState) bool {
+					// TODO: Enable the gate if the web is able to handle the whitelisting on subscribe, manage, ...
+					//if rs.Role == recipient.RoleRecipient || slices.Contains(rs.EventTypeWhitelist.Elements, ev.Type) {
+					//	return i.IsNotifiable(rs)
+					//}
+					//return false
+					return i.IsNotifiable(rs)
+				}),
+			))
 			return err
 		}
 
+		// The unmute history entry, on the other hand, must be inserted first, so that the notifications generated
+		// below appear logically after the unmute event. This way, when viewing the incident history in the UI, the
+		// unmute event will appear before the notifications that were sent after unmuting.
+		if err := i.handleUnmute(ctx, tx, ev); err != nil {
+			i.logger.Errorw("Cannot insert incident muted history", zap.Error(err))
+			return err
+		}
+
+		if triggerNotifications {
+			notifications, err = i.generateNotifications(ctx, tx, ev, i.getRecipientsChannel(ev.Time, i.IsNotifiable))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}()
+	if err != nil {
+		return err
+	}
+
+	if !ev.NotificationOnly() {
 		// So that the incident muted history appears logically after the just generated notifications, we must insert
 		// the muted history last. This way, the history entries will make sense when viewed in chronological order.
 		if err := i.handleMute(ctx, tx, ev); err != nil {
@@ -274,6 +277,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	}
 
 	return i.notifyContacts(ctx, obj, ev, notifications)
+
 }
 
 // RetriggerEscalations tries to re-evaluate the escalations and notify contacts.
@@ -426,7 +430,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				return fmt.Errorf("incident already has a manager, cannot add recipient %q as manager", r)
 			}
 
-			if err := i.addRecipient(ctx, tx, r, recipient.RoleManager, qa.EventTypeWhitelist); err != nil {
+			if err := i.addRecipient(ctx, tx, r, recipient.RoleManager, qa.EventTypes); err != nil {
 				return fmt.Errorf("cannot add recipient %q as manager: %w", r, err)
 			}
 			// Remove the recipient from the incident's recipients list for now, so that we don't notify him about his
@@ -447,7 +451,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				return fmt.Errorf("incident has no manager, cannot demote recipient %q", r)
 			}
 
-			if err := i.addRecipient(ctx, tx, r, recipient.RoleSubscriber, qa.EventTypeWhitelist); err != nil {
+			if err := i.addRecipient(ctx, tx, r, recipient.RoleSubscriber, qa.EventTypes); err != nil {
 				return fmt.Errorf("cannot add recipient %q as subscriber: %w", r, err)
 			}
 			return nil
@@ -838,13 +842,13 @@ func (i *Incident) getRecipientsChannel(t time.Time, isNotifiable func(rs Recipi
 	contactChs := make(rule.ContactChannels)
 	// Load all escalations recipients channels
 	for escalationID := range i.EscalationState {
-		escalation := i.runtimeConfig.GetRuleEntry(escalationID)
+		escalation := i.runtimeConfig.GetRuleEscalation(escalationID)
 		if escalation == nil {
 			i.logger.Debugw("Incident refers unknown escalation, might got deleted", zap.Int64("escalation_id", escalationID))
 			continue
 		}
 
-		contactChs.LoadFromEntryRecipients(escalation, t, rule.TypeEscalation, i.isRecipientNotifiable(isNotifiable))
+		contactChs.LoadFromEntryRecipients(escalation, t, rule.TypeEscalation, i.isRecipientNotifiable())
 	}
 
 	// Check whether all the incident recipients do have an appropriate contact channel configured.
@@ -927,7 +931,7 @@ func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
 		i.runtimeConfig.RLock()
 		defer i.runtimeConfig.RUnlock()
 
-		if escalation := i.runtimeConfig.GetRuleEntry(es.RuleEntryID); escalation != nil {
+		if escalation := i.runtimeConfig.GetRuleEscalation(es.RuleEntryID); escalation != nil {
 			i.Rules[escalation.RuleID] = struct{}{}
 		}
 	})
@@ -960,13 +964,10 @@ func (i *Incident) isRecipientNotifiable(cbs ...func(rs RecipientState) bool) fu
 			return false
 		}
 
-		if len(cbs) > 0 {
-			for _, cb := range cbs {
-				if !cb(state) {
-					return false
-				}
+		for _, cb := range cbs {
+			if !cb(state) {
+				return false
 			}
-			return true
 		}
 
 		return i.IsNotifiable(state)
