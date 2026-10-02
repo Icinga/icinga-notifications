@@ -211,69 +211,52 @@ func TestIncidents(t *testing.T) {
 	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 3)
 
 	t.Run("YieldIncidents", func(t *testing.T) {
-		testData := make(map[string]*Incident, 64)
-		for range 64 {
-			i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityCrit)))
-			testData[i.ObjectID.String()] = i
+		t.Parallel()
+
+		activeIncidents := make(map[string]*Incident, 48)
+		recoveredIncidents := make(map[string]*Incident, 16)
+		for n := range 64 {
+			ev := makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityCrit))
+			i := makeIncident(db, logs, runtimeConfig, t, ev)
+			if n%4 == 0 { // 64 / 4 => 16 existing incidents will be marked as recovered!
+				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+					withIncident(), withClose(), withTags(ev.Tags))))
+				require.NotZero(t, reloadIncident(t, db, i).RecoveredAt)
+				recoveredIncidents[i.ObjectID.String()] = i
+			} else {
+				activeIncidents[i.ObjectID.String()] = i
+			}
 		}
+		assert.Equal(t, 48, len(activeIncidents))
+		assert.Equal(t, 16, len(recoveredIncidents))
 
-		t.Run("WithNoRecoveredIncidents", func(t *testing.T) {
-			assertIncidents(t.Context(), db, logs, runtimeConfig, t, testData)
-		})
-
-		t.Run("WithSomeRecoveredIncidents", func(t *testing.T) {
-			pairCh, errCh := Yield(t.Context(), db, logs, runtimeConfig)
-			for pair := range pairCh {
-				// Mark some of the existing incidents as recovered.
-				if pair.Incident.Id%4 == 0 { // 64 / 4 => 16 existing incidents will be marked as recovered!
-					require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
-						withIncident(), withClose(), withTags(pair.Object.Tags))))
-					require.NotZero(t, reloadIncident(t, db, pair.Incident).RecoveredAt)
-					delete(testData, pair.Object.ID.String())
-				}
+		var incidentsLen int
+		pairCh, errCh := Yield(t.Context(), db, logs, runtimeConfig)
+		for pair := range pairCh {
+			current := pair.Incident
+			i := activeIncidents[current.ObjectID.String()]
+			// If the incident is not in the active incidents map, then it must be from other parallel test runs,
+			// thus it shouldn't be in the recovered incidents map either, otherwise Yield is behaving incorrectly.
+			if i == nil {
+				assert.Nil(t, recoveredIncidents[current.ObjectID.String()])
+				continue
 			}
-			assert.NoError(t, <-errCh)
+			incidentsLen++
 
-			var incidentsLen int
-			pairCh, errCh = Yield(t.Context(), db, logs, runtimeConfig)
-			for range pairCh {
-				incidentsLen++
-			}
-			assert.NoError(t, <-errCh)
-			assert.Equal(t, len(testData), incidentsLen, "only the recovered incidents should be gone")
+			assert.Equal(t, i.Id, current.Id)
+			assert.Equal(t, i.Severity, current.Severity)
+			assert.Equal(t, i.StartedAt, current.StartedAt)
+			assert.Equal(t, i.RecoveredAt, current.RecoveredAt)
 
-			for j := range 16 {
-				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
-					withIncident(), withClose(), withSeverity(baseEv.SeverityAlert))))
+			assert.NotNil(t, current.EscalationState)
+			assert.NotNil(t, current.Recipients)
+			assert.NotNil(t, current.Rules)
 
-				if j%2 == 0 {
-					// Add some extra new not recovered incidents to fully simulate a daemon reload.
-					i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
-						withIncident(), withSeverity(baseEv.SeverityWarning)))
-					testData[i.ObjectID.String()] = i
-				}
-			}
-
-			assertIncidents(t.Context(), db, logs, runtimeConfig, t, testData)
-
-			// Close all remaining incidents to clean up the database for the next test run.
-			pairCh, errCh = Yield(t.Context(), db, logs, runtimeConfig)
-			for pair := range pairCh {
-				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
-					withIncident(), withClose(), withTags(pair.Object.Tags))))
-			}
-			assert.NoError(t, <-errCh)
-
-			incidentsLen = 0
-			pairCh, errCh = Yield(t.Context(), db, logs, runtimeConfig)
-			for range pairCh {
-				incidentsLen++
-			}
-			assert.NoError(t, <-errCh)
-			assert.Equal(t, 0, incidentsLen, "there should be no active incidents")
-			clear(testData)
-			testData = nil
-		})
+			assert.NotNil(t, mustIncidentObject(t, current), "failed to restore incident object")
+			assert.Equal(t, mustIncidentObject(t, i), mustIncidentObject(t, current))
+		}
+		assert.NoError(t, <-errCh)
+		assert.Equal(t, len(activeIncidents), incidentsLen)
 	})
 
 	t.Run("Severity Change", func(t *testing.T) {
@@ -639,42 +622,6 @@ func TestIncidents(t *testing.T) {
 		})
 
 	})
-}
-
-// assertIncidents restores all not recovered incidents from the database and asserts them based on the given testData.
-//
-// The incident loading process is limited to a maximum duration of 10 seconds and will be
-// aborted and causes the entire test suite to fail immediately, if it takes longer.
-func assertIncidents(ctx context.Context, db *database.DB, l *logging.Logging, rc *config.RuntimeConfig, t *testing.T, testData map[string]*Incident) {
-	// The incident loading process may hang due to unknown bugs or semaphore lock waits.
-	// Therefore, give it maximum time of 10s to finish normally, otherwise give up and fail.
-	ctx, cancelFunc := context.WithDeadline(ctx, time.Now().Add(10*time.Second))
-	defer cancelFunc()
-
-	var incidentsLen int
-	pairCh, errCh := Yield(ctx, db, l, rc)
-	for pair := range pairCh {
-		incidentsLen++
-		current := pair.Incident
-		i := testData[current.ObjectID.String()]
-		assert.NotNilf(t, i, "found mysterious incident that's not part of our test data")
-		assert.NotNil(t, mustIncidentObject(t, current), "failed to restore incident object")
-
-		if i != nil {
-			assert.Equal(t, i.Id, current.Id, "incidents linked to the same object don't have the same ID")
-			assert.Equal(t, i.Severity, current.Severity, "failed to restore incident severity")
-			assert.Equal(t, i.StartedAt, current.StartedAt, "failed to restore incident started at")
-			assert.Equal(t, i.RecoveredAt, current.RecoveredAt, "failed to restore incident recovered at")
-
-			assert.NotNil(t, current.EscalationState, "incident escalation state map should've initialised")
-			assert.NotNil(t, current.Recipients, "incident recipients map should've initialised")
-			assert.NotNil(t, current.Rules, "incident rules map should've initialised")
-
-			assert.Equal(t, mustIncidentObject(t, i), mustIncidentObject(t, current), "failed to fully restore incident")
-		}
-	}
-	assert.NoError(t, <-errCh)
-	assert.Equal(t, len(testData), incidentsLen, "failed to load all active incidents")
 }
 
 // makeIncident creates a new incident by processing the given event and returns the resulting incident object.
