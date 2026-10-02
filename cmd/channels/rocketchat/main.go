@@ -85,9 +85,9 @@ func (ch *RocketChat) SetConfig(jsonStr json.RawMessage) error {
 	return nil
 }
 
-func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
+func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) (*plugin.DeliveryResult, error) {
 	if len(req.Contact.Addresses) == 0 {
-		return fmt.Errorf("contact user %s does not specify a rocketchat channel or username", req.Contact.FullName)
+		return nil, fmt.Errorf("contact user %s does not specify a rocketchat channel or username", req.Contact.FullName)
 	}
 
 	var output bytes.Buffer
@@ -105,7 +105,7 @@ func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 
 	body, err := json.Marshal(message)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	ch.mu.Lock()
@@ -116,7 +116,7 @@ func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 
 	request, err := http.NewRequest(http.MethodPost, url+"/api/v1/chat.postMessage", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	request.Header.Set("X-Auth-Token", token)
@@ -127,15 +127,15 @@ func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) error {
 	//nolint:bodyclose // False positive, drainAndClose is called in the defer statement below.
 	resp, err := client.Do(request) // #nosec G704 -- no SSRF, trusted user input
 	if err != nil {
-		return fmt.Errorf("error while sending http request to rocketchat server: %w", err)
+		return nil, fmt.Errorf("error while sending http request to rocketchat server: %w", err)
 	}
 	defer drainAndClose(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		return errors.New(resp.Status)
+		return nil, errors.New(resp.Status)
 	}
 
-	return nil
+	return nil, nil
 }
 
 // drainAndClose reads and discards the remaining data from the provided io.ReadCloser and then closes it.
