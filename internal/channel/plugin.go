@@ -70,71 +70,74 @@ func newPluginSupervisor(ctx context.Context, db *database.DB, logger *zap.Sugar
 		return nil, fmt.Errorf("failed to create stdout pipe for channel plugin process: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
 	// Set up a pipe for the plugin's stderr to capture and log any crashes or error messages.
 	// This is important because if the plugin crashes, we want to know why, and stderr is where
 	// such messages are typically sent.
-	cmd.Stderr = func() *os.File {
-		r, w, err := os.Pipe()
-		if err != nil {
-			logger.Warnw("Failed to create pipe for channel plugin stderr", zap.Error(err))
-			return os.Stderr
-		}
-
-		go func() {
-			defer func() {
-				_ = r.Close()
-				_ = w.Close()
-			}()
-
-			const maxBufSize = 512 * 1024
-			buf := new(bytes.Buffer)
-			flush := func() {
-				if buf.Len() > 0 {
-					logger.Errorw("Channel plugin stderr", zap.Int("pid", cmd.Process.Pid), zap.String("stderr", buf.String()))
-					buf.Reset()
-				}
-			}
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-
-				default:
-					// Plugin might literally be spamming stderr, so flush before we read more data to avoid excessive memory usage.
-					flush()
-					if err := r.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
-						logger.Warnw("Failed to set read deadline for channel plugin stderr pipe", zap.Error(err))
-						return
-					}
-					// Read up to 512KiB from the plugin's stderr pipe. This is a safeguard to prevent excessive memory
-					// usage from malicious or misbehaving plugins that might write large amounts of data to stderr.
-					if n, err := buf.ReadFrom(io.LimitReader(r, maxBufSize)); err != nil {
-						if errors.Is(err, os.ErrDeadlineExceeded) {
-							continue
-						}
-						logger.Errorw("Failed to read from channel plugin stderr pipe", zap.Error(err))
-						return
-					} else if n == 0 {
-						// buf.ReadFrom is never supposed to return 0 bytes read unless we've reached io.EOF,
-						// but that error is not returned by buf.ReadFrom, so treat it n == 0 as eof and exit the loop.
-						flush()
-						return
-					}
-				}
-			}
-		}()
-		return w
-	}()
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		logger.Warnw("Failed to create pipe for channel plugin stderr", zap.Error(err))
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stderr = stderrW
+		// Once Start has returned, the plugin process has its own copy of the write end (or none at all if Start
+		// failed), so close ours when returning.
+		defer func() { _ = stderrW.Close() }()
+	}
 
 	if err := cmd.Start(); err != nil {
-		cancel() // This will also cause the write end of the stderr pipe to be closed if we created new one for it.
+		if stderrR != nil {
+			_ = stderrR.Close()
+		}
 		return nil, fmt.Errorf("failed to start channel plugin process: %w", err)
 	}
 
 	l := logger.With(zap.Int("pid", cmd.Process.Pid))
 	l.Debug("Successfully started channel plugin process")
+
+	ctx, cancel := context.WithCancel(ctx)
+	if stderrR != nil {
+		go func(r *os.File) {
+			defer func() { _ = r.Close() }()
+
+			const maxBufSize = 512 * 1024
+			buf := new(bytes.Buffer)
+			flush := func() {
+				if buf.Len() > 0 {
+					l.Errorw("Channel plugin stderr", zap.String("stderr", buf.String()))
+					buf.Reset()
+				}
+			}
+			defer flush() // Flush any remaining data in the buffer when the goroutine exits.
+
+			for ctx.Err() == nil {
+				flush()
+				if err := r.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+					l.Warnw("Failed to set read deadline for channel plugin stderr pipe", zap.Error(err))
+					return
+				}
+				// Read up to 512KiB from the plugin's stderr pipe. This is a safeguard to prevent excessive memory
+				// usage from malicious or misbehaving plugins that might write large amounts of data to stderr.
+				if n, err := buf.ReadFrom(io.LimitReader(r, maxBufSize)); err != nil {
+					if errors.Is(err, os.ErrDeadlineExceeded) {
+						continue
+					}
+					l.Errorw("Failed to read from channel plugin stderr pipe", zap.Error(err))
+					return
+				} else if n == 0 {
+					// buf.ReadFrom is never supposed to return 0 bytes read unless we've reached io.EOF,
+					// but that error is not returned by buf.ReadFrom, so treat n == 0 as EOF.
+					return
+				}
+			}
+
+			// ctx was canceled, but the pipe may still contain the plugin's last words, e.g., its crash message.
+			// Read whatever is left without blocking for long, as the pipe might never see EOF if a process that
+			// inherited the plugin's stderr is still running.
+			if err := r.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err == nil {
+				_, _ = buf.ReadFrom(io.LimitReader(r, maxBufSize))
+			}
+		}(stderrR)
+	}
 
 	ps := &pluginSupervisor{cmd: cmd, db: db, logger: l, ctx: ctx, cancel: cancel, ChannelID: chID}
 	ps.rpc = jsonrpc.New(ctx, pr, pw, rpcHandler{ps: ps}, l)
