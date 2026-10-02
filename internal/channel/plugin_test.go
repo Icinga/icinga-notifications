@@ -9,12 +9,16 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/daemon"
+	"github.com/icinga/icinga-notifications/internal/event"
+	"github.com/icinga/icinga-notifications/internal/object"
+	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/testutils"
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
@@ -30,21 +34,16 @@ func TestPlugin(t *testing.T) {
 
 	db := testutils.GetTestDB(t.Context(), t, &daemon.Config().Database)
 	logs := testutils.GetTestLogging(t)
+	logger := logs.GetChildLogger("channel").Desugar()
 
 	UpsertPlugins(t.Context(), daemon.Config().ChannelsDir, logs.GetChildLogger("channel"), db)
 
-	cleaner := testutils.NewDBCleaner("channel_state", "channel")
+	cleaner := testutils.NewDBCleaner("channel_state", "channel", "incident", "object")
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		cleaner.Clean(ctx, t, db)
 	})
-
-	// assembleDBCleanupConditions is a helper function to add cleanup conditions for the database tables used in the tests.
-	assembleDBCleanupConditions := func(channelID int64) {
-		cleaner.Add("channel", fmt.Sprintf("id = %d", channelID))
-		cleaner.Add("channel_state", fmt.Sprintf("channel_id = %d", channelID))
-	}
 
 	// getPluginS is a helper function to retrieve the pluginSupervisor from the channel's pluginCh channel.
 	getPluginS := func(ch *Channel) *pluginSupervisor {
@@ -59,9 +58,7 @@ func TestPlugin(t *testing.T) {
 	t.Run("Config Reload", func(t *testing.T) {
 		t.Parallel()
 
-		ch := makeTestChannel(t, db, logs.GetChildLogger("channel").Desugar(), "sleepy1", "sleep", `{"duration": "2s"}`)
-
-		assembleDBCleanupConditions(ch.ID)
+		ch := makeTestChannel(t, db, cleaner, logger, "sleepy1", "sleep", `{"duration": "2s","success":true}`)
 
 		var plugin1 *pluginSupervisor
 		require.Eventually(t, func() bool { plugin1 = getPluginS(ch); return plugin1 != nil }, 5*time.Second, 100*time.Millisecond)
@@ -71,22 +68,26 @@ func TestPlugin(t *testing.T) {
 		checkSleepy := func(timeout time.Duration, expectedDuration time.Duration) {
 			ctx, cancel := context.WithTimeout(t.Context(), timeout)
 			defer cancel()
-			assert.ErrorContains(t,
-				plugin1.SendNotification(ctx, makeTestRequest("sleep", false, false)),
-				fmt.Sprintf("plugin slept for %s", expectedDuration))
+			res, err := ch.Notify(ctx, makeContact("sleep"), makeIncident(false, false), makeObj(), makeEvent(t))
+			assert.NoError(t, err)
+			assert.NotNil(t, res)
+			if res != nil {
+				assert.True(t, res.State.IsZero())
+				assert.Equal(t, fmt.Sprintf("Slept for %s", expectedDuration), res.Details["message"])
+			}
 		}
 		checkSleepy(3*time.Second, 2*time.Second)
 
 		var wg sync.WaitGroup
 		// Update the channel's configuration to simulate a DB config change and trigger a plugin reload.
-		ch.Config = `{"duration": "3s"}`
+		ch.Config = `{"duration": "3s","success":true}`
 		ch.restartCh <- newConfig{ctype: ch.Type, config: ch.Config}
 		require.Eventually(t, func() bool { return getPluginS(ch) == plugin1 }, 5*time.Second, 100*time.Millisecond)
 		wg.Go(func() { checkSleepy(4*time.Second, 3*time.Second) })
 
-		// Now, let's change the config again, but this with invalid config to simulate a plugin
+		// Now, let's change the config again, but this time with invalid config to simulate a plugin
 		// config change that fails validation and doesn't trigger a restart.
-		ch.Config = `{"duration": "invalid"}`
+		ch.Config = `{"duration": "invalid","success":true}`
 		ch.restartCh <- newConfig{ctype: ch.Type, config: ch.Config}
 		require.Eventually(t, func() bool { return getPluginS(ch) == plugin1 }, 5*time.Second, 100*time.Millisecond)
 		// Nothing should have changed, so the plugin should still sleep for 3 seconds.
@@ -96,107 +97,100 @@ func TestPlugin(t *testing.T) {
 		// Now, let's change the type to simulate a plugin type change and trigger a full restart.
 		ch.Type = "webhook"
 		ch.restartCh <- newConfig{ctype: ch.Type, config: `{}`}
-		var plugin2 *pluginSupervisor
 		require.Eventually(t, func() bool {
-			plugin2 = getPluginS(ch)
-			return plugin2 != nil && plugin2 != plugin1
+			p := getPluginS(ch)
+			return p != nil && p != plugin1
 		}, 5*time.Second, 100*time.Millisecond, "new plugin should be started after type change")
-		require.Error(t, plugin2.SendNotification(t.Context(), makeTestRequest("sleep", false, false)))
+
+		res, err := ch.Notify(t.Context(), makeContact("webhook"), makeIncident(false, false), makeObj(), makeEvent(t))
+		require.Error(t, err)
+		require.Nil(t, res)
 	})
 
 	t.Run("Plugin Crash Recovery", func(t *testing.T) {
 		t.Parallel()
 
-		ch := makeTestChannel(t, db, logs.GetChildLogger("channel").Desugar(), "sleepy2", "sleep", `{"duration": "1s"}`)
-
-		assembleDBCleanupConditions(ch.ID)
+		ch := makeTestChannel(t, db, cleaner, logger, "sleepy2", "sleep", `{"duration": "1s","success":true}`)
 
 		var plugin1 *pluginSupervisor
 		require.Eventually(t, func() bool { plugin1 = getPluginS(ch); return plugin1 != nil }, 5*time.Second, 100*time.Millisecond)
 		require.NotNil(t, plugin1)
 		require.NoError(t, plugin1.rpc.Conn().Close()) // Simulate a plugin crash by closing the RPC connection.
 
-		var plugin2 *pluginSupervisor
-		require.Eventually(t, func() bool { plugin2 = getPluginS(ch); return plugin2 != nil && plugin2 != plugin1 }, 5*time.Second, 100*time.Millisecond)
-		require.ErrorContains(t,
-			plugin2.SendNotification(t.Context(), makeTestRequest("sleep", false, false)),
-			"plugin slept for 1s")
+		require.Eventually(t, func() bool { p := getPluginS(ch); return p != nil && p != plugin1 }, 5*time.Second, 100*time.Millisecond)
+
+		res, err := ch.Notify(t.Context(), makeContact("sleep"), makeIncident(false, false), makeObj(), makeEvent(t))
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		require.Equal(t, "Slept for 1s", res.Details["message"])
 	})
 
 	t.Run("Plugin State Management", func(t *testing.T) {
 		t.Parallel()
 
-		ch := makeTestChannel(t, db, logs.GetChildLogger("channel").Desugar(), "sleepy3", "sleep", `{"duration": "1s", "persist_state": true}`)
-
-		assembleDBCleanupConditions(ch.ID)
+		ch := makeTestChannel(t, db, cleaner, logger, "sleepy3", "sleep", `{"duration":"1s","persist_state":true,"success":true}`)
 
 		var plugin1 *pluginSupervisor
 		require.Eventually(t, func() bool { plugin1 = getPluginS(ch); return plugin1 != nil }, 5*time.Second, 100*time.Millisecond)
 		require.NotNil(t, plugin1)
 
+		notify := func(ch *Channel, i *plugin.Incident, o *object.Object, ev *event.Event) {
+			res, err := ch.Notify(t.Context(), makeContact("sleep"), i, o, ev)
+			require.NoError(t, err)
+			require.NotNil(t, res)
+		}
+
 		// Simulate sending a notification and persisting state.
-		req := makeTestRequest("sleep", false, false)
-		require.ErrorContains(t, plugin1.SendNotification(t.Context(), req), "plugin slept for 1s")
-		stateBefore, err := getStateByChannelID(t.Context(), db, ch.ID)
-		require.NoError(t, err)
-		require.Len(t, stateBefore, 1)
+		i, o, ev := makePersistedIncidentData(t, db, cleaner, false, false)
+		notify(ch, i, o, ev)
+		require.Len(t, getStateByChannelID(t, db, ch.ID), 1)
 
-		// Now, let's simulate a recovery scenario by sending a recovered notification and checking if the state is cleaned up.
-		req.Incident.IsRecovered = true
-		require.ErrorContains(t, plugin1.SendNotification(t.Context(), req), "plugin slept for 1s")
-		stateAfter, err := getStateByChannelID(t.Context(), db, ch.ID)
-		require.NoError(t, err)
-		require.Len(t, stateAfter, 0)
+		// Test whether using a different channel with the same incident and recipient type will also persist state correctly.
+		ch2 := makeTestChannel(t, db, cleaner, logger, "sleepy3.2", "sleep", `{"duration":"1s","persist_state":true,"success":true}`)
+		require.Eventually(t, func() bool { return getPluginS(ch2) != nil }, 5*time.Second, 100*time.Millisecond)
+		notify(ch2, i, o, ev)
+		require.Len(t, getStateByChannelID(t, db, ch2.ID), 1)
+		require.Len(t, getStateByChannelID(t, db, ch.ID), 1)
 
-		req1 := makeTestRequest("sleep", true, false)
-		require.ErrorContains(t, plugin1.SendNotification(t.Context(), req1), "plugin slept for 1s")
-		req1.Incident.IsMuted = false
-		require.ErrorContains(t, plugin1.SendNotification(t.Context(), req1), "plugin slept for 1s")
+		// Send another notification with the same incident to ensure state is updated and not duplicated.
+		i.IsMuted = true
+		notify(ch, i, o, ev)
+		require.Len(t, getStateByChannelID(t, db, ch.ID), 1)
 
-		states, err := getStateByChannelID(t.Context(), db, ch.ID)
-		require.NoError(t, err)
-		require.Len(t, states, 1)
+		i2, o2, ev2 := makePersistedIncidentData(t, db, cleaner, false, false)
+		notify(ch, i2, o2, ev2)
 
-		req2 := makeTestRequest("sleep", false, false)
-		require.ErrorContains(t, plugin1.SendNotification(t.Context(), req2), "plugin slept for 1s")
+		i3, o3, ev3 := makePersistedIncidentData(t, db, cleaner, false, false)
+		notify(ch, i3, o3, ev3)
+		// At this point, we should have 3 states in the database.
+		require.Len(t, getStateByChannelID(t, db, ch.ID), 3)
 
-		req3 := makeTestRequest("sleep", false, false)
-		require.ErrorContains(t, plugin1.SendNotification(t.Context(), req3), "plugin slept for 1s")
-
-		states, err = getStateByChannelID(t.Context(), db, ch.ID)
-		require.NoError(t, err)
-		require.Len(t, states, 3)
-
-		req1.Incident.IsRecovered = true
-		require.ErrorContains(t, plugin1.SendNotification(t.Context(), req1), "plugin slept for 1s")
-
-		states, err = getStateByChannelID(t.Context(), db, ch.ID)
-		require.NoError(t, err)
-		require.Len(t, states, 2)
+		// Sending a notification with a recovered incident should not persist a new state.
+		i4, o4, ev4 := makePersistedIncidentData(t, db, cleaner, false, true)
+		notify(ch, i4, o4, ev4)
+		notify(ch2, i4, o4, ev4)
+		require.Len(t, getStateByChannelID(t, db, ch.ID), 3)
+		require.Len(t, getStateByChannelID(t, db, ch2.ID), 1)
 
 		// Now, let's simulate a plugin type change and ensure that the state is cleaned up in the database.
 		ch.Type = "webhook"
 		ch.restartCh <- newConfig{ctype: ch.Type, config: `{}`}
-		var plugin2 *pluginSupervisor
-		require.Eventually(t, func() bool { plugin2 = getPluginS(ch); return plugin2 != nil && plugin2 != plugin1 }, 5*time.Second, 100*time.Millisecond)
-
-		states, err = getStateByChannelID(t.Context(), db, ch.ID)
-		require.NoError(t, err)
-		require.Len(t, states, 0)
+		require.Eventually(t, func() bool { p := getPluginS(ch); return p != nil && p != plugin1 }, 5*time.Second, 100*time.Millisecond)
+		require.Len(t, getStateByChannelID(t, db, ch.ID), 0)
 	})
 
 	t.Run("Spamming Stderr", func(t *testing.T) {
 		t.Parallel()
 
 		// Use a noop logger here, otherwise the test output will be spammed with the plugin's stderr output.
-		ch := makeTestChannel(t, db, zap.NewNop(), "sleepy4", "sleep", `{"duration": "1s", "spam_stderr": true}`)
+		ch := makeTestChannel(t, db, cleaner, zap.NewNop(), "sleepy4", "sleep", `{"duration":"1s","spam_stderr":true,"success":true}`)
 
-		assembleDBCleanupConditions(ch.ID)
-
-		var ps *pluginSupervisor
-		require.Eventually(t, func() bool { ps = getPluginS(ch); return ps != nil }, 5*time.Second, 100*time.Millisecond)
-		req := makeTestRequest("sleep", false, false)
-		require.ErrorContains(t, ps.SendNotification(t.Context(), req), "plugin slept for 1s")
+		require.Eventually(t, func() bool { return getPluginS(ch) != nil }, 5*time.Second, 100*time.Millisecond)
+		res, err := ch.Notify(t.Context(), makeContact("sleep"), makeIncident(false, false), makeObj(), makeEvent(t))
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		require.True(t, res.State.IsZero())
+		require.Equal(t, "Slept for 1s", res.Details["message"])
 	})
 
 	t.Run("Stderr Read Timeout", func(t *testing.T) {
@@ -204,65 +198,66 @@ func TestPlugin(t *testing.T) {
 
 		// The read timeout used for reading the plugin's stderr is 10 seconds, so we set the plugin's
 		// sleep duration to 12 seconds to trigger a timeout.
-		ch := makeTestChannel(t, db, zap.NewNop(), "sleepy5", "sleep", `{"duration": "12s"}`)
+		ch := makeTestChannel(t, db, cleaner, zap.NewNop(), "sleepy5", "sleep", `{"duration": "12s","success":true}`)
 
-		assembleDBCleanupConditions(ch.ID)
-
-		var ps *pluginSupervisor
-		require.Eventually(t, func() bool { ps = getPluginS(ch); return ps != nil }, 5*time.Second, 100*time.Millisecond)
-		req := makeTestRequest("sleep", false, false)
-		require.ErrorContains(t, ps.SendNotification(t.Context(), req), "plugin slept for 12s")
+		require.Eventually(t, func() bool { return getPluginS(ch) != nil }, 5*time.Second, 100*time.Millisecond)
+		res, err := ch.Notify(t.Context(), makeContact("sleep"), makeIncident(false, false), makeObj(), makeEvent(t))
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		require.Equal(t, "Slept for 12s", res.Details["message"])
 	})
 
 	t.Run("Plugin Context Cancellation", func(t *testing.T) {
 		t.Parallel()
 
-		ch := makeTestChannel(t, db, zap.NewNop(), "sleepy6", "sleep", `{"duration": "1s", "persist_state": true}`)
+		ch := makeTestChannel(t, db, cleaner, zap.NewNop(), "sleepy6", "sleep", `{"duration":"1s","persist_state":true,"success":true}`)
 
-		assembleDBCleanupConditions(ch.ID)
+		require.Eventually(t, func() bool { return getPluginS(ch) != nil }, 5*time.Second, 100*time.Millisecond)
 
-		var ps *pluginSupervisor
-		require.Eventually(t, func() bool { ps = getPluginS(ch); return ps != nil }, 5*time.Second, 100*time.Millisecond)
-
-		assert.ErrorContains(t,
-			ps.SendNotification(t.Context(), makeTestRequest("sleep", false, false)),
-			"plugin slept for 1s")
-		assert.ErrorContains(t,
-			ps.SendNotification(t.Context(), makeTestRequest("sleep", false, false)),
-			"plugin slept for 1s")
-
-		states, err := getStateByChannelID(t.Context(), db, ch.ID)
+		i, o, ev := makePersistedIncidentData(t, db, cleaner, false, false)
+		res, err := ch.Notify(t.Context(), makeContact("sleep"), i, o, ev)
 		require.NoError(t, err)
-		require.Len(t, states, 2)
+		require.NotNil(t, res)
+		require.Equal(t, "Slept for 1s", res.Details["message"])
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		res, err = ch.Notify(ctx, makeContact("sleep"), makeIncident(false, false), makeObj(), makeEvent(t))
+		require.ErrorIs(t, err, context.Canceled)
+		require.Nil(t, res)
+
+		require.Len(t, getStateByChannelID(t, db, ch.ID), 1)
 
 		ch.Stop(true) // Simulate channel deletion, which cancels the plugin context with ErrChannelDeleted.
 		<-ch.pluginCh
-		states, err = getStateByChannelID(t.Context(), db, ch.ID)
-		require.NoError(t, err)
-		require.Len(t, states, 0, "plugin state should be cleaned up after channel deletion")
+		require.Len(t, getStateByChannelID(t, db, ch.ID), 0)
 	})
 
 	t.Run("Invalid State", func(t *testing.T) {
 		t.Parallel()
 
-		config := `{"duration": "1s", "persist_state": true, "use_invalid_state_key": true}`
-		ch := makeTestChannel(t, db, logs.GetChildLogger("channel").Desugar(), "sleepy7", "sleep", config)
+		config := `{"duration": "1s", "persist_state": true, "use_invalid_state_value": true, "success": true}`
+		ch := makeTestChannel(t, db, cleaner, logger, "sleepy7", "sleep", config)
 
-		assembleDBCleanupConditions(ch.ID)
+		require.Eventually(t, func() bool { return getPluginS(ch) != nil }, 5*time.Second, 100*time.Millisecond)
 
-		var ps *pluginSupervisor
-		require.Eventually(t, func() bool { ps = getPluginS(ch); return ps != nil }, 5*time.Second, 100*time.Millisecond)
-		// The sleep plugins sends any errors received from Icinga Notifications back to the SendNotification caller.
-		assert.ErrorContains(t,
-			ps.SendNotification(t.Context(), makeTestRequest("sleep", false, false)),
-			"jsonrpc2: code -32602 message: invalid state key, must be non-empty and at most 255 chars")
+		i, o, ev := makePersistedIncidentData(t, db, cleaner, false, false)
+		res, err := ch.Notify(t.Context(), makeContact("sleep"), i, o, ev)
+		require.NoError(t, err)
+		require.NotNil(t, res)
 
-		config = `{"duration": "1s", "persist_state": true, "use_invalid_state_value": true}`
-		ch.restartCh <- newConfig{ctype: ch.Type, config: config}
-		require.Eventually(t, func() bool { ps = getPluginS(ch); return ps != nil }, 5*time.Second, 100*time.Millisecond)
-		assert.ErrorContains(t,
-			ps.SendNotification(t.Context(), makeTestRequest("sleep", false, false)),
-			"jsonrpc2: code -32602 message: invalid state value, must be non-empty and at most 4096 chars")
+		assert.True(t, utf8.RuneCountInString(res.State.Value) > maxStateValueLen) // Invalid!
+		assert.Len(t, getStateByChannelID(t, db, ch.ID), 0)                        // The state should not be persisted due to invalid state value.
+
+		ch.restartCh <- newConfig{ctype: ch.Type, config: `{"duration":"1s","persist_state":true,"success":true}`}
+		require.Eventually(t, func() bool { return getPluginS(ch) != nil }, 5*time.Second, 100*time.Millisecond)
+
+		res, err = ch.Notify(t.Context(), makeContact("sleep"), i, o, ev)
+		require.NoError(t, err)
+		require.NotNil(t, res)
+
+		assert.Len(t, getStateByChannelID(t, db, ch.ID), 1) // The state should be persisted now with valid state value.
 	})
 
 	t.Run("Type Validation", func(t *testing.T) {
@@ -279,7 +274,7 @@ func TestPlugin(t *testing.T) {
 }
 
 // makeTestChannel creates a new Channel instance with the provided name, type, and config for testing purposes.
-func makeTestChannel(t *testing.T, db *database.DB, logger *zap.Logger, name, ctype, config string) *Channel {
+func makeTestChannel(t *testing.T, db *database.DB, cleaner *testutils.DBCleaner, logger *zap.Logger, name, ctype, config string) *Channel {
 	ch := &Channel{Name: name, Type: ctype, Config: config, ExternalUUID: types.MakeUUID(uuid.New())}
 	ch.ChangedAt = types.UnixMilli(time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC))
 	ch.Deleted = types.MakeBool(false)
@@ -291,17 +286,86 @@ func makeTestChannel(t *testing.T, db *database.DB, logger *zap.Logger, name, ct
 		return nil
 	})
 	require.NoError(t, err, "db.ExecTx should not fail")
+
+	cleaner.Add("channel", fmt.Sprintf("id = %d", ch.ID))
+	cleaner.Add("channel_state", fmt.Sprintf("channel_id = %d", ch.ID))
 	ch.Start(t.Context(), db, logger.Sugar())
 	return ch
 }
 
-// makeTestRequest creates a new [plugin.NotificationRequest] instance for testing purposes.
-func makeTestRequest(addrType string, muted, recovered bool) *plugin.NotificationRequest {
-	return &plugin.NotificationRequest{
-		Contact:  &plugin.Contact{FullName: "Sleepy User", Addresses: []*plugin.Address{{Type: addrType, Address: "john@doe.com"}}},
-		Object:   &plugin.Object{Name: "Sleepy Object"},
-		Incident: &plugin.Incident{Id: makeRandomNumber(), IsMuted: muted, IsRecovered: recovered},
-		Event:    &plugin.Event{Time: time.Now(), Message: "Test event message"},
+// getStateByChannelID retrieves all states associated with a specific channel ID from the database.
+func getStateByChannelID(t *testing.T, db *database.DB, channelID int64) []*State {
+	var states []*State
+	require.NoError(t, db.SelectContext(t.Context(), &states, db.Rebind(`SELECT * FROM channel_state WHERE channel_id = ?`), channelID))
+	return states
+}
+
+// makeContact creates a new [recipient.Contact] instance with multiple addresses for testing purposes.
+func makeContact(addrType string) *recipient.Contact {
+	return &recipient.Contact{
+		FullName: "Sleepy User",
+		Addresses: []*recipient.Address{
+			{Type: addrType, Address: "john@doe.com"},
+			{Type: "sms", Address: "+1234567890"},
+			{Type: "pager", Address: "+0987654321"},
+			{Type: "slack", Address: "@sleepyuser"},
+			{Type: addrType, Address: "doe@john.com"},
+		},
+	}
+}
+
+// makePersistedIncidentData creates a new incident, object, and event required for state management tests.
+//
+// It inserts the incident and object into the database and returns the created incident, object, and event.
+func makePersistedIncidentData(t *testing.T, db *database.DB, cleaner *testutils.DBCleaner, muted, recovered bool) (*plugin.Incident, *object.Object, *event.Event) {
+	ev := makeEvent(t)
+	obj := makeObj()
+	obj.ID = object.ID(ev.Tags)
+
+	objInsertStmt := `INSERT INTO object (id, name) VALUES (?, ?)`
+	_, err := db.ExecContext(t.Context(), db.Rebind(objInsertStmt), obj.ID, obj.Name)
+	require.NoError(t, err)
+
+	if db.DriverName() == database.PostgreSQL {
+		cleaner.Add("object", fmt.Sprintf("id = DECODE('%s', 'HEX')", obj.ID))
+	} else {
+		cleaner.Add("object", fmt.Sprintf("id = UNHEX('%s')", obj.ID))
+	}
+
+	var recoveredAt types.UnixMilli
+	startedAt := types.UnixMilli(time.Now().Add(-1 * time.Hour))
+	if recovered {
+		recoveredAt = types.UnixMilli(time.Now())
+	}
+
+	incidentInsertStmt := `INSERT INTO incident (id, object_id, started_at, recovered_at, severity) VALUES (?, ?, ?, ?, ?)`
+	i := makeIncident(muted, recovered)
+	_, err = db.ExecContext(t.Context(), db.Rebind(incidentInsertStmt), i.Id, obj.ID, startedAt, recoveredAt, "crit")
+	require.NoError(t, err)
+	cleaner.Add("incident", fmt.Sprintf("id = %d", i.Id))
+
+	return i, obj, ev
+}
+
+func makeIncident(muted, recovered bool) *plugin.Incident {
+	return &plugin.Incident{
+		Id:          makeRandomNumber(),
+		IsMuted:     muted,
+		IsRecovered: recovered,
+	}
+}
+
+func makeObj() *object.Object { return &object.Object{Name: "Sleepy Object"} }
+
+func makeEvent(t *testing.T) *event.Event {
+	return &event.Event{
+		Time:    time.Now(),
+		Name:    "Sleepy Object",
+		Message: "Test event message",
+		Tags: map[string]string{
+			"source": "unit-test",
+			"random": testutils.MakeRandomString(t),
+		},
 	}
 }
 

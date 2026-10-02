@@ -326,7 +326,7 @@ func (ch *Webhook) SetConfig(jsonStr json.RawMessage) error {
 	return nil
 }
 
-func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
+func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) (*plugin.DeliveryResult, error) {
 	ch.mu.Lock()
 	method := ch.Method
 	tmplUrl := ch.tmplUrl
@@ -341,29 +341,29 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
 
 	var urlBuff, reqBodyBuff, respBuffer bytes.Buffer
 	if err := tmplUrl.Execute(&urlBuff, req); err != nil {
-		return fmt.Errorf("cannot execute URL template: %w", err)
+		return nil, fmt.Errorf("cannot execute URL template: %w", err)
 	}
 	if err := tmplRequestBody.Execute(&reqBodyBuff, req); err != nil {
-		return fmt.Errorf("cannot execute Request Body template: %w", err)
+		return nil, fmt.Errorf("cannot execute Request Body template: %w", err)
 	}
 
 	httpReq, err := http.NewRequest(method, urlBuff.String(), &reqBodyBuff)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	httpReq.Header.Set("User-Agent", "icinga-notifications-webhook/"+internal.Version.Version)
 	for key, tmplValue := range tmplRequestHeaders {
 		var valueBuff bytes.Buffer
 		if err := tmplValue.Execute(&valueBuff, req); err != nil {
-			return fmt.Errorf("cannot execute Request Header template for key %q: %w", key, err)
+			return nil, fmt.Errorf("cannot execute Request Header template for key %q: %w", key, err)
 		}
 		httpReq.Header.Set(key, valueBuff.String())
 	}
 
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	defer func() {
@@ -375,7 +375,7 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
 		// Limit response to 1 MiB as it will be logged; rest is going to be discarded.
 		limitedRespReader := io.LimitReader(httpResp.Body, 1024*1024)
 		if _, err := io.Copy(&respBuffer, limitedRespReader); err != nil {
-			return fmt.Errorf("cannot read response: %w", err)
+			return nil, fmt.Errorf("cannot read response: %w", err)
 		}
 
 		err := ch.rpcEp.NotifyLog(
@@ -388,9 +388,9 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) error {
 			slog.ErrorContext(ch.rpcCtx, "Failed to log HTTP response body", "error", err)
 		}
 
-		return fmt.Errorf("unaccepted HTTP response status code %d not in %v",
+		return nil, fmt.Errorf("unaccepted HTTP response status code %d not in %v",
 			httpResp.StatusCode, respStatusCodes)
 	}
 
-	return nil
+	return nil, nil
 }

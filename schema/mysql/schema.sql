@@ -59,17 +59,6 @@ CREATE TABLE channel (
 
 CREATE INDEX idx_channel_changed_at ON channel(changed_at);
 
-CREATE TABLE channel_state (
-    channel_id bigint NOT NULL,
-    state_key varchar(255) NOT NULL,
-    value varchar(4096) NOT NULL,
-
-    CONSTRAINT pk_channel_state PRIMARY KEY (channel_id, state_key),
-    CONSTRAINT fk_channel_state_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
-
-CREATE INDEX idx_channel_state_channel_id ON channel_state(channel_id);
-
 CREATE TABLE contact (
     id bigint NOT NULL AUTO_INCREMENT,
     external_uuid binary(16), -- used for external references
@@ -474,6 +463,18 @@ CREATE INDEX idx_incident_history_time_type ON incident_history(time, type) COMM
 -- This will be used by the query in the [Incident.RetriggerEscalations] method in icinga-notifications.
 CREATE INDEX idx_incident_history_event_id_incident_id ON incident_history(event_id, incident_id);
 
+-- It's far away from the channel table creation due to the foreign key constraints on the incident table.
+CREATE TABLE channel_state (
+    state_key binary(16) NOT NULL,
+    channel_id bigint NOT NULL,
+    incident_id bigint NOT NULL, -- The incident this state is associated with.
+    value varchar(4096) NOT NULL,
+
+    CONSTRAINT pk_channel_state PRIMARY KEY (state_key),
+    CONSTRAINT fk_channel_state_channel FOREIGN KEY (channel_id) REFERENCES channel(id),
+    CONSTRAINT fk_channel_state_incident FOREIGN KEY (incident_id) REFERENCES incident(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
 CREATE TABLE notification_history (
     id bigint NOT NULL AUTO_INCREMENT,
     object_id binary(32) NOT NULL,
@@ -486,6 +487,8 @@ CREATE TABLE notification_history (
     event_message longtext NOT NULL,
     state enum('sent', 'failed'),
     triggered_at bigint NOT NULL,
+
+    delivery_result mediumtext, -- The result of the notification delivery attempt (if any) as a JSON string.
 
     CONSTRAINT pk_notification_history PRIMARY KEY (id),
     CONSTRAINT ck_notification_history_state_notnull CHECK (state IS NOT NULL),
