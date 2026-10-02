@@ -3,17 +3,20 @@ package incident
 import (
 	"context"
 	"database/sql"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/notifications/jsonrpc"
+	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
+	utils2 "github.com/icinga/icinga-go-library/utils"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
-	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -83,16 +86,8 @@ func (i *Incident) Object(ctx context.Context) (*object.Object, error) {
 	return obj, nil
 }
 
-func (i *Incident) IncidentSeverity() baseEv.Severity {
-	return i.Severity
-}
-
 func (i *Incident) String() string {
 	return fmt.Sprintf("#%d", i.Id)
-}
-
-func (i *Incident) ID() int64 {
-	return i.Id
 }
 
 // IsMuted returns whether this incident is currently muted.
@@ -440,7 +435,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			}
 
 			query := `DELETE FROM incident_contact WHERE incident_id = :incident_id AND contact_id = :contact_id`
-			if _, err := tx.NamedExecContext(ctx, query, &ContactRow{Key: recipientKey, IncidentID: i.ID()}); err != nil {
+			if _, err := tx.NamedExecContext(ctx, query, &ContactRow{Key: recipientKey, IncidentID: i.Id}); err != nil {
 				return fmt.Errorf("cannot remove recipient %q from incident: %w", r, err)
 			}
 			return i.recordRecipientRoleChange(ctx, tx, r, state.Role, recipient.RoleNone)
@@ -755,7 +750,6 @@ func (i *Incident) notifyContacts(
 			i.logger.Debugw("Incident refers unknown contact, might got deleted", zap.Int64("contact_id", notification.ContactID))
 			continue
 		}
-		contactName := contact.String()
 
 		ch := i.runtimeConfig.Channels[notification.ChannelID]
 		if ch == nil {
@@ -765,62 +759,105 @@ func (i *Incident) notifyContacts(
 		}
 		i.runtimeConfig.RUnlock()
 
-		err := i.notifyContact(ctx, obj, contact, ev, ch)
-		if err != nil {
-			notification.State = source.NotificationStateFailed
-		} else {
-			notification.State = source.NotificationStateSent
-		}
-
-		notification.SentAt = types.UnixMilli(time.Now())
-		notification.HistoryEntry.TriggeredAt = notification.SentAt
-		notification.HistoryEntry.State = notification.State
-
-		stmt, _ := i.db.BuildUpdateStmt(notification)
-		if _, err := i.db.NamedExecContext(ctx, stmt, notification); err != nil {
-			i.logger.Errorw(
-				"Failed to update contact notified incident history", zap.String("contact", contactName),
-				zap.Error(err),
-			)
-		}
-
-		if err := notification.HistoryEntry.Sync(ctx, i.db); err != nil {
-			i.logger.Errorw("Failed to insert notification history", zap.String("contact", contactName), zap.Error(err))
-		}
-		for _, skippedEntry := range notification.SkippedHistoryEntries {
-			skippedEntry.NotificationID = notification.HistoryEntry.ID
-			stmt := database.BuildInsertStmtWithout(i.db, skippedEntry, "id")
-			if _, err := i.db.NamedExecContext(ctx, stmt, skippedEntry); err != nil {
-				return err
-			}
-		}
+		i.notifyContact(ctx, obj, contact, ev, ch, notification)
 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 	}
 
+	if !i.RecoveredAt.Time().IsZero() {
+		// The incident is being recovered, so purge all channel state for this incident in one go.
+		if err := channel.DeleteStateByIncidentID(ctx, i.db, i.Id); err != nil {
+			i.logger.Warnw("Failed to delete channel state for recovered incident", zap.Error(err))
+		}
+	}
+
 	return nil
 }
 
-// notifyContact notifies the given recipient via a channel.
+// notifyContact sends a single notification for this incident to the given contact via the provided channel.
+//
+// It performs the delivery, logs success or failure, updates the NotificationEntry (State, SentAt) and its
+// HistoryEntry (TriggeredAt, State, DeliveryResult), persists the updated notification row and the notification
+// history to the database, and inserts any SkippedNotificationHistory entries. Delivery result details are
+// marshaled (and truncated/dropped if too large).
 func (i *Incident) notifyContact(
 	ctx context.Context,
 	obj *object.Object,
 	contact *recipient.Contact,
 	ev *event.Event,
 	ch *channel.Channel,
-) error {
+	notification *NotificationEntry,
+) {
 	i.logger.Infof("Notifying contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type)
 
-	if err := ch.Notify(ctx, contact, i, obj, ev); err != nil {
-		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
-		return err
+	pi := &plugin.Incident{
+		Id:          i.Id,
+		Severity:    i.Severity,
+		IsMuted:     i.IsMuted(),
+		IsRecovered: !i.RecoveredAt.Time().IsZero(),
 	}
 
-	i.logger.Infow("Successfully sent notification", zap.String("type", ch.Type), zap.Stringer("contact", contact))
+	if result, err := ch.Notify(ctx, contact, pi, obj, ev); err != nil {
+		i.logger.Errorw("Failed to send notification",
+			zap.String("type", ch.Type),
+			zap.Stringer("contact", contact),
+			zap.Error(err))
 
-	return nil
+		notification.State = source.NotificationStateFailed
+		var deliveryResult string
+		if rpcErr, ok := errors.AsType[*jsonrpc.Error](err); ok {
+			deliveryResult = utils2.EllipsizeBytes(rpcErr.Message, channel.MaxDeliveryResult)
+		} else {
+			deliveryResult = utils2.EllipsizeBytes(err.Error(), channel.MaxDeliveryResult)
+		}
+		notification.HistoryEntry.DeliveryResult = types.MakeString(deliveryResult, types.TransformEmptyStringToNull)
+	} else {
+		i.logger.Infow("Successfully sent notification", zap.String("type", ch.Type), zap.Stringer("contact", contact))
+
+		notification.State = source.NotificationStateSent
+		if result != nil && len(result.Details) > 0 {
+			deliveryResult, err := json.Marshal(result.Details, json.Deterministic(true))
+			if err != nil {
+				i.logger.Warnw("Failed to marshal notification delivery result", zap.String("type", ch.Type), zap.Error(err))
+			} else if len(deliveryResult) <= channel.MaxDeliveryResult {
+				notification.HistoryEntry.DeliveryResult = types.MakeString(string(deliveryResult), types.TransformEmptyStringToNull)
+			} else {
+				i.logger.Warnw("Dropping delivery result details due to excessive size",
+					zap.Int("count", len(result.Details)),
+					zap.Int("size", len(deliveryResult)),
+					zap.Int64("max_size", channel.MaxDeliveryResult))
+			}
+		}
+	}
+
+	notification.SentAt = types.UnixMilli(time.Now())
+	notification.HistoryEntry.TriggeredAt = notification.SentAt
+	notification.HistoryEntry.State = notification.State
+
+	updateStmt, _ := i.db.BuildUpdateStmt(notification)
+	if _, err := i.db.NamedExecContext(ctx, updateStmt, notification); err != nil {
+		i.logger.Errorw(
+			"Failed to update contact notified incident history",
+			zap.Stringer("contact", contact),
+			zap.Error(err))
+		return
+	}
+
+	if err := notification.HistoryEntry.Sync(ctx, i.db); err != nil {
+		i.logger.Errorw("Failed to insert notification history", zap.Stringer("contact", contact), zap.Error(err))
+		return
+	}
+
+	skippedStmt := database.BuildInsertStmtWithout(i.db, SkippedNotificationHistory{}, "id")
+	for _, skippedEntry := range notification.SkippedHistoryEntries {
+		skippedEntry.NotificationID = notification.HistoryEntry.ID
+		if _, err := i.db.NamedExecContext(ctx, skippedStmt, skippedEntry); err != nil {
+			i.logger.Errorw("Failed to insert skipped notification history", zap.Stringer("contact", contact), zap.Error(err))
+			return
+		}
+	}
 }
 
 // getRecipientsChannel returns all the configured channels of the current incident and escalation recipients.
@@ -970,7 +1007,3 @@ type RecipientState struct {
 	// added in Incident.AddRecipient due to the ongoing event, IsNew is set true.
 	IsNew bool
 }
-
-var (
-	_ contracts.Incident = (*Incident)(nil)
-)

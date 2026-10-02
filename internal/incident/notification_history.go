@@ -24,6 +24,7 @@ type NotificationHistory struct {
 	EventMessage   string                   `db:"event_message"`
 	State          source.NotificationState `db:"state"`
 	TriggeredAt    types.UnixMilli          `db:"triggered_at"`
+	DeliveryResult types.String             `db:"delivery_result"`
 }
 
 // Sync persists the current state of this notification history to the database and retrieves the just inserted
