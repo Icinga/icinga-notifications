@@ -42,7 +42,7 @@ func CheckSchema(ctx context.Context, db *database.DB) error {
 	err := retry.WithBackoff(
 		ctx,
 		func(ctx context.Context) error {
-			qs := `SELECT version FROM notifications_schema ORDER BY timestamp DESC LIMIT 1`
+			qs := `SELECT version FROM notifications_schema ORDER BY id DESC LIMIT 1`
 			if err := db.SelectContext(ctx, &dbResult, qs); err != nil {
 				return database.CantPerformQuery(err, qs)
 			}

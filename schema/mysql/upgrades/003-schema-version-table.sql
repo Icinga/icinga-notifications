@@ -11,7 +11,7 @@ CREATE PROCEDURE assert_correct_schema_version(expected_version text)
 BEGIN
     DECLARE actual_version text;
     DECLARE error_message text;
-    SELECT version INTO actual_version FROM notifications_schema ORDER BY timestamp DESC LIMIT 1;
+    SELECT version INTO actual_version FROM notifications_schema ORDER BY id DESC LIMIT 1;
     IF actual_version IS NULL THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Schema version not found in notifications_schema table.';
     ELSEIF actual_version != expected_version THEN
