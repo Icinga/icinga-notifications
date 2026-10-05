@@ -480,18 +480,18 @@ CREATE TABLE incident_rule (
 -- PostgreSQL doesn't automatically create an index for foreign keys, so we need to do this manually.
 CREATE INDEX idx_incident_rule_incident_id ON incident_rule(incident_id);
 
-CREATE TABLE incident_rule_entry_state (
+CREATE TABLE incident_rule_escalation_state (
     incident_id bigint NOT NULL,
     rule_entry_id bigint NOT NULL,
     triggered_at bigint NOT NULL,
 
-    CONSTRAINT pk_incident_rule_entry_state PRIMARY KEY (incident_id, rule_entry_id),
-    CONSTRAINT fk_incident_rule_entry_state_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
-    CONSTRAINT fk_incident_rule_entry_state_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id)
+    CONSTRAINT pk_incident_rule_escalation_state PRIMARY KEY (incident_id, rule_entry_id),
+    CONSTRAINT fk_incident_rule_escalation_state_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
+    CONSTRAINT fk_incident_rule_escalation_state_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id)
 );
 
 -- PostgreSQL doesn't automatically create an index for foreign keys, so we need to do this manually.
-CREATE INDEX idx_incident_rule_entry_state_incident_id ON incident_rule_entry_state(incident_id);
+CREATE INDEX idx_incident_rule_escalation_state_incident_id ON incident_rule_escalation_state(incident_id);
 
 CREATE TABLE incident_history (
     id bigserial,
@@ -514,7 +514,7 @@ CREATE TABLE incident_history (
     sent_at bigint,
 
     CONSTRAINT pk_incident_history PRIMARY KEY (id),
-    CONSTRAINT fk_incident_history_incident_rule_entry_state FOREIGN KEY (incident_id, rule_entry_id) REFERENCES incident_rule_entry_state(incident_id, rule_entry_id),
+    CONSTRAINT fk_incident_history_incident_rule_escalation_state FOREIGN KEY (incident_id, rule_entry_id) REFERENCES incident_rule_escalation_state(incident_id, rule_entry_id),
     CONSTRAINT fk_incident_history_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
     CONSTRAINT fk_incident_history_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id),
     CONSTRAINT fk_incident_history_contact FOREIGN KEY (contact_id) REFERENCES contact(id),

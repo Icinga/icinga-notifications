@@ -1,97 +1,77 @@
 CREATE TYPE rule_type AS ENUM ('notification', 'escalation');
-ALTER TABLE rule ADD COLUMN type rule_type;
-UPDATE rule SET type = 'escalation' WHERE type IS NULL;
-ALTER TABLE rule ALTER COLUMN type SET NOT NULL;
+ALTER TABLE rule ADD COLUMN type rule_type NOT NULL DEFAULT 'escalation';
+ALTER TABLE rule ALTER COLUMN type DROP DEFAULT;
 
 ALTER TABLE incident_contact ADD COLUMN event_types text;
 
--- Recreate rule_escalation as rule_entry, carrying over the existing rows and their ids.
-CREATE TABLE rule_entry (
-    id bigserial,
-    rule_id bigint NOT NULL,
-    position integer,
-    condition text,
-    name citext, -- if not set, recipients are used as a fallback for display purposes
-    fallback_for bigint,
+-- Drop the not null clauses before renaming the table, otherwise PostgreSQL will automatically
+-- create a non_null constraint with the old name.
+ALTER TABLE rule_escalation
+    DROP CONSTRAINT pk_rule_escalation CASCADE, -- CASCADE to all child tables.
+    ALTER COLUMN id DROP NOT NULL,
+    ALTER COLUMN rule_id DROP NOT NULL,
+    ALTER COLUMN changed_at DROP NOT NULL,
+    ALTER COLUMN deleted DROP NOT NULL;
 
-    changed_at bigint NOT NULL,
-    deleted boolenum NOT NULL DEFAULT 'n',
+ALTER TABLE rule_escalation RENAME TO rule_entry;
+ALTER SEQUENCE rule_escalation_id_seq RENAME TO rule_entry_id_seq;
+ALTER INDEX idx_rule_escalation_changed_at RENAME TO idx_rule_entry_changed_at;
+ALTER TABLE rule_entry RENAME CONSTRAINT uk_rule_escalation_rule_id_position TO uk_rule_entry_rule_id_position;
+ALTER TABLE rule_entry RENAME CONSTRAINT ck_rule_escalation_not_both_condition_and_fallback_for TO ck_rule_entry_not_both_condition_and_fallback_for;
+ALTER TABLE rule_entry RENAME CONSTRAINT ck_rule_escalation_non_deleted_needs_position TO ck_rule_entry_non_deleted_needs_position;
+ALTER TABLE rule_entry RENAME CONSTRAINT fk_rule_escalation_rule TO fk_rule_entry_rule;
 
-    CONSTRAINT pk_rule_entry PRIMARY KEY (id),
+-- Now, undo the not null clauses on the renamed table to restore the original constraints.
+ALTER TABLE rule_entry
+    ALTER COLUMN id SET NOT NULL,
+    ALTER COLUMN rule_id SET NOT NULL,
+    ALTER COLUMN changed_at SET NOT NULL,
+    ALTER COLUMN deleted SET NOT NULL,
+    ADD CONSTRAINT pk_rule_entry PRIMARY KEY (id),
+    ADD CONSTRAINT fk_rule_entry_rule_entry FOREIGN KEY (fallback_for) REFERENCES rule_entry(id);
 
-    -- Each position in an escalation can only be used once.
-    -- Column position must be NULLed for deletion via "deleted = 'y'"
-    CONSTRAINT uk_rule_entry_rule_id_position UNIQUE (rule_id, position),
+-- Similarly, drop the not null clauses before renaming the table, otherwise PostgreSQL will
+-- automatically create a non_null constraint with the old name.
+ALTER TABLE rule_escalation_recipient
+    DROP CONSTRAINT pk_rule_escalation_recipient,
+    ALTER COLUMN id DROP NOT NULL,
+    ALTER COLUMN rule_escalation_id DROP NOT NULL,
+    ALTER COLUMN changed_at DROP NOT NULL,
+    ALTER COLUMN deleted DROP NOT NULL;
 
-    CONSTRAINT ck_rule_entry_not_both_condition_and_fallback_for CHECK (NOT (condition IS NOT NULL AND fallback_for IS NOT NULL)),
-    CONSTRAINT ck_rule_entry_non_deleted_needs_position CHECK (deleted = 'y' OR position IS NOT NULL),
-    CONSTRAINT fk_rule_entry_rule FOREIGN KEY (rule_id) REFERENCES rule(id),
-    CONSTRAINT fk_rule_entry_rule_entry FOREIGN KEY (fallback_for) REFERENCES rule_entry(id)
-);
+ALTER TABLE rule_escalation_recipient RENAME TO rule_entry_recipient;
+ALTER SEQUENCE rule_escalation_recipient_id_seq RENAME TO rule_entry_recipient_id_seq;
+ALTER INDEX idx_rule_escalation_recipient_changed_at RENAME TO idx_rule_entry_recipient_changed_at;
+ALTER TABLE rule_entry_recipient RENAME COLUMN rule_escalation_id TO rule_entry_id;
+ALTER TABLE rule_entry_recipient RENAME CONSTRAINT ck_rule_escalation_recipient_has_exactly_one_recipient TO ck_rule_entry_recipient_has_exactly_one_recipient;
+ALTER TABLE rule_entry_recipient RENAME CONSTRAINT fk_rule_escalation_recipient_contact TO fk_rule_entry_recipient_contact;
+ALTER TABLE rule_entry_recipient RENAME CONSTRAINT fk_rule_escalation_recipient_contactgroup TO fk_rule_entry_recipient_contactgroup;
+ALTER TABLE rule_entry_recipient RENAME CONSTRAINT fk_rule_escalation_recipient_schedule TO fk_rule_entry_recipient_schedule;
+ALTER TABLE rule_entry_recipient RENAME CONSTRAINT fk_rule_escalation_recipient_channel TO fk_rule_entry_recipient_channel;
 
-CREATE INDEX idx_rule_entry_changed_at ON rule_entry(changed_at);
+-- Restore the not null clauses on the renamed table again.
+ALTER TABLE rule_entry_recipient
+    ALTER COLUMN id SET NOT NULL,
+    ALTER COLUMN rule_entry_id SET NOT NULL,
+    ALTER COLUMN changed_at SET NOT NULL,
+    ALTER COLUMN deleted SET NOT NULL,
+    ADD CONSTRAINT pk_rule_entry_recipient PRIMARY KEY (id),
+    ADD CONSTRAINT fk_rule_entry_recipient_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id);
 
-INSERT INTO rule_entry (id, rule_id, position, condition, name, fallback_for, changed_at, deleted)
-    SELECT id, rule_id, position, condition, name, fallback_for, changed_at, deleted FROM rule_escalation;
-SELECT setval(pg_get_serial_sequence('rule_entry', 'id'), coalesce(max(id), 1), max(id) IS NOT NULL) FROM rule_entry;
+ALTER TABLE incident_rule_escalation_state
+    DROP CONSTRAINT pk_incident_rule_escalation_state CASCADE, -- CASCADE to incident_history table.
+    ALTER COLUMN rule_escalation_id DROP NOT NULL;
 
--- Recreate rule_escalation_recipient as rule_entry_recipient, carrying over the existing rows and their ids.
-CREATE TABLE rule_entry_recipient (
-    id bigserial,
-    rule_entry_id bigint NOT NULL,
-    contact_id bigint,
-    contactgroup_id bigint,
-    schedule_id bigint,
-    channel_id bigint,
+ALTER TABLE incident_rule_escalation_state RENAME COLUMN rule_escalation_id TO rule_entry_id;
+ALTER TABLE incident_rule_escalation_state
+    ADD CONSTRAINT fk_incident_rule_escalation_state_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id),
+    ADD CONSTRAINT pk_incident_rule_escalation_state PRIMARY KEY (incident_id, rule_entry_id),
+    ALTER COLUMN rule_entry_id SET NOT NULL;
 
-    changed_at bigint NOT NULL,
-    deleted boolenum NOT NULL DEFAULT 'n',
-
-    CONSTRAINT pk_rule_entry_recipient PRIMARY KEY (id),
-    CONSTRAINT ck_rule_entry_recipient_has_exactly_one_recipient CHECK (num_nonnulls(contact_id, contactgroup_id, schedule_id) = 1),
-    CONSTRAINT fk_rule_entry_recipient_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id),
-    CONSTRAINT fk_rule_entry_recipient_contact FOREIGN KEY (contact_id) REFERENCES contact(id),
-    CONSTRAINT fk_rule_entry_recipient_contactgroup FOREIGN KEY (contactgroup_id) REFERENCES contactgroup(id),
-    CONSTRAINT fk_rule_entry_recipient_schedule FOREIGN KEY (schedule_id) REFERENCES schedule(id),
-    CONSTRAINT fk_rule_entry_recipient_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
-);
-
-CREATE INDEX idx_rule_entry_recipient_changed_at ON rule_entry_recipient(changed_at);
-
-INSERT INTO rule_entry_recipient (id, rule_entry_id, contact_id, contactgroup_id, schedule_id, channel_id, changed_at, deleted)
-    SELECT id, rule_escalation_id, contact_id, contactgroup_id, schedule_id, channel_id, changed_at, deleted FROM rule_escalation_recipient;
-SELECT setval(pg_get_serial_sequence('rule_entry_recipient', 'id'), coalesce(max(id), 1), max(id) IS NOT NULL) FROM rule_entry_recipient;
-
--- Recreate incident_rule_escalation_state as incident_rule_entry_state, carrying over the existing rows.
-CREATE TABLE incident_rule_entry_state (
-    incident_id bigint NOT NULL,
-    rule_entry_id bigint NOT NULL,
-    triggered_at bigint NOT NULL,
-
-    CONSTRAINT pk_incident_rule_entry_state PRIMARY KEY (incident_id, rule_entry_id),
-    CONSTRAINT fk_incident_rule_entry_state_incident FOREIGN KEY (incident_id) REFERENCES incident(id),
-    CONSTRAINT fk_incident_rule_entry_state_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id)
-);
-
--- PostgreSQL doesn't automatically create an index for foreign keys, so we need to do this manually.
-CREATE INDEX idx_incident_rule_entry_state_incident_id ON incident_rule_entry_state(incident_id);
-
-INSERT INTO incident_rule_entry_state (incident_id, rule_entry_id, triggered_at)
-    SELECT incident_id, rule_escalation_id, triggered_at FROM incident_rule_escalation_state;
-
--- Drop the old tables now that their data lives in rule_entry, rule_entry_recipient and
--- incident_rule_entry_state. CASCADE takes care of dropping incident_history's foreign keys pointing at
--- them; incident_history itself and its rows are kept.
-DROP TABLE rule_escalation_recipient;
-DROP TABLE incident_rule_escalation_state CASCADE;
-DROP TABLE rule_escalation CASCADE;
-
--- Rename incident_history.rule_escalation_id to rule_entry_id and re-point its foreign keys at the
--- recreated tables; the referenced ids were carried over as-is, so the existing rows stay intact.
 ALTER TABLE incident_history RENAME COLUMN rule_escalation_id TO rule_entry_id;
 ALTER TABLE incident_history
-    ADD CONSTRAINT fk_incident_history_incident_rule_entry_state FOREIGN KEY (incident_id, rule_entry_id) REFERENCES incident_rule_entry_state(incident_id, rule_entry_id),
-    ADD CONSTRAINT fk_incident_history_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id);
+    ADD CONSTRAINT fk_incident_history_rule_entry FOREIGN KEY (rule_entry_id) REFERENCES rule_entry(id),
+    ADD CONSTRAINT fk_incident_history_incident_rule_escalation_state FOREIGN KEY (incident_id, rule_entry_id) REFERENCES incident_rule_escalation_state(incident_id, rule_entry_id);
 
 TRUNCATE skipped_notification_history;
 ALTER TABLE skipped_notification_history DROP COLUMN rule_escalation_id;
