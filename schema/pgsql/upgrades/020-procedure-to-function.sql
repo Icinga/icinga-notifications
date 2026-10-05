@@ -1,4 +1,6 @@
-CREATE OR REPLACE FUNCTION assert_correct_schema_version(expected_version text)
+-- A procedure cannot be replaced by a function of the same name, so it must be dropped first.
+DROP PROCEDURE assert_correct_schema_version(text);
+CREATE FUNCTION assert_correct_schema_version(expected_version text)
     RETURNS void
     LANGUAGE plpgsql
     STABLE
