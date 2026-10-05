@@ -3,8 +3,9 @@
 -- while the new JSON object format is a structured representation of the same condition. For filter chains, this
 -- script assumes that the logical operator is always &, so if somehow a different logical op is used, the resulting
 -- JSON object will be invalid.
+DROP PROCEDURE IF EXISTS upgrade_escalation_condition_to_json_object;
 DELIMITER //
-CREATE OR REPLACE PROCEDURE upgrade_escalation_condition_to_json_object()
+CREATE PROCEDURE upgrade_escalation_condition_to_json_object()
     LANGUAGE SQL
     MODIFIES SQL DATA
 BEGIN
