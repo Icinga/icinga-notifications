@@ -15,7 +15,7 @@ BEGIN
     IF actual_version IS NULL THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Schema version not found in notifications_schema table.';
     ELSEIF actual_version != expected_version THEN
-        SET error_message = CONCAT('Schema version mismatch: expected ', expected_version, ', got ', actual_version, '. Please apply all previous upgrade scripts in order before applying this one.');
+        SET error_message = CONCAT('Schema version mismatch: expected ', expected_version, ', got ', actual_version, '. Apply all previous upgrade scripts in order first.');
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = error_message;
     END IF;
 END //

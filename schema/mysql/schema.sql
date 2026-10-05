@@ -18,7 +18,7 @@ BEGIN
         -- MySQL/MariaDB doesn't seem to allow to directly use CONCAT in the SIGNAL statement[^1],
         -- so we need to set it to a variable first.
         -- [^1]: https://bugs.mysql.com/bug.php?id=114001
-        SET error_message = CONCAT('Schema version mismatch: expected ', expected_version, ', got ', actual_version, '. Please apply all previous upgrade scripts in order before applying this one.');
+        SET error_message = CONCAT('Schema version mismatch: expected ', expected_version, ', got ', actual_version, '. Apply all previous upgrade scripts in order first.');
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = error_message;
     END IF;
 END //
