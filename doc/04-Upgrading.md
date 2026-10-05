@@ -52,7 +52,7 @@ user. Please modify them for your setup and the schema upgrade you want to apply
   ```
 * PostgreSQL:
   ```
-  psql -U notifications notifications < /usr/share/icinga-notifications/schema/pgsql/upgrades/0.1.2.sql
+  psql -v ON_ERROR_STOP=1 -U notifications notifications < /usr/share/icinga-notifications/schema/pgsql/upgrades/0.1.2.sql
   ```
 
 Afterwards, restart Icinga Notifications.
