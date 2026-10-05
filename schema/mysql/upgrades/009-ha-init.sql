@@ -1,3 +1,5 @@
+CALL assert_correct_schema_version('v0.2.0-8');
+
 CREATE TABLE event_queue (
     id binary(32) NOT NULL, -- SHA256 of JSON representation.
 
@@ -14,3 +16,5 @@ CREATE TABLE event_queue (
 CREATE INDEX idx_event_queue_time ON event_queue (time);
 CREATE INDEX idx_event_queue_time_state ON event_queue (time, state);
 CREATE INDEX idx_event_queue_state_object_id ON event_queue (state, object_id);
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-9', UNIX_TIMESTAMP() * 1000);

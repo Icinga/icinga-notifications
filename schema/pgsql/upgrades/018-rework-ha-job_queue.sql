@@ -1,3 +1,5 @@
+CALL assert_correct_schema_version('v0.2.0-17');
+
 DROP TABLE event_queue;
 CREATE TABLE job_queue (
     id bytea NOT NULL, -- SHA256 of JSON representation of the envelope.
@@ -20,3 +22,5 @@ CREATE TABLE job_processing_lock (
     CONSTRAINT fk_job_processing_lock_job_queue FOREIGN KEY (job_queue_id) REFERENCES job_queue(id),
     CONSTRAINT uk_job_processing_lock_job_queue_id UNIQUE (job_queue_id)
 );
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-18', EXTRACT(EPOCH from NOW()) * 1000);

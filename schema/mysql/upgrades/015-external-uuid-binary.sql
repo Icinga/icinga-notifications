@@ -1,3 +1,5 @@
+CALL assert_correct_schema_version('v0.2.0-14');
+
 ALTER TABLE channel
     DROP CONSTRAINT ck_channel_non_deleted_needs_external_uuid,
     DROP INDEX uk_channel_external_uuid,
@@ -30,3 +32,5 @@ ALTER TABLE contactgroup
     CHANGE COLUMN external_uuid_new external_uuid binary(16),
     ADD CONSTRAINT uk_contactgroup_external_uuid UNIQUE (external_uuid),
     ADD CONSTRAINT ck_contactgroup_non_deleted_needs_external_uuid CHECK (deleted = 'y' OR external_uuid IS NOT NULL);
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-15', UNIX_TIMESTAMP() * 1000);

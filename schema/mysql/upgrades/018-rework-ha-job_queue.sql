@@ -1,3 +1,5 @@
+CALL assert_correct_schema_version('v0.2.0-17');
+
 DROP TABLE event_queue;
 CREATE TABLE job_queue (
     id binary(32) NOT NULL, -- SHA256 of JSON representation of the envelope.
@@ -20,3 +22,5 @@ CREATE TABLE job_processing_lock (
     CONSTRAINT fk_job_processing_lock_job_queue FOREIGN KEY (job_queue_id) REFERENCES job_queue(id),
     CONSTRAINT uk_job_processing_lock_job_queue_id UNIQUE (job_queue_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-18', UNIX_TIMESTAMP() * 1000);

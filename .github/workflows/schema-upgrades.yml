@@ -1,0 +1,127 @@
+name: Schema Upgrades
+
+on:
+  push:
+    branches: [ main ]
+  pull_request: {}
+
+permissions:
+  contents: read
+
+jobs:
+  schema-upgrades:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Check upgrade scripts
+      # Checks the schema upgrade scripts in schema/*/upgrades for consistency.
+      #
+      # Released upgrades are named after the release, e.g. "0.2.0.sql". Unreleased (development) upgrades are named
+      # "NNN-description.sql", with each database having its own sequence, i.e. a number must not be used twice within a
+      # directory. Upon release, all of them are merged into a single release upgrade and the sequence starts from scratch.
+      #
+      # Each added, modified or renamed (with changes) development upgrade must assert the schema version of its predecessor
+      # and end by stamping its own version. Versions follow the syntax vM.m.p-r, as supported by PHP's version_compare(),
+      # where vM.m.p is the latest release and r the number of the upgrade, e.g. v0.2.0-4. The first development upgrade
+      # asserts the release version. The upgrade creating the notifications_schema table has nothing to assert. Unchanged
+      # upgrades aren't checked, as the ones written before assert_correct_schema_version() can't do that.
+      #
+      # The schema version stamped by schema/*/schema.sql and expected by internal/schema.go must be the latest one.
+      #
+      # This assumes the branch is up to date with the default branch, so that numbers taken by already merged upgrades
+      # are visible here.
+      shell: bash
+      env:
+        BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      run: |
+        set -u
+
+        # Upgrades added, modified or renamed since the base. Perfect renames (100% similarity) are excluded.
+        if ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+          BASE=HEAD^
+        fi
+        declare -A changed=()
+        while IFS=$'\t' read -r status f renamed; do
+          [ "$status" = R100 ] && continue
+          changed[${renamed:-$f}]=1
+        done < <(git diff --name-status --find-renames --diff-filter=ARM "$BASE" HEAD -- 'schema/*/upgrades/*')
+
+        declare -A goConst=([mysql]=expectedMysqlSchemaVersion [pgsql]=expectedPostgresSchemaVersion)
+        rc=0
+
+        # Usage: error FILE [LINE] MESSAGE
+        error() {
+          if [ $# -eq 3 ]; then
+            echo "::error file=$1,line=$2::$3"
+          else
+            echo "::error file=$1::$2"
+          fi
+          rc=1
+        }
+
+        # Usage: last_statement FILE - prints LINE:STATEMENT of the last line that isn't empty or a comment
+        last_statement() {
+          grep -nvE '^\s*(--.*)?$' "$1" | tail -n1
+        }
+
+        for dir in schema/*/upgrades; do
+          db="$(basename "$(dirname "$dir")")"
+          release="$(find "$dir" -maxdepth 1 -regextype egrep -regex '.*/[0-9]+\.[0-9]+\.[0-9]+\.sql' -printf '%f\n' | sed 's/\.sql$//' | sort -V | tail -n1)"
+          if [ -z "$release" ]; then
+            error "$dir" "No release upgrade (X.Y.Z.sql) found"
+            continue
+          fi
+
+          version="v$release"
+          declare -A seen=()
+
+          for f in "$dir"/*; do
+            name="$(basename "$f")"
+
+            if [[ "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.sql$ ]]; then
+              continue
+            elif [[ ! "$name" =~ ^([0-9]{3})-[a-z0-9_-]+\.sql$ ]]; then
+              error "$f" "Invalid name, expected NNN-description.sql or X.Y.Z.sql"
+              continue
+            fi
+
+            num="${BASH_REMATCH[1]}"
+            if [ -z "${seen[$num]:-}" ]; then
+              seen[$num]="$f"
+            else
+              error "$f" 1 "Number $num is already used by ${seen[$num]}"
+            fi
+
+            id="$release-$((10#$num))"
+
+            if [ -n "${changed[$f]:-}" ] && ! grep -q '^CREATE TABLE notifications_schema ' "$f"; then
+              if ! grep -qE "^\s*(CALL|SELECT) assert_correct_schema_version\('$version'\);" "$f"; then
+                error "$f" "Must assert the previous schema version: CALL/SELECT assert_correct_schema_version('$version');"
+              fi
+            fi
+
+            version="v$id"
+
+            if [ -n "${changed[$f]:-}" ]; then
+              last="$(last_statement "$f")"
+              if [[ ! "${last#*:}" =~ ^INSERT\ INTO\ notifications_schema\(version,\ timestamp\)\ VALUES\(\'$version\',\  ]]; then
+                error "$f" "${last%%:*}" "Must end with stamping its schema version: INSERT INTO notifications_schema(version, timestamp) VALUES('$version', ...);"
+              fi
+            fi
+          done
+
+          if ! grep -qF "INSERT INTO notifications_schema(version, timestamp) VALUES('$version'," "schema/$db/schema.sql"; then
+            line="$(grep -nF 'INSERT INTO notifications_schema(' "schema/$db/schema.sql" | tail -n1 | cut -d: -f1)"
+            error "schema/$db/schema.sql" "${line:-1}" "Must stamp the latest schema version $version"
+          fi
+
+          if ! grep -qE "^\s*${goConst[$db]}\s*=\s*\"$version\"$" internal/schema.go; then
+            line="$(grep -nE "^\s*${goConst[$db]}\s*=" internal/schema.go | cut -d: -f1)"
+            error internal/schema.go "${line:-1}" "${goConst[$db]} must be the latest schema version $version"
+          fi
+        done
+
+        exit $rc

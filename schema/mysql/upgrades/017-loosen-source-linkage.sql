@@ -1,3 +1,5 @@
+CALL assert_correct_schema_version('v0.2.0-16');
+
 CREATE TABLE object_source (
     object_id binary(32) NOT NULL,
     source_id bigint NOT NULL, -- The specific source that the object referenced by object_id is associated with.
@@ -27,3 +29,5 @@ ALTER TABLE rule
   DROP CONSTRAINT fk_rule_source,
   DROP COLUMN source_id,
   MODIFY COLUMN source_type text NOT NULL;
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-17', UNIX_TIMESTAMP() * 1000);

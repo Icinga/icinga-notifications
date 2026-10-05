@@ -1,3 +1,5 @@
+CALL assert_correct_schema_version('v0.2.0-5');
+
 ALTER TABLE incident_contact ADD COLUMN changed_at bigint;
 UPDATE incident_contact SET changed_at = ih.time
   FROM incident_history ih WHERE (
@@ -13,3 +15,5 @@ UPDATE incident_contact SET changed_at = ih.time
   );
 UPDATE incident_contact SET changed_at = EXTRACT(EPOCH from NOW()) * 1000 WHERE changed_at IS NULL;
 ALTER TABLE incident_contact ALTER COLUMN changed_at SET NOT NULL;
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-6', EXTRACT(EPOCH from NOW()) * 1000);

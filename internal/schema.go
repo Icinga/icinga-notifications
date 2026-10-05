@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	// Both MySQL and PostgreSQL schema versions are currently the same, but they can
-	// evolve independently in the future, so can't be merged into a single constant.
-	expectedMysqlSchemaVersion    = "v1.0"
-	expectedPostgresSchemaVersion = "v1.0"
+	// The MySQL and PostgreSQL schema versions evolve independently, as each database
+	// has its own sequence of schema upgrades, so they can't be merged into a single constant.
+	expectedMysqlSchemaVersion    = "v0.2.0-23"
+	expectedPostgresSchemaVersion = "v0.2.0-23"
 )
 
 // CheckSchema verifies that the database schema version matches the expected version for the database driver.

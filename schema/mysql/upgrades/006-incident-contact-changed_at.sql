@@ -1,3 +1,5 @@
+CALL assert_correct_schema_version('v0.2.0-5');
+
 ALTER TABLE incident_contact ADD COLUMN changed_at bigint DEFAULT NULL;
 UPDATE incident_contact
   INNER JOIN incident_history ih ON (
@@ -9,3 +11,5 @@ UPDATE incident_contact
   SET incident_contact.changed_at = ih.time;
 UPDATE incident_contact SET changed_at = UNIX_TIMESTAMP() * 1000 WHERE changed_at IS NULL;
 ALTER TABLE incident_contact MODIFY COLUMN changed_at bigint NOT NULL;
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-6', UNIX_TIMESTAMP() * 1000);

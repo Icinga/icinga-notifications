@@ -1,3 +1,5 @@
+SELECT assert_correct_schema_version('v0.2.0-21');
+
 -- This script is used to upgrade the escalation condition column in the rule_escalation table from a raw filter
 -- string to the new JSON object format. The raw filter string is a simple string that represents a logical condition,
 -- while the new JSON object format is a structured representation of the same condition. For filter chains, this
@@ -70,3 +72,5 @@ $$;
 -- Run the upgrade and then drop the routine immediately as it is no longer needed after the upgrade is complete.
 SELECT upgrade_escalation_condition_to_json_object();
 DROP FUNCTION upgrade_escalation_condition_to_json_object();
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-22', EXTRACT(EPOCH from NOW()) * 1000);

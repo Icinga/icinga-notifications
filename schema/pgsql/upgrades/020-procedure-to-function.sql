@@ -1,3 +1,5 @@
+CALL assert_correct_schema_version('v0.2.0-19');
+
 -- A procedure cannot be replaced by a function of the same name, so it must be dropped first.
 DROP PROCEDURE assert_correct_schema_version(text);
 CREATE FUNCTION assert_correct_schema_version(expected_version text)
@@ -19,3 +21,5 @@ BEGIN
     END IF;
 END;
 $$;
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-20', EXTRACT(EPOCH from NOW()) * 1000);

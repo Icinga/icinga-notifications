@@ -1,3 +1,5 @@
+CALL assert_correct_schema_version('v0.2.0-4');
+
 ALTER TABLE incident ADD COLUMN mute_reason mediumtext DEFAULT NULL AFTER severity;
 
 -- Migrate currently active muted state from object onto its open incident.
@@ -8,3 +10,5 @@ UPDATE incident
     AND object.mute_reason IS NOT NULL;
 
 ALTER TABLE object DROP COLUMN mute_reason;
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-5', UNIX_TIMESTAMP() * 1000);

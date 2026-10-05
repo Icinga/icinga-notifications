@@ -1,3 +1,5 @@
+CALL assert_correct_schema_version('v0.2.0-18');
+
 ALTER TABLE incident_history ADD COLUMN event_id binary(16) AFTER incident_id; -- used for external references
 -- This will be used by the query in the [Incident.RetriggerEscalations] method in icinga-notifications.
 CREATE INDEX idx_incident_history_event_id_incident_id ON incident_history(event_id, incident_id);
@@ -44,3 +46,5 @@ CREATE TABLE skipped_notification_history (
     CONSTRAINT pk_skipped_notification_history PRIMARY KEY (id),
     CONSTRAINT fk_skipped_notification_history_notification_history FOREIGN KEY (notification_history_id) REFERENCES notification_history(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-19', UNIX_TIMESTAMP() * 1000);

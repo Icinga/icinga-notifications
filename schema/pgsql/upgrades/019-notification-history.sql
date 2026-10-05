@@ -1,3 +1,5 @@
+CALL assert_correct_schema_version('v0.2.0-18');
+
 CREATE TYPE notification_history_state_type AS ENUM ( 'sent', 'failed' );
 
 ALTER TABLE incident_history ADD COLUMN event_id uuid; -- used for external references
@@ -53,3 +55,5 @@ CREATE TABLE skipped_notification_history (
 
 -- This index is required for the "notification history" retention query to identify and delete related references.
 CREATE INDEX idx_skipped_notification_history_notification_history_id ON skipped_notification_history(notification_history_id);
+
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-19', EXTRACT(EPOCH from NOW()) * 1000);
