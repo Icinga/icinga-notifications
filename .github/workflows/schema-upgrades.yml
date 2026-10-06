@@ -52,14 +52,22 @@ jobs:
         declare -A goConst=([mysql]=expectedMysqlSchemaVersion [pgsql]=expectedPostgresSchemaVersion)
         rc=0
 
-        # Usage: error FILE [LINE] MESSAGE
+        # Usage: error FILE [LINE] MESSAGE - LINE defaults to 1, as annotations without a line aren't shown in a PR's diff
         error() {
-          if [ $# -eq 3 ]; then
-            echo "::error file=$1,line=$2::$3"
-          else
-            echo "::error file=$1::$2"
+          if [ $# -eq 2 ]; then
+            set -- "$1" 1 "$2"
           fi
+          echo "::error file=$1,line=$2::$3"
           rc=1
+        }
+
+        # Usage: error_latest FILE LINE MESSAGE - reports the error on the stamp of the latest upgrade instead, if that has
+        # been changed, as it's the cause and FILE may not be part of the diff
+        error_latest() {
+          if [ -n "$latest" ] && [ -n "${changed[$latest]:-}" ]; then
+            set -- "$latest" "$(last_statement "$latest" | cut -d: -f1)" "$3"
+          fi
+          error "$@"
         }
 
         # Usage: last_statement FILE - prints LINE:STATEMENT of the last line that isn't empty or a comment
@@ -76,6 +84,7 @@ jobs:
           fi
 
           version="v$release"
+          latest=""
           declare -A seen=()
 
           for f in "$dir"/*; do
@@ -92,6 +101,8 @@ jobs:
             num="${BASH_REMATCH[1]}"
             if [ -z "${seen[$num]:-}" ]; then
               seen[$num]="$f"
+            elif [ -z "${changed[$f]:-}" ] && [ -n "${changed[${seen[$num]}]:-}" ]; then
+              error "${seen[$num]}" 1 "Number $num is already used by $f"
             else
               error "$f" 1 "Number $num is already used by ${seen[$num]}"
             fi
@@ -105,6 +116,7 @@ jobs:
             fi
 
             version="v$id"
+            latest="$f"
 
             if [ -n "${changed[$f]:-}" ]; then
               last="$(last_statement "$f")"
@@ -116,12 +128,12 @@ jobs:
 
           if ! grep -qF "INSERT INTO notifications_schema(version, timestamp) VALUES('$version'," "schema/$db/schema.sql"; then
             line="$(grep -nF 'INSERT INTO notifications_schema(' "schema/$db/schema.sql" | tail -n1 | cut -d: -f1)"
-            error "schema/$db/schema.sql" "${line:-1}" "Must stamp the latest schema version $version"
+            error_latest "schema/$db/schema.sql" "${line:-1}" "schema/$db/schema.sql must stamp the latest schema version $version"
           fi
 
           if ! grep -qE "^\s*${goConst[$db]}\s*=\s*\"$version\"$" internal/schema.go; then
             line="$(grep -nE "^\s*${goConst[$db]}\s*=" internal/schema.go | cut -d: -f1)"
-            error internal/schema.go "${line:-1}" "${goConst[$db]} must be the latest schema version $version"
+            error_latest internal/schema.go "${line:-1}" "${goConst[$db]} in internal/schema.go must be the latest schema version $version"
           fi
         done
 
