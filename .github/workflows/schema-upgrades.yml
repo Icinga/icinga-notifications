@@ -85,7 +85,8 @@ jobs:
               continue
             elif [[ ! "$name" =~ ^([0-9]{3})-[a-z0-9_-]+\.sql$ ]]; then
               error "$f" "Invalid name, expected NNN-description.sql or X.Y.Z.sql"
-              continue
+              # Check the contents anyway if the number can be determined, so that all errors are reported at once.
+              [[ "$name" =~ ^([0-9]+) ]] || continue
             fi
 
             num="${BASH_REMATCH[1]}"
