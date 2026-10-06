@@ -58,14 +58,13 @@ func YieldNotificationHistory(
 		ch.name AS channel_name,
 		nh.event_message,
 		nh.incident_closed,
-		nh.state,
 		nh.object_id
     FROM notification_history nh
     LEFT JOIN contact c ON nh.contact_id = c.id AND c.deleted = 'n'
     LEFT JOIN channel ch ON nh.channel_id = ch.id
 	LEFT JOIN contactgroup cg ON nh.contactgroup_id = cg.id
 	LEFT JOIN schedule s ON nh.schedule_id = s.id
-    WHERE nh.triggered_at >= ? ORDER BY nh.triggered_at`
+    WHERE nh.state = ? AND nh.triggered_at >= ? ORDER BY nh.triggered_at`
 
 	valueCh := make(chan NotificationHistoryPair)
 	errCh := make(chan error, 1) // buffered to avoid goroutine leak if the receiver is not ready to receive errors.
@@ -74,7 +73,7 @@ func YieldNotificationHistory(
 		defer close(valueCh)
 		defer close(errCh)
 
-		rows, err := db.QueryxContext(ctx, db.Rebind(query), since)
+		rows, err := db.QueryxContext(ctx, db.Rebind(query), NotificationStateSent, since)
 		if err != nil {
 			errCh <- fmt.Errorf("cannot query notification_history entries: %w", err)
 			return

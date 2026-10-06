@@ -120,6 +120,7 @@ func (s *Sleep) SetConfig(jsonStr json.RawMessage) error {
 	s.SpamStderr = tmp.SpamStderr
 	s.UseInvalidStateK = tmp.UseInvalidStateK
 	s.UseInvalidStateV = tmp.UseInvalidStateV
+	s.Success = tmp.Success
 	s.mu.Unlock()
 
 	return nil
