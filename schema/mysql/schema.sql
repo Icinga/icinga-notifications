@@ -486,6 +486,7 @@ CREATE TABLE notification_history (
     event_message longtext NOT NULL,
     state enum('sent', 'failed'),
     triggered_at bigint NOT NULL,
+    incident_closed enum('n', 'y') NOT NULL DEFAULT 'n',  -- Indicates whether the incident was closed at the time of the notification.
 
     CONSTRAINT pk_notification_history PRIMARY KEY (id),
     CONSTRAINT ck_notification_history_state_notnull CHECK (state IS NOT NULL),
@@ -550,4 +551,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-23', UNIX_TIMESTAMP() * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-24', UNIX_TIMESTAMP() * 1000);
