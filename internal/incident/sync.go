@@ -9,7 +9,6 @@ import (
 
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
-	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -175,12 +174,12 @@ func (i *Incident) recordRecipientRoleChange(ctx context.Context, tx *sqlx.Tx, r
 func (i *Incident) generateNotifications(
 	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
 ) ([]*NotificationEntry, error) {
-	var notificationState source.NotificationState
+	var notificationState NotificationState
 	suppress := i.IsMuted()
 	if suppress {
-		notificationState = source.NotificationStateSuppressed
+		notificationState = NotificationStateSuppressed
 	} else {
-		notificationState = source.NotificationStatePending
+		notificationState = NotificationStatePending
 	}
 
 	var notifications []*NotificationEntry
@@ -234,7 +233,7 @@ func (i *Incident) generateNotifications(
 					HistoryRowID: hr.ID,
 					ContactID:    contact.ID,
 					ChannelID:    origin.ChannelID,
-					State:        source.NotificationStatePending,
+					State:        NotificationStatePending,
 					HistoryEntry: notificationHistory,
 				}
 

@@ -13,18 +13,18 @@ import (
 // NotificationHistory represents a single notification_history database entry,
 // recording the fact that a notification was triggered for a given incident history entry.
 type NotificationHistory struct {
-	ID             int64                    `db:"id"`
-	ObjectID       types.Binary             `db:"object_id"`
-	EventID        types.UUID               `db:"event_id"`
-	ContactID      int64                    `db:"contact_id"`
-	ContactgroupID types.Int                `db:"contactgroup_id"`
-	ScheduleID     types.Int                `db:"schedule_id"`
-	ChannelID      int64                    `db:"channel_id"`
-	IncidentID     types.Int                `db:"incident_id"`
-	EventMessage   string                   `db:"event_message"`
-	State          source.NotificationState `db:"state"`
-	TriggeredAt    types.UnixMilli          `db:"triggered_at"`
-	IncidentClosed types.Bool               `db:"incident_closed"`
+	ID             int64             `db:"id"`
+	ObjectID       types.Binary      `db:"object_id"`
+	EventID        types.UUID        `db:"event_id"`
+	ContactID      int64             `db:"contact_id"`
+	ContactgroupID types.Int         `db:"contactgroup_id"`
+	ScheduleID     types.Int         `db:"schedule_id"`
+	ChannelID      int64             `db:"channel_id"`
+	IncidentID     types.Int         `db:"incident_id"`
+	EventMessage   string            `db:"event_message"`
+	State          NotificationState `db:"state"`
+	TriggeredAt    types.UnixMilli   `db:"triggered_at"`
+	IncidentClosed types.Bool        `db:"incident_closed"`
 }
 
 // Sync persists the current state of this notification history to the database and retrieves the just inserted
