@@ -46,7 +46,7 @@ AS $$
 DECLARE
     actual_version text;
 BEGIN
-    SELECT version INTO actual_version FROM notifications_schema ORDER BY timestamp DESC LIMIT 1;
+    SELECT version INTO actual_version FROM notifications_schema ORDER BY id DESC LIMIT 1;
 
     IF actual_version IS NULL THEN
         RAISE 'Schema version not found in notifications_schema table.';
@@ -609,4 +609,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 );
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0', EXTRACT(EPOCH from NOW()) * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-23', EXTRACT(EPOCH from NOW()) * 1000);

@@ -11,14 +11,14 @@ CREATE PROCEDURE assert_correct_schema_version(expected_version text)
 BEGIN
     DECLARE actual_version text;
     DECLARE error_message text;
-    SELECT version INTO actual_version FROM notifications_schema ORDER BY timestamp DESC LIMIT 1;
+    SELECT version INTO actual_version FROM notifications_schema ORDER BY id DESC LIMIT 1;
     IF actual_version IS NULL THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Schema version not found in notifications_schema table.';
     ELSEIF actual_version != expected_version THEN
         -- MySQL/MariaDB doesn't seem to allow to directly use CONCAT in the SIGNAL statement[^1],
         -- so we need to set it to a variable first.
         -- [^1]: https://bugs.mysql.com/bug.php?id=114001
-        SET error_message = CONCAT('Schema version mismatch: expected ', expected_version, ', got ', actual_version, '. Please apply all previous upgrade scripts in order before applying this one.');
+        SET error_message = CONCAT('Schema version mismatch: expected ', expected_version, ', got ', actual_version, '. Apply all previous upgrade scripts in order first.');
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = error_message;
     END IF;
 END //
@@ -550,4 +550,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0', UNIX_TIMESTAMP() * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-23', UNIX_TIMESTAMP() * 1000);
