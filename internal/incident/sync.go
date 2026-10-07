@@ -24,6 +24,7 @@ func (i *Incident) Upsert() any {
 		Severity              baseEv.Severity `db:"severity"`
 		RecoveredAt           types.UnixMilli `db:"recovered_at"`
 		MuteReason            types.String    `db:"mute_reason"`
+		Summary               types.String    `db:"summary"`
 		Message               types.String    `db:"message"`
 		NextEscalationCheckAt types.UnixMilli `db:"next_escalation_check_at"`
 	}{}
@@ -173,7 +174,7 @@ func (i *Incident) recordRecipientRoleChange(ctx context.Context, tx *sqlx.Tx, r
 // Note: handleUnmute clears i.MuteReason before this function runs, and handleMute sets it after, so a single
 // i.IsMuted() check captures the correct transitional state for mute/unmute and steady-state events alike.
 func (i *Incident) generateNotifications(
-	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
+	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels, reason notifyReason,
 ) ([]*NotificationEntry, error) {
 	var notificationState source.NotificationState
 	suppress := i.IsMuted()
@@ -218,6 +219,9 @@ func (i *Incident) generateNotifications(
 					continue
 				}
 
+				recipientIsNew := i.Recipients[recipient.ToKey(contact)].IsNew
+				effectiveReason := reason.reasonFor(recipientIsNew)
+
 				notificationHistory := NotificationHistory{
 					ObjectID:       i.ObjectID,
 					EventID:        ev.ID,
@@ -235,6 +239,7 @@ func (i *Incident) generateNotifications(
 					ContactID:    contact.ID,
 					ChannelID:    origin.ChannelID,
 					State:        source.NotificationStatePending,
+					Reason:       effectiveReason,
 					HistoryEntry: notificationHistory,
 				}
 

@@ -12,7 +12,6 @@ import (
 	"github.com/icinga/icinga-go-library/retry"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
-	"github.com/icinga/icinga-notifications/internal/contracts"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
 	"github.com/icinga/icinga-notifications/internal/recipient"
@@ -232,7 +231,14 @@ func (c *Channel) Restart(logger *zap.SugaredLogger) {
 }
 
 // Notify prepares and sends the notification request, returns a non-error on fails, nil on success
-func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, o *object.Object, ev *event.Event) error {
+func (c *Channel) Notify(
+	contact *recipient.Contact,
+	i *plugin.Incident,
+	o *object.Object,
+	ev *event.Event,
+	summary string,
+	body string,
+) error {
 	p := c.getPlugin()
 	if p == nil {
 		return errors.New("plugin could not be started")
@@ -246,18 +252,19 @@ func (c *Channel) Notify(contact *recipient.Contact, i contracts.Incident, o *ob
 	req := &plugin.NotificationRequest{
 		Contact: contactStruct,
 		Object: &plugin.Object{
-			Name: o.DisplayName(),
-			Url:  ev.URL,
-			Tags: o.Tags,
+			Name:    o.DisplayName(),
+			Url:     ev.URL,
+			Sources: o.Sources,
+			Tags:    o.Tags,
 		},
-		Incident: &plugin.Incident{
-			Id:       i.ID(),
-			Severity: i.IncidentSeverity(),
-		},
+		Incident: i,
 		Event: &plugin.Event{
 			Time:    ev.Time,
 			Message: ev.Message,
+			Summary: ev.Summary,
 		},
+		Summary: summary,
+		Body:    body,
 	}
 
 	return p.SendNotification(c.pluginCtx, req)

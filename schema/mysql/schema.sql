@@ -382,12 +382,15 @@ CREATE TABLE incident (
     severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg'),
     -- mute_reason indicates whether this incident is currently muted, and its non-null value is mapped to true.
     mute_reason mediumtext,
+    summary longtext, -- contains the latest plugin event summary of the respective object.
     message longtext, -- contains the latest plugin output of the respective object.
+    source_id bigint NOT NULL, -- the source whose event originally opened this incident.
     next_escalation_check_at bigint,
 
     CONSTRAINT pk_incident PRIMARY KEY (id),
     CONSTRAINT ck_incident_severity_notnull CHECK (severity IS NOT NULL),
-    CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id)
+    CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id),
+    CONSTRAINT fk_incident_source FOREIGN KEY (source_id) REFERENCES source(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
@@ -551,4 +554,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-24', UNIX_TIMESTAMP() * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-25', UNIX_TIMESTAMP() * 1000);

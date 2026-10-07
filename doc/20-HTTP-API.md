@@ -64,15 +64,15 @@ An example request to submit an event looks like this:
 ```
 curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomplete: true' -d '@-' 'http://localhost:5680/process-event' <<EOF
 {
-  "name": "dummy-809: random fortune",
-  "url": "http://localhost/icingaweb2/icingadb/service?name=random%20fortune&host.name=dummy-809",
+  "name": "example-809: disk /",
+  "url": "http://localhost/icingaweb2/icingadb/service?name=disk%20%2F&host.name=example-809",
   "tags": {
-    "host": "dummy-809",
-    "service": "random fortune"
+    "host": "example-809",
+    "service": "disk /"
   },
-  "type": "state",
-  "severity": "crit",
-  "message": "Something went somewhere very wrong.",
+  "severity": "ok",
+  "summary": "[OK] - Filesystem checks succeeded",
+  "message": "[OK] - Filesystem checks succeeded\n        \\_[OK] - / (ffs)\n                \\_[OK] - Free space absolute: 242 MiB (of 985 MiB)\n                \\_[OK] - Free space percentage: 24.649%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=727183360B;826918502.400000;930283315.200000;0;1033648128",
   "complete_relations": [
     "host",
     "services",
@@ -81,16 +81,16 @@ curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomple
   ],
   "relations": {
     "host": {
-      "name": "dummy-809",
-      "display_name": "My Dummy Host",
+      "name": "example-809",
+      "display_name": "Example Host 809",
       "vars": {
         "os": "linux"
       }
     },
     "services": [
       {
-        "name": "random fortune",
-        "display_name": "Random Fortune Service",
+        "name": "disk /",
+        "display_name": "Disk /",
         "vars": {
           "env": "production",
           "team": "devops"

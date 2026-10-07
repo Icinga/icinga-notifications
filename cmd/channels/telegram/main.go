@@ -117,8 +117,9 @@ func (ch *Telegram) SendNotification(req *plugin.NotificationRequest) error {
 	}
 
 	var output bytes.Buffer
-	_, _ = fmt.Fprint(&output, plugin.FormatSubject(req)+"\n\n")
-	plugin.FormatMessage(&output, req)
+	_, _ = fmt.Fprintln(&output, req.Summary)
+	_, _ = fmt.Fprintln(&output)
+	_, _ = fmt.Fprintln(&output, req.Body)
 
 	message := struct {
 		ChatID                string           `json:"chat_id"`
