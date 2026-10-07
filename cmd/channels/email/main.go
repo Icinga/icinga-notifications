@@ -375,9 +375,6 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 		return fmt.Errorf("contact user %s does not have an e-mail address", req.Contact.FullName)
 	}
 
-	var msg bytes.Buffer
-	plugin.FormatMessage(&msg, req)
-
 	compositeKey := makeStateKey(to, req.Incident)
 
 	ch.mu.Lock()
@@ -385,7 +382,7 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 	b := enmime.Builder().
 		ToAddrs([]mail.Address{*to}).
 		From(ch.SenderName, ch.SenderMail).
-		Subject(plugin.FormatSubject(req)).
+		Subject(req.Summary).
 		Header("Message-Id", messageID)
 	ch.mu.Unlock()
 
@@ -400,7 +397,7 @@ func (ch *Email) SendNotification(req *plugin.NotificationRequest) error {
 		b = b.Header("In-Reply-To", s.LastMessageID).Header("References", s.LastMessageID)
 	}
 
-	if err := b.Text(msg.Bytes()).Send(ch); err != nil {
+	if err := b.Text([]byte(req.Body)).Send(ch); err != nil {
 		return err
 	}
 

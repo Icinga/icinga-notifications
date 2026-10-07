@@ -419,21 +419,25 @@ CREATE INDEX idx_rule_entry_recipient_changed_at ON rule_entry_recipient(changed
 CREATE TABLE incident (
     id bigserial,
     object_id bytea NOT NULL,
+    source_id bigint NOT NULL, -- the source whose event originally opened this incident.
     started_at bigint NOT NULL,
     recovered_at bigint,
     severity severity NOT NULL,
     -- mute_reason indicates whether this incident is currently muted, and its non-null value is mapped to true.
     mute_reason text,
+    summary text NOT NULL, -- contains the latest plugin event summary of the respective object.
     message text, -- contains the latest plugin output of the respective object.
     next_escalation_check_at bigint,
 
     CONSTRAINT pk_incident PRIMARY KEY (id),
-    CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id)
+    CONSTRAINT fk_incident_object FOREIGN KEY (object_id) REFERENCES object(id),
+    CONSTRAINT fk_incident_source FOREIGN KEY (source_id) REFERENCES source(id)
 );
 
 -- PostgreSQL doesn't automatically create an index for foreign keys, so we need to do this manually.
 -- This is important for the retention queries, which become quite unusable without an index on object_id.
 CREATE INDEX idx_incident_object_id ON incident(object_id);
+CREATE INDEX idx_incident_source_id ON incident(source_id);
 CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
 CREATE INDEX idx_incident_object_id_recovered_at ON incident(object_id, recovered_at);
 CREATE INDEX idx_incident_next_escalation_check_at ON incident(next_escalation_check_at);
@@ -613,4 +617,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 );
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-25', EXTRACT(EPOCH from NOW()) * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-26', EXTRACT(EPOCH from NOW()) * 1000);

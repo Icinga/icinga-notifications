@@ -23,6 +23,7 @@ func (i *Incident) Upsert() any {
 		Severity              baseEv.Severity `db:"severity"`
 		RecoveredAt           types.UnixMilli `db:"recovered_at"`
 		MuteReason            types.String    `db:"mute_reason"`
+		Summary               types.String    `db:"summary"`
 		Message               types.String    `db:"message"`
 		NextEscalationCheckAt types.UnixMilli `db:"next_escalation_check_at"`
 	}{}
@@ -177,6 +178,7 @@ func (i *Incident) generateNotifications(
 	tx *sqlx.Tx,
 	ev *event.Event,
 	contactChannels rule.ContactChannels,
+	reason notifyReason,
 ) ([]*NotificationEntry, error) {
 	var notificationState NotificationState
 	suppress := i.IsMuted()
@@ -198,6 +200,11 @@ func (i *Incident) generateNotifications(
 		isIncidentRelated := ev.OpenOrEscalate() || slices.ContainsFunc(channelOrigins, func(origin rule.ChannelOrigin) bool {
 			return origin.IncidentRelated
 		})
+
+		recipientIsNew := slices.ContainsFunc(
+			channelOrigins,
+			func(o rule.ChannelOrigin) bool { return i.Recipients[o.RecipientKey(contact)].IsNew })
+		effectiveReason := reason.reasonFor(ev.NotificationOnly() && !i.IsNew(), recipientIsNew)
 
 		var lastChannelID int64
 		var notificationOfCurrentChannel *NotificationEntry
@@ -250,6 +257,7 @@ func (i *Incident) generateNotifications(
 					ContactID:         contact.ID,
 					ChannelID:         origin.ChannelID,
 					State:             NotificationStatePending,
+					Reason:            effectiveReason,
 					HistoryEntry:      notificationHistory,
 					IsIncidentRelated: isIncidentRelated,
 				}

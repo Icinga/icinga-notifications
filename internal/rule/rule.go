@@ -117,6 +117,18 @@ type ChannelOrigin struct {
 	IncidentRelated bool
 }
 
+// RecipientKey returns the key of the recipient based on its origin.
+func (o ChannelOrigin) RecipientKey(contact *recipient.Contact) recipient.Key {
+	switch {
+	case o.ContactGroupID != 0:
+		return recipient.Key{GroupID: types.MakeInt(o.ContactGroupID)}
+	case o.ScheduleID != 0:
+		return recipient.Key{ScheduleID: types.MakeInt(o.ScheduleID)}
+	default:
+		return recipient.ToKey(contact)
+	}
+}
+
 // ContactChannels stores, per contact and channel ID, the origins that selected this channel.
 //
 // When multiple entry recipients resolve to the same contact and channel, all their origins are
