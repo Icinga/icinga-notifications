@@ -380,6 +380,11 @@ CREATE TABLE incident (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
+-- This index is explicitly referenced by name via FORCE INDEX in [Incident.RestoreState] in Icinga Notifications.
+-- Without that hint, the optimizer may choose idx_incident_recovered_at for the SELECT ... FOR UPDATE query, locking
+-- the open incidents of all objects and deadlocking with concurrent updates of recovered_at. Do not rename or drop it!
+-- Apparently, MariaDB uses this index to satisfy the foreign key constraint on incident(object_id) as well, so it is
+-- not redundant and can't easily be dropped without dropping the FK constraint first.
 CREATE INDEX idx_incident_object_id_recovered_at ON incident(object_id, recovered_at);
 CREATE INDEX idx_incident_next_escalation_check_at ON incident(next_escalation_check_at);
 CREATE INDEX idx_incident_recovered_at_next_escalation_check_at ON incident(recovered_at, next_escalation_check_at);

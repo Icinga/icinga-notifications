@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -911,11 +912,14 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	return contactChs
 }
 
-// RestoreState reloads all incident state from the database within the given transaction.
+// RestoreState reloads the incident state from the database within the given transaction.
 //
-// This method must be called for existing Incidents before processing an event, as another node in an HA setup may
-// have altered the state in the meantime. The incident row is locked via SELECT FOR UPDATE so that concurrent calls
-// on other nodes for the same incident are serialized until the caller commits.
+// The open incident is looked up by the Incident.ObjectID, which must be set before calling this method. It must be
+// called before processing an event, as another node in an HA setup may have altered the state in the meantime.
+//
+// The incident row is locked via SELECT ... FOR UPDATE, so that concurrent calls for the same object, whether on
+// this or other nodes, are serialized until the caller commits or rolls back the tx. To avoid lock ordering issues,
+// callers shouldn't lock any other incident rows in the same tx before calling this method.
 //
 // If restoreAll is true, the incident's matched rules, escalation states, and recipients are also restored from
 // the database, otherwise only the incident row itself is restored.
@@ -923,10 +927,23 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 // A caller must not hold a read lock on the Incident.runtimeConfig when calling this method, as it will be
 // acquired internally to restore the incident's escalation states.
 //
-// If the Incident has recovered in the meantime, a sql.ErrNoRows error will be returned.
+// If there is no open incident for the object, e.g. because it has recovered in the meantime or has never existed,
+// a sql.ErrNoRows error will be returned.
 func (i *Incident) RestoreState(ctx context.Context, tx *sqlx.Tx, restoreAll bool) error {
-	stmt := i.db.Rebind(i.db.BuildSelectStmt(i, i) + ` WHERE "recovered_at" IS NULL AND "object_id" = ? FOR UPDATE`)
-	if err := tx.GetContext(ctx, i, stmt, i.ObjectID); err != nil {
+	var indexHint string
+	if i.db.DriverName() == database.MySQL {
+		// Force the composite index on MySQL/MariaDB. Otherwise, the optimizer may choose idx_incident_recovered_at,
+		// causing this locking read to X-lock the open incidents of all objects and deadlock with concurrent Sync()
+		// calls. See the schema comment on idx_incident_object_id_recovered_at.
+		indexHint = ` FORCE INDEX (idx_incident_object_id_recovered_at)`
+	}
+	stmt := fmt.Sprintf(
+		`SELECT "%s" FROM "%s"%s WHERE "object_id" = ? AND "recovered_at" IS NULL FOR UPDATE`,
+		strings.Join(i.db.BuildColumns(i), `", "`),
+		database.TableName(i),
+		indexHint,
+	)
+	if err := tx.GetContext(ctx, i, i.db.Rebind(stmt), i.ObjectID); err != nil {
 		return err
 	}
 
