@@ -113,14 +113,18 @@ func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Re
 		return nil // The recipient already has the desired role, so no changes are needed.
 	}
 
+	oldRole := state.Role
 	if !exists {
 		i.Recipients[recipientKey] = RecipientState{Role: role, IsNew: true}
 	} else {
-		if err := i.recordRecipientRoleChange(ctx, tx, r, state.Role, role); err != nil {
-			return err
-		}
 		state.Role = role
 		i.Recipients[recipientKey] = state
+	}
+
+	// Record the role change in the incident's history table regardless of whether the recipient is new or existing.
+	// This ensures that we have a complete history of role changes for all recipients.
+	if err := i.recordRecipientRoleChange(ctx, tx, r, oldRole, role); err != nil {
+		return err
 	}
 
 	cr := &ContactRow{IncidentID: i.Id, Key: recipientKey, Role: role, ChangedAt: types.UnixMilli(time.Now())}
