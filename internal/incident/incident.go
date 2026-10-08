@@ -1108,9 +1108,9 @@ func (i *Incident) RestoreState(ctx context.Context, tx *sqlx.Tx, restoreAll boo
 //
 // A caller must not hold a read lock on the Incident.runtimeConfig when calling this method, as it will be
 // acquired internally to restore the incident's escalation states.
-func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
+func (i *Incident) restoreRelatedState(ctx context.Context, executor database.TxOrDB) error {
 	i.EscalationRules = make(map[ruleID]struct{})
-	err := utils.ForEachRow(ctx, i.db, tx, "incident_id", []int64{i.Id}, func(rr *RuleRow) {
+	err := utils.ForEachRow(ctx, i.db, executor, "incident_id", []int64{i.Id}, func(rr *RuleRow) {
 		i.EscalationRules[rr.RuleID] = struct{}{}
 	})
 	if err != nil {
@@ -1119,7 +1119,7 @@ func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
 	}
 
 	i.EscalationState = make(map[escalationID]*EscalationState)
-	err = utils.ForEachRow(ctx, i.db, tx, "incident_id", []int64{i.Id}, func(es *EscalationState) {
+	err = utils.ForEachRow(ctx, i.db, executor, "incident_id", []int64{i.Id}, func(es *EscalationState) {
 		i.EscalationState[es.RuleEntryID] = es
 
 		i.runtimeConfig.RLock()
@@ -1135,7 +1135,7 @@ func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
 	}
 
 	i.Recipients = make(map[recipient.Key]RecipientState)
-	err = utils.ForEachRow(ctx, i.db, tx, "incident_id", []int64{i.Id}, func(cr *ContactRow) {
+	err = utils.ForEachRow(ctx, i.db, executor, "incident_id", []int64{i.Id}, func(cr *ContactRow) {
 		i.Recipients[cr.Key] = RecipientState{Role: cr.Role, EventTypes: cr.EventTypes}
 	})
 	if err != nil {
