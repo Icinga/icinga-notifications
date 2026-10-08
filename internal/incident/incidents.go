@@ -12,7 +12,6 @@ import (
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/object"
-	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )
 
@@ -127,9 +126,7 @@ func yield(
 			}
 			i.initializeFields(db, rc, logger.With(zap.String("incident", i.String()), zap.String("object", obj.DisplayName())))
 			if restoreAll {
-				if err := db.ExecTx(ctx, nil, func(ctx context.Context, tx *sqlx.Tx) error {
-					return i.restoreRelatedState(ctx, tx)
-				}); err != nil {
+				if err := i.restoreRelatedState(ctx, db); err != nil {
 					errCh <- fmt.Errorf("cannot restore related state for incident %s: %w", i, err)
 					return
 				}

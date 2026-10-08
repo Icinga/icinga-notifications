@@ -655,12 +655,8 @@ func reloadIncident(t *testing.T, db *database.DB, i *Incident) *Incident {
 
 // reloadIncidentRecursive reloads the given Incident from the database recursively and returns a new one.
 func reloadIncidentRecursive(t *testing.T, db *database.DB, i *Incident) *Incident {
-	reloaded := &Incident{ObjectID: i.ObjectID}
-	reloaded.initializeFields(db, i.runtimeConfig, i.logger)
-	err := db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
-		return reloaded.RestoreState(ctx, tx, true)
-	})
-	require.NoError(t, err)
+	reloaded := reloadIncident(t, db, i)
+	require.NoError(t, reloaded.restoreRelatedState(t.Context(), db))
 	return reloaded
 }
 
