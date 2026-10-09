@@ -91,17 +91,6 @@ CREATE TABLE channel (
 
 CREATE INDEX idx_channel_changed_at ON channel(changed_at);
 
-CREATE TABLE channel_state (
-    channel_id bigint NOT NULL,
-    state_key varchar(255) NOT NULL,
-    value varchar(4096) NOT NULL,
-
-    CONSTRAINT pk_channel_state PRIMARY KEY (channel_id, state_key),
-    CONSTRAINT fk_channel_state_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
-);
-
-CREATE INDEX idx_channel_state_channel_id ON channel_state(channel_id);
-
 CREATE TABLE contact (
     id bigserial,
     external_uuid uuid, -- used for external references
@@ -528,6 +517,22 @@ COMMENT ON INDEX idx_incident_history_time_type IS 'Incident History ordered by 
 -- This will be used by the query in the [Incident.RetriggerEscalations] method in icinga-notifications.
 CREATE INDEX idx_incident_history_event_id_incident_id ON incident_history(event_id, incident_id);
 
+-- Created after the incident table because of its foreign key to it.
+CREATE TABLE channel_state (
+    state_key uuid NOT NULL,
+    channel_id bigint NOT NULL,
+    incident_id bigint NOT NULL, -- The incident this state is associated with.
+    value varchar(4096) NOT NULL,
+
+    CONSTRAINT pk_channel_state PRIMARY KEY (state_key),
+    CONSTRAINT fk_channel_state_channel FOREIGN KEY (channel_id) REFERENCES channel(id),
+    CONSTRAINT fk_channel_state_incident FOREIGN KEY (incident_id) REFERENCES incident(id)
+);
+
+CREATE INDEX idx_channel_state_channel_id ON channel_state(channel_id);
+-- This index is required to speed up the "incident" retention query.
+CREATE INDEX idx_channel_state_incident_id ON channel_state(incident_id);
+
 CREATE TABLE notification_history (
     id bigserial,
     object_id bytea NOT NULL,
@@ -541,6 +546,8 @@ CREATE TABLE notification_history (
     state notification_history_state_type NOT NULL,
     triggered_at bigint NOT NULL,
     incident_closed boolenum NOT NULL DEFAULT 'n', -- Indicates whether the incident was closed at the time of the notification.
+
+    delivery_result text, -- The result of the notification delivery attempt (if any) as a JSON string.
 
     CONSTRAINT pk_notification_history PRIMARY KEY (id),
     CONSTRAINT fk_notification_history_object_id FOREIGN KEY (object_id) REFERENCES object(id)
@@ -610,4 +617,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 );
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-24', EXTRACT(EPOCH from NOW()) * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-25', EXTRACT(EPOCH from NOW()) * 1000);

@@ -7,7 +7,7 @@ require (
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
 	github.com/emersion/go-smtp v0.25.0
 	github.com/google/uuid v1.6.0
-	github.com/icinga/icinga-go-library v0.9.1-0.20261009130856-ae75334169f1
+	github.com/icinga/icinga-go-library v0.9.1-0.20261009131002-68464efa3862
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/okzk/sdnotify v0.0.0-20180710141335-d9becc38acbd

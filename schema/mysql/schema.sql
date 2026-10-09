@@ -59,17 +59,6 @@ CREATE TABLE channel (
 
 CREATE INDEX idx_channel_changed_at ON channel(changed_at);
 
-CREATE TABLE channel_state (
-    channel_id bigint NOT NULL,
-    state_key varchar(255) NOT NULL,
-    value varchar(4096) NOT NULL,
-
-    CONSTRAINT pk_channel_state PRIMARY KEY (channel_id, state_key),
-    CONSTRAINT fk_channel_state_channel FOREIGN KEY (channel_id) REFERENCES channel(id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
-
-CREATE INDEX idx_channel_state_channel_id ON channel_state(channel_id);
-
 CREATE TABLE contact (
     id bigint NOT NULL AUTO_INCREMENT,
     external_uuid binary(16), -- used for external references
@@ -391,6 +380,11 @@ CREATE TABLE incident (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
+-- This index is explicitly referenced by name via FORCE INDEX in [Incident.RestoreState] in Icinga Notifications.
+-- Without that hint, the optimizer may choose idx_incident_recovered_at for the SELECT ... FOR UPDATE query, locking
+-- the open incidents of all objects and deadlocking with concurrent updates of recovered_at. Do not rename or drop it!
+-- Apparently, MariaDB uses this index to satisfy the foreign key constraint on incident(object_id) as well, so it is
+-- not redundant and can't easily be dropped without dropping the FK constraint first.
 CREATE INDEX idx_incident_object_id_recovered_at ON incident(object_id, recovered_at);
 CREATE INDEX idx_incident_next_escalation_check_at ON incident(next_escalation_check_at);
 CREATE INDEX idx_incident_recovered_at_next_escalation_check_at ON incident(recovered_at, next_escalation_check_at);
@@ -474,6 +468,18 @@ CREATE INDEX idx_incident_history_time_type ON incident_history(time, type) COMM
 -- This will be used by the query in the [Incident.RetriggerEscalations] method in icinga-notifications.
 CREATE INDEX idx_incident_history_event_id_incident_id ON incident_history(event_id, incident_id);
 
+-- Created after the incident table because of its foreign key to it.
+CREATE TABLE channel_state (
+    state_key binary(16) NOT NULL,
+    channel_id bigint NOT NULL,
+    incident_id bigint NOT NULL, -- The incident this state is associated with.
+    value varchar(4096) NOT NULL,
+
+    CONSTRAINT pk_channel_state PRIMARY KEY (state_key),
+    CONSTRAINT fk_channel_state_channel FOREIGN KEY (channel_id) REFERENCES channel(id),
+    CONSTRAINT fk_channel_state_incident FOREIGN KEY (incident_id) REFERENCES incident(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
 CREATE TABLE notification_history (
     id bigint NOT NULL AUTO_INCREMENT,
     object_id binary(32) NOT NULL,
@@ -487,6 +493,8 @@ CREATE TABLE notification_history (
     state enum('sent', 'failed'),
     triggered_at bigint NOT NULL,
     incident_closed enum('n', 'y') NOT NULL DEFAULT 'n',  -- Indicates whether the incident was closed at the time of the notification.
+
+    delivery_result mediumtext, -- The result of the notification delivery attempt (if any) as a JSON string.
 
     CONSTRAINT pk_notification_history PRIMARY KEY (id),
     CONSTRAINT ck_notification_history_state_notnull CHECK (state IS NOT NULL),
@@ -551,4 +559,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-24', UNIX_TIMESTAMP() * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-25', UNIX_TIMESTAMP() * 1000);
