@@ -250,7 +250,8 @@ See [Authentication](#authentication) for the transport-specific rules that appl
 
 In order to retrieve notification history entries, send a `GET` request to the `/notification-history` endpoint
 with the query parameters `filter` described in [API Filtering](#api-filtering) and `since` set to a Unix timestamp in
-milliseconds. Only entries whose `triggered_at` is greater than or equal to this value are returned.
+milliseconds. Only entries whose `triggered_at` is greater than or equal to this value are returned. Failed notification
+attempts are not included, i.e. the response only contains notifications that were successfully sent to a contact.
 
 In the successful case with matching notification history entries, the [response result](#response-format) will contain
 the following attributes for each notification history entry:
@@ -258,13 +259,12 @@ the following attributes for each notification history entry:
 | Attribute         | Description                                                                                                 |
 |-------------------|-------------------------------------------------------------------------------------------------------------|
 | event_id          | Hex-encoded ID of the event that caused the notification to be triggered.                                   |
-| triggered_at      | Unix timestamp in milliseconds at which the notification attempt was made.                                  |
+| triggered_at      | Unix timestamp in milliseconds at which the notification was sent.                                          |
 | contact_name      | Full name of the contact the notification was sent to.                                                      |
 | contactgroup_name | Name of the contact group the contact was resolved from, if any.                                            |
 | schedule_name     | Name of the on-call schedule the contact was resolved from, if any.                                         |
 | channel_name      | Name of the channel used to deliver the notification.                                                       |
 | event_message     | The message of the event that triggered the notification.                                                   |
-| state             | The state of the notification attempt, either `sent` or `failed`.                                           |
 | incident_closed   | A boolean indicating whether the associated incident was closed at the time the notification was triggered. |
 
 In error cases, the response result will contain the following attributes:
@@ -283,8 +283,8 @@ The following example shows how to retrieve all notification history entries rec
 ```
 $ curl -u 'example:insecureinsecure' 'http://localhost:5680/notification-history?since=1767225600000' -G --data-urlencode 'filter={"host":"test-host"}'
 ...
-{"status":"success","result":{"event_id":"b56665fc-70f1-48b9-a19c-b15beeb0152e","triggered_at":1788518901863,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"PING OK - Packet loss = 0%, RTA = 0.09 ms","state":"sent","incident_closed":false}}
-{"status":"success","result":{"event_id":"48bb1a43-4066-4b69-a14f-7d3d1fd76927","triggered_at":1788518901865,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"LOAD OK - total load average: 1.93, 0.98, 0.66","state":"sent","incident_closed":false}}
+{"status":"success","result":{"event_id":"b56665fc-70f1-48b9-a19c-b15beeb0152e","triggered_at":1788518901863,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"PING OK - Packet loss = 0%, RTA = 0.09 ms","incident_closed":false}}
+{"status":"success","result":{"event_id":"48bb1a43-4066-4b69-a14f-7d3d1fd76927","triggered_at":1788518901865,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"LOAD OK - total load average: 1.93, 0.98, 0.66","incident_closed":false}}
 ```
 
 ## API Filtering

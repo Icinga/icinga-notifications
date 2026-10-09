@@ -9,7 +9,6 @@ import (
 
 	"github.com/icinga/icinga-go-library/database"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
-	"github.com/icinga/icinga-go-library/notifications/source"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
@@ -767,9 +766,9 @@ func (i *Incident) notifyContacts(
 
 		err := i.notifyContact(obj, contact, ev, ch)
 		if err != nil {
-			notification.State = source.NotificationStateFailed
+			notification.State = NotificationStateFailed
 		} else {
-			notification.State = source.NotificationStateSent
+			notification.State = NotificationStateSent
 		}
 
 		notification.SentAt = types.UnixMilli(time.Now())

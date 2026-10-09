@@ -121,7 +121,7 @@ func TestIncidents(t *testing.T) {
 	})
 
 	channel.UpsertPlugins(t.Context(), daemon.Config().ChannelsDir, logs.GetChildLogger("channel"), db)
-	ch := makeTestChannel(t, db, cleaner, "notification_history_channel ", "sleep", `{"success": true}`)
+	ch := makeTestChannel(t, db, cleaner, "notification_history_channel ", "sleep", `{"duration":"1ns","success": true}`)
 
 	contact := makeContact(t, db, cleaner, "testuser", "testuser", ch.ID)
 	incidentManager := makeContact(t, db, cleaner, "Thomas A. Anderson", "neo", ch.ID)
