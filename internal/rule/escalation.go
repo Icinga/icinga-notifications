@@ -1,7 +1,6 @@
 package rule
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -13,7 +12,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-type Escalation struct {
+type Entry struct {
 	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
 
 	RuleID        int64        `db:"rule_id"`
@@ -22,13 +21,13 @@ type Escalation struct {
 	ConditionExpr types.String `db:"condition"`
 	FallbackForID types.Int    `db:"fallback_for"`
 
-	Condition  filter.Filter          `db:"-"`
-	Fallbacks  []*Escalation          `db:"-"`
-	Recipients []*EscalationRecipient `db:"-"`
+	Condition  filter.Filter     `db:"-"`
+	Fallbacks  []*Entry          `db:"-"`
+	Recipients []*EntryRecipient `db:"-"`
 }
 
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
-func (e *Escalation) IncrementalInitAndValidate() error {
+func (e *Entry) IncrementalInitAndValidate() error {
 	if e.ConditionExpr.Valid {
 		f, err := filter.ParseASTExpr(e.ConditionExpr.String)
 		if err != nil {
@@ -48,10 +47,10 @@ func (e *Escalation) IncrementalInitAndValidate() error {
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
 //
-// This allows us to use `zap.Inline(escalation)` or `zap.Object("rule_escalation", escalation)` wherever
+// This allows us to use `zap.Inline(escalation)` or `zap.Object("rule_entry", entry)` wherever
 // fine-grained logging context is needed, without having to add all the individual fields ourselves each time.
 // https://pkg.go.dev/go.uber.org/zap/zapcore#ObjectMarshaler
-func (e *Escalation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+func (e *Entry) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("id", e.ID)
 	encoder.AddInt64("rule_id", e.RuleID)
 	encoder.AddString("name", e.DisplayName())
@@ -66,9 +65,9 @@ func (e *Escalation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	return nil
 }
 
-// Eval evaluates the configured escalation filter for the provided filter.
-// Returns always true if there are no configured escalation conditions.
-func (e *Escalation) Eval(filterable *EscalationFilter) (bool, error) {
+// Eval evaluates the configured entry filter for the provided filter.
+// Returns always true if there are no configured entry conditions.
+func (e *Entry) Eval(filterable filter.Filterable) (bool, error) {
 	if e.Condition == nil {
 		return true, nil
 	}
@@ -76,7 +75,7 @@ func (e *Escalation) Eval(filterable *EscalationFilter) (bool, error) {
 	return e.Condition.Eval(filterable)
 }
 
-func (e *Escalation) DisplayName() string {
+func (e *Entry) DisplayName() string {
 	if e.NameRaw.Valid && e.NameRaw.String != "" {
 		return e.NameRaw.String
 	}
@@ -101,7 +100,7 @@ func (e *Escalation) DisplayName() string {
 	return strings.Join(recipients, ", ")
 }
 
-func (e *Escalation) GetContactsAt(t time.Time) []ContactChannelPair {
+func (e *Entry) GetContactsAt(t time.Time) []ContactChannelPair {
 	var pairs []ContactChannelPair
 
 	for _, r := range e.Recipients {
@@ -113,34 +112,34 @@ func (e *Escalation) GetContactsAt(t time.Time) []ContactChannelPair {
 	return pairs
 }
 
-func (e *Escalation) TableName() string {
-	return "rule_escalation"
+func (e *Entry) TableName() string {
+	return "rule_entry"
 }
 
-type EscalationRecipient struct {
+type EntryRecipient struct {
 	baseconf.IncrementalPkDbEntry[int64] `db:",inline"`
 
-	EscalationID  int64         `db:"rule_escalation_id"`
-	ChannelID     sql.NullInt64 `db:"channel_id"`
+	EntryID       int64     `db:"rule_entry_id"`
+	ChannelID     types.Int `db:"channel_id"`
 	recipient.Key `db:",inline"`
 	Recipient     recipient.Recipient `db:"-"`
 }
 
 // MarshalLogObject implements the zapcore.ObjectMarshaler interface.
-func (r *EscalationRecipient) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
+func (r *EntryRecipient) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("id", r.ID)
-	encoder.AddInt64("rule_escalation_id", r.EscalationID)
+	encoder.AddInt64("rule_entry_id", r.EntryID)
 	if r.ChannelID.Valid {
 		encoder.AddInt64("channel_id", r.ChannelID.Int64)
 	}
 	return r.Key.MarshalLogObject(encoder)
 }
 
-func (r *EscalationRecipient) TableName() string {
-	return "rule_escalation_recipient"
+func (r *EntryRecipient) TableName() string {
+	return "rule_entry_recipient"
 }
 
 type ContactChannelPair struct {
 	Contact   *recipient.Contact
-	ChannelID sql.NullInt64
+	ChannelID types.Int
 }

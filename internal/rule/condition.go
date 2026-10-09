@@ -153,3 +153,31 @@ func keyString(key []string) string {
 	}
 	return key[0]
 }
+
+type NotificationFilter struct {
+	EventType string
+}
+
+func (n *NotificationFilter) EvalEqual(key []string, value any) (bool, error) {
+	switch keyString(key) {
+	case "event_type":
+		if s, ok := value.(string); ok && n.EventType == s {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (n *NotificationFilter) EvalExists(key []string) bool {
+	return keyString(key) == "event_type"
+}
+
+func (n *NotificationFilter) EvalLike(key []string, value any) (bool, error) {
+	return false, fmt.Errorf("notification rule filter does not support wildcard matches")
+}
+func (n *NotificationFilter) EvalLess(key []string, value any) (bool, error) {
+	return false, fmt.Errorf("notification rule filter does not support 'less' matches")
+}
+func (n *NotificationFilter) EvalLessOrEqual(key []string, value any) (bool, error) {
+	return false, fmt.Errorf("notification rule filter does not support 'less or equal' matches")
+}

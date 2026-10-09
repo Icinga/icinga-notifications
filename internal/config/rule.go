@@ -12,7 +12,7 @@ import (
 // The second return value indicates whether there are any rules without an object filter, in which case the events
 // from the provided src should be processed nonetheless, even if they don't carry all the required filter columns
 // unless it was explicitly requested to reject such events by the client.
-func (r *RuntimeConfig) GetRulesFilterColumnsForSource(src *Source) (rule.FilterAttrsType, bool) {
+func (r *RuntimeConfig) GetRulesFilterColumnsForSource(src *Source, ruleType rule.Type) (rule.FilterAttrsType, bool) {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -20,7 +20,7 @@ func (r *RuntimeConfig) GetRulesFilterColumnsForSource(src *Source) (rule.Filter
 	var hasRulesWithoutFilter bool
 	for id := range src.RuleIDs() {
 		eventRule, ok := r.Rules[id]
-		if !ok {
+		if !ok || eventRule.Type != ruleType {
 			continue
 		}
 		columns = append(columns, eventRule.FilterColumns...)
@@ -43,7 +43,7 @@ func (r *RuntimeConfig) applyPendingRules() {
 				newElement.TimePeriod = tp
 			}
 
-			newElement.Escalations = make(map[int64]*rule.Escalation)
+			newElement.Entries = make(map[int64]*rule.Entry)
 			for _, src := range r.Sources {
 				if src.Type == newElement.SourceType {
 					src.appendRuleID(newElement.ID)
@@ -98,17 +98,17 @@ func (r *RuntimeConfig) applyPendingRules() {
 
 	incrementalApplyPending(
 		r,
-		&r.ruleEscalations, &r.configChange.ruleEscalations,
-		func(newElement *rule.Escalation) error {
+		&r.ruleEntries, &r.configChange.ruleEntries,
+		func(newElement *rule.Entry) error {
 			elementRule, ok := r.Rules[newElement.RuleID]
 			if !ok {
-				return fmt.Errorf("rule escalation refers unknown rule %d", newElement.RuleID)
+				return fmt.Errorf("rule entry refers unknown rule %d", newElement.RuleID)
 			}
 
-			elementRule.Escalations[newElement.ID] = newElement
+			elementRule.Entries[newElement.ID] = newElement
 			return nil
 		},
-		func(curElement, update *rule.Escalation) error {
+		func(curElement, update *rule.Entry) error {
 			if curElement.RuleID != update.RuleID {
 				return errRemoveAndAddInstead
 			}
@@ -123,41 +123,51 @@ func (r *RuntimeConfig) applyPendingRules() {
 
 			return nil
 		},
-		func(delElement *rule.Escalation) error {
+		func(delElement *rule.Entry) error {
 			elementRule, ok := r.Rules[delElement.RuleID]
 			if !ok {
 				return nil
 			}
 
-			delete(elementRule.Escalations, delElement.ID)
+			delete(elementRule.Entries, delElement.ID)
 			return nil
 		})
 
+	lookupEntry := func(entryID int64) (*rule.Entry, error) {
+		for _, rr := range r.Rules {
+			re, ok := rr.Entries[entryID]
+			if ok {
+				return re, nil
+			}
+		}
+		return nil, fmt.Errorf("rule entry recipient refers to unknown entry %d", entryID)
+	}
+
 	incrementalApplyPending(
 		r,
-		&r.ruleEscalationRecipients, &r.configChange.ruleEscalationRecipients,
-		func(newElement *rule.EscalationRecipient) error {
+		&r.ruleEntryRecipients, &r.configChange.ruleEntryRecipients,
+		func(newElement *rule.EntryRecipient) error {
 			newElement.Recipient = r.GetRecipient(newElement.Key)
 			if newElement.Recipient == nil {
-				return fmt.Errorf("rule escalation recipient is missing or unknown")
+				return fmt.Errorf("rule entry recipient is missing or unknown")
 			}
 
-			escalation := r.GetRuleEscalation(newElement.EscalationID)
-			if escalation == nil {
-				return fmt.Errorf("rule escalation recipient refers to unknown escalation %d", newElement.EscalationID)
+			re, err := lookupEntry(newElement.EntryID)
+			if err != nil {
+				return err
 			}
-			escalation.Recipients = append(escalation.Recipients, newElement)
+			re.Recipients = append(re.Recipients, newElement)
 
 			return nil
 		},
 		nil,
-		func(delElement *rule.EscalationRecipient) error {
-			escalation := r.GetRuleEscalation(delElement.EscalationID)
-			if escalation == nil {
-				return nil
+		func(delElement *rule.EntryRecipient) error {
+			re, err := lookupEntry(delElement.EntryID)
+			if err != nil {
+				return err
 			}
 
-			escalation.Recipients = slices.DeleteFunc(escalation.Recipients, func(recipient *rule.EscalationRecipient) bool {
+			re.Recipients = slices.DeleteFunc(re.Recipients, func(recipient *rule.EntryRecipient) bool {
 				return recipient.ID == delElement.ID
 			})
 			return nil

@@ -48,12 +48,18 @@ type QuickAction struct {
 	Kind       Action            `json:"action"`
 	ContactID  int64             `json:"contact_id"`
 	ObjectTags map[string]string `json:"object_tags"`
+	EventTypes types.StringList  `json:"event_types"`
 }
 
 // MarshalLogObject implements the [zapcore.ObjectMarshaler] interface.
 func (qa *QuickAction) MarshalLogObject(enc zapcore.ObjectEncoder) error {
 	enc.AddString("action", qa.Kind.String())
 	enc.AddInt64("contact_id", qa.ContactID)
+	if evTypeStr, err := qa.EventTypes.MarshalJSON(); err != nil {
+		return err
+	} else {
+		enc.AddByteString("event_types", evTypeStr)
+	}
 	return enc.AddObject("object_tags", zapcore.ObjectMarshalerFunc(func(enc zapcore.ObjectEncoder) error {
 		for k, v := range qa.ObjectTags {
 			enc.AddString(k, v)
