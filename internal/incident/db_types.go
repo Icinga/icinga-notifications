@@ -108,6 +108,8 @@ type NotificationEntry struct {
 	State        source.NotificationState `db:"notification_state"`
 	SentAt       types.UnixMilli          `db:"sent_at"`
 
+	Reason notifyReason `db:"-"`
+
 	HistoryEntry          NotificationHistory          `db:"-"`
 	SkippedHistoryEntries []SkippedNotificationHistory `db:"-"`
 }

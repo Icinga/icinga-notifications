@@ -457,21 +457,32 @@ or if the channel is missing required configuration values.
       ]
     },
     "object": {
-      "name": "dummy-816!random fortune",
-      "url": "http://localhost/icingaweb2/icingadb/service?name=random%20fortune&host.name=dummy-816",
+      "name": "example-809!disk /",
+      "url": "http://localhost/icingaweb2/icingadb/service?name=disk%20%2F&host.name=example-809",
+      "sources": ["icinga2-master"],
       "tags": {
-        "host": "dummy-816",
-        "service": "random fortune"
+        "host": "example-809",
+        "service": "disk /"
       }
     },
     "incident": {
       "id": 1437,
-      "severity": "crit"
+      "severity": "crit",
+      "muted": false,
+      "recovered": false,
+      "message": "[CRITICAL] - Filesystem checks failed\n        \\_[CRITICAL] - / (ffs)\n                \\_[CRITICAL] - Free space absolute: 42 MiB (of 985 MiB)\n                \\_[CRITICAL] - Free space percentage: 4.264%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=943718400B;826918502.400000;930283315.200000;0;1033648128",
+      "summary": "[CRITICAL] - Filesystem checks failed",
+      "started_at": "2024-07-12T10:40:00Z",
+      "managed": false,
+      "opened_by_source": "icinga2-master"
     },
     "event": {
       "time": "2024-07-12T10:47:30.445439055Z",
-      "message": "Q:\tWhat looks like a cat, flies like a bat, brays like a donkey, and\n\tplays like a monkey?\nA:\tNothing."
-    }
+      "message": "[CRITICAL] - Filesystem checks failed\n        \\_[CRITICAL] - / (ffs)\n                \\_[CRITICAL] - Free space absolute: 42 MiB (of 985 MiB)\n                \\_[CRITICAL] - Free space percentage: 4.264%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=943718400B;826918502.400000;930283315.200000;0;1033648128",
+      "summary": "[CRITICAL] - Filesystem checks failed"
+    },
+    "summary": "[example-809!disk /] Incident opened: [CRITICAL] - Filesystem checks failed",
+    "body": "A new incident has been opened by icinga2-master for example-809!disk /.\n\nSeverity: Critical\nOpened:   2024-07-12 10:40:00 +0000\nDetails:  http://localhost/icingaweb2/icingadb/service?name=disk%20%2F&host.name=example-809\n\n[CRITICAL] - Filesystem checks failed\n        \\_[CRITICAL] - / (ffs)\n                \\_[CRITICAL] - Free space absolute: 42 MiB (of 985 MiB)\n                \\_[CRITICAL] - Free space percentage: 4.264%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=943718400B;826918502.400000;930283315.200000;0;1033648128"
   },
   "id": 3
 }
