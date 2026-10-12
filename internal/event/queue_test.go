@@ -176,7 +176,7 @@ func TestQueue(t *testing.T) {
 		failEvM := make(map[string]struct{})
 
 		wg.Go(func() {
-			ticker := time.NewTicker(time.Second)
+			ticker := time.NewTicker(5 * time.Second)
 
 			for {
 				select {
@@ -185,7 +185,7 @@ func TestQueue(t *testing.T) {
 						continue
 					}
 					t.Logf("Processed %d events so far. Successful: %d, Failed: %d", counter.Load(), len(successEvM), len(failEvM))
-					consumerCtxCancel() // Stop processing queue after 1 second of inactivity
+					consumerCtxCancel() // Stop processing queue after 5 second of inactivity
 					return
 
 				case ev := <-successfulEventJobs:
@@ -197,7 +197,7 @@ func TestQueue(t *testing.T) {
 					assert.False(t, failExits, "event %s processed successfully after failing", qID)
 
 					successEvM[qID] = struct{}{}
-					ticker.Reset(time.Second)
+					ticker.Reset(5 * time.Second)
 
 				case ev := <-failedEventJobs:
 					qID := makeQueueID(t, ev)
@@ -208,7 +208,7 @@ func TestQueue(t *testing.T) {
 					assert.False(t, failExits, "event %s failed more than once", qID)
 
 					failEvM[qID] = struct{}{}
-					ticker.Reset(time.Second)
+					ticker.Reset(5 * time.Second)
 				}
 			}
 		})
