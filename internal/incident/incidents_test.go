@@ -326,7 +326,9 @@ func TestIncidents(t *testing.T) {
 		verifyIncident(t, db, i, 1, 0, 0, 0, baseEv.SeverityDebug)
 
 		// Attempting to open an incident without a severity should fail.
-		require.ErrorIs(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID, withIncident())), ErrOpenIncidentWithoutSeverity)
+		ev := makeEvent(t, source.ID, withIncident())
+		ev.Severity = baseEv.SeverityNone
+		require.ErrorIs(t, Process(t.Context(), db, logs, runtimeConfig, ev), ErrOpenIncidentWithoutSeverity)
 
 		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
 			withTime(time.Now()), withIncident(), withRelations(relations), withSeverity(baseEv.SeverityEmerg), withMsg("Incident opened!")))
@@ -374,12 +376,11 @@ func TestIncidents(t *testing.T) {
 			withTime(time.Now()), withIncident(), withRelations(relations), withSeverity(baseEv.SeverityWarning)))
 		verifyIncident(t, db, i, 1, 2, 2, 2, baseEv.SeverityWarning)
 
-		// Closing incident without providing a severity will keep the existing severity and mark it as recovered.
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withTime(time.Now()), withIncident(), withClose(), withRelations(relations), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.NotZero(t, i.RecoveredAt)
-		assert.Equal(t, baseEv.SeverityWarning, i.Severity)
+		assert.Equal(t, baseEv.SeverityInfo, i.Severity)
 	})
 
 	t.Run("Notify Flag", func(t *testing.T) {
@@ -591,11 +592,7 @@ func TestIncidents(t *testing.T) {
 
 		tags := map[string]string{"notification_history_test": "true"}
 		msg := testutils.MakeRandomString(t)
-		ev := makeEvent(t, source.ID, withIncident(), withSeverity(baseEv.SeverityDebug), withTags(tags), withMsg(msg))
-		// Otherwise, it will race with the time-based escalation test, which calls ReevaluateEscalations and causes
-		// the escalation to match on this incident as well, which would cause the notification history to contain
-		// two entries instead of one.
-		ev.Time = time.Now()
+		ev := makeEvent(t, source.ID, withIncident(), withTime(time.Now()), withSeverity(baseEv.SeverityDebug), withTags(tags), withMsg(msg))
 		assert.NotZero(t, ev.ID)
 		i := makeIncident(db, logs, runtimeConfig, t, ev)
 		assert.NotZero(t, i.ID())
@@ -760,7 +757,9 @@ func makeEvent(t *testing.T, sourceID int64, opts ...eventOption) *event.Event {
 	if ev.Time.IsZero() {
 		ev.Time = time.Now().Add(-2 * time.Hour).Truncate(time.Second)
 	}
-
+	if ev.OpenOrEscalate() && ev.Severity == baseEv.SeverityNone {
+		ev.Severity = baseEv.SeverityInfo
+	}
 	if ev.Muted.Valid {
 		ev.MutedReason = "You're gonna have a bad time!"
 	}
