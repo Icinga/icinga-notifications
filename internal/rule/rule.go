@@ -1,6 +1,7 @@
 package rule
 
 import (
+	"errors"
 	"time"
 
 	"github.com/icinga/icinga-go-library/types"
@@ -9,6 +10,23 @@ import (
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"go.uber.org/zap/zapcore"
+)
+
+// Type represents the type of rule, either a notification or an escalation.
+type Type string
+
+// String returns the string representation of the rule type.
+func (t Type) String() string {
+	return string(t)
+}
+
+// Every rule must have exactly one type of the following values.
+const (
+	// TypeNotification rules are evaluated for events with incident=false and notify their recipients immediately,
+	// without opening or escalating an incident.
+	TypeNotification Type = "notification"
+	// TypeEscalation is used for rules that are triggered when an incident is opened or escalated.
+	TypeEscalation Type = "escalation"
 )
 
 type Rule struct {
@@ -20,6 +38,7 @@ type Rule struct {
 	ObjectFilter     filter.Filter          `db:"-"`
 	ObjectFilterExpr types.String           `db:"object_filter"`
 	SourceType       string                 `db:"source_type"`
+	Type             Type                   `db:"type"`
 	Entries          map[int64]*Entry       `db:"-"`
 
 	// FilterColumns is a set of all filter columns used in the rule's ObjectFilter.
@@ -34,6 +53,10 @@ type FilterAttrsType [][]string
 
 // IncrementalInitAndValidate implements the config.IncrementalConfigurableInitAndValidatable interface.
 func (r *Rule) IncrementalInitAndValidate() error {
+	if r.Type != TypeNotification && r.Type != TypeEscalation {
+		return errors.New("invalid rule type: " + r.Type.String())
+	}
+
 	if r.ObjectFilterExpr.Valid {
 		f, err := filter.ParseASTExpr(r.ObjectFilterExpr.String)
 		if err != nil {
@@ -55,6 +78,7 @@ func (r *Rule) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("id", r.ID)
 	encoder.AddString("name", r.Name)
 	encoder.AddString("source_type", r.SourceType)
+	encoder.AddString("rule_type", r.Type.String())
 
 	if r.TimePeriodID.Valid && r.TimePeriodID.Int64 != 0 {
 		encoder.AddInt64("timeperiod_id", r.TimePeriodID.Int64)

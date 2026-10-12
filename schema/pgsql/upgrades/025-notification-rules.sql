@@ -1,5 +1,11 @@
 SELECT assert_correct_schema_version('v0.2.0-24');
 
+CREATE TYPE rule_type AS ENUM ('notification', 'escalation');
+ALTER TABLE rule ADD COLUMN type rule_type NOT NULL DEFAULT 'escalation';
+ALTER TABLE rule ALTER COLUMN type DROP DEFAULT;
+
+ALTER TABLE incident_contact ADD COLUMN event_types text;
+
 -- Drop the not null clauses before renaming the table, otherwise PostgreSQL will automatically
 -- create a non_null constraint with the old name.
 ALTER TABLE rule_escalation

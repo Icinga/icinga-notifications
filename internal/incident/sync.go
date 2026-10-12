@@ -105,7 +105,7 @@ func (i *Incident) AddRuleMatched(ctx context.Context, tx *sqlx.Tx, r *rule.Rule
 // If the recipient already exists in the incident's recipients list, their role is updated to the new role and a
 // history entry is created to record the change. If the recipient does not exist, they are added to the list with
 // the specified role and a new ContactRow is inserted.
-func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Recipient, role recipient.Role) error {
+func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Recipient, role recipient.Role, eventTypes types.StringList) error {
 	recipientKey := recipient.ToKey(r)
 	state, exists := i.Recipients[recipientKey]
 	if exists && state.Role == role {
@@ -114,9 +114,10 @@ func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Re
 
 	oldRole := state.Role
 	if !exists {
-		i.Recipients[recipientKey] = RecipientState{Role: role, IsNew: true}
+		i.Recipients[recipientKey] = RecipientState{Role: role, IsNew: true, EventTypes: eventTypes}
 	} else {
 		state.Role = role
+		state.EventTypes = eventTypes
 		i.Recipients[recipientKey] = state
 	}
 
@@ -126,7 +127,7 @@ func (i *Incident) addRecipient(ctx context.Context, tx *sqlx.Tx, r recipient.Re
 		return err
 	}
 
-	cr := &ContactRow{IncidentID: i.Id, Key: recipientKey, Role: role, ChangedAt: types.UnixMilli(time.Now())}
+	cr := &ContactRow{IncidentID: i.Id, Key: recipientKey, Role: role, EventTypes: eventTypes, ChangedAt: types.UnixMilli(time.Now())}
 	stmt, _ := i.db.BuildUpsertStmt(cr, "id")
 	if _, err := tx.NamedExecContext(ctx, stmt, cr); err != nil {
 		return fmt.Errorf("failed to upsert contact: %w", err)

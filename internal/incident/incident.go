@@ -406,7 +406,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				return fmt.Errorf("incident already has a manager, cannot add recipient %q as manager", r)
 			}
 
-			if err := i.addRecipient(ctx, tx, r, recipient.RoleManager); err != nil {
+			if err := i.addRecipient(ctx, tx, r, recipient.RoleManager, qa.EventTypes); err != nil {
 				return fmt.Errorf("cannot add recipient %q as manager: %w", r, err)
 			}
 			// Remove the recipient from the incident's recipients list for now, so that we don't notify him about his
@@ -427,7 +427,7 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				return fmt.Errorf("incident has no manager, cannot demote recipient %q", r)
 			}
 
-			if err := i.addRecipient(ctx, tx, r, recipient.RoleSubscriber); err != nil {
+			if err := i.addRecipient(ctx, tx, r, recipient.RoleSubscriber, qa.EventTypes); err != nil {
 				return fmt.Errorf("cannot add recipient %q as subscriber: %w", r, err)
 			}
 			return nil
@@ -925,7 +925,7 @@ func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
 
 	i.Recipients = make(map[recipient.Key]RecipientState)
 	err = utils.ForEachRow(ctx, i.db, tx, "incident_id", []int64{i.Id}, func(cr *ContactRow) {
-		i.Recipients[cr.Key] = RecipientState{Role: cr.Role}
+		i.Recipients[cr.Key] = RecipientState{Role: cr.Role, EventTypes: cr.EventTypes}
 	})
 	if err != nil {
 		i.logger.Errorw("Failed to restore incident recipients from the database", zap.Error(err))
@@ -961,6 +961,9 @@ func (e *EscalationState) TableName() string {
 
 type RecipientState struct {
 	Role recipient.Role
+	// EventTypes lists the event types a subscriber or manager wants to be notified about for incident=false events.
+	// Ignored for RoleRecipient.
+	EventTypes types.StringList
 
 	// IsNew defines whether the associated recipient was added to the incident during the current transaction.
 	//

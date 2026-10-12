@@ -316,11 +316,13 @@ CREATE TABLE rule (
     timeperiod_id bigint,
     object_filter text,
     source_type text NOT NULL, -- Which source type this rule is associated with, e.g. 'icinga2', 'custom', ...
+    type enum('notification', 'escalation'), -- NOT NULL is enforced via CHECK not to default to 'notification'
 
     changed_at bigint NOT NULL,
     deleted enum('n', 'y') NOT NULL DEFAULT 'n',
 
     CONSTRAINT pk_rule PRIMARY KEY (id),
+    CONSTRAINT ck_rule_type_notnull CHECK (type IS NOT NULL),
     CONSTRAINT fk_rule_timeperiod FOREIGN KEY (timeperiod_id) REFERENCES timeperiod(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
@@ -402,6 +404,7 @@ CREATE TABLE incident_contact (
     contactgroup_id bigint,
     schedule_id bigint,
     role enum('recipient', 'subscriber', 'manager'), -- NOT NULL is enforced via CHECK not to default to 'recipient'
+    event_types text, -- JSON-Array of event types a subscriber/manager is notified about for incident=false events.
     changed_at bigint NOT NULL, -- used only by Notifications Web to show when the recipients role was last changed.
 
     CONSTRAINT pk_incident_contact PRIMARY KEY (id),

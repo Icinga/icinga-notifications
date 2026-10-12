@@ -1,5 +1,11 @@
 CALL assert_correct_schema_version('v0.2.0-24');
 
+ALTER TABLE rule ADD COLUMN type enum('notification', 'escalation') AFTER source_type; -- NOT NULL is enforced via CHECK not to default to 'notification'
+UPDATE rule SET type = 'escalation' WHERE type IS NULL;
+ALTER TABLE rule ADD CONSTRAINT ck_rule_type_notnull CHECK (type IS NOT NULL);
+
+ALTER TABLE incident_contact ADD COLUMN event_types text AFTER role;
+
 -- Rename rule_escalation to rule_entry.
 RENAME TABLE rule_escalation TO rule_entry;
 ALTER TABLE rule_entry

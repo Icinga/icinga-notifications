@@ -130,13 +130,14 @@ func TestIncidents(t *testing.T) {
 	var unmanagedEscalationID, managedEscalationID int64
 	var basicRule, managedRule, triggerNotificationsRule *rule.Rule
 	err = db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
-		insertRule := func(name, filter string) *rule.Rule {
+		insertRule := func(name, filter string, ruleType rule.Type) *rule.Rule {
 			r := &rule.Rule{
 				Name:             name,
 				SourceType:       source.Type,
 				ObjectFilterExpr: types.MakeString(filter),
 				ChangedAt:        source.ChangedAt,
 				Deleted:          source.Deleted,
+				Type:             ruleType,
 			}
 			id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, r, "id"), r)
 			assert.NoError(t, err)
@@ -152,9 +153,9 @@ func TestIncidents(t *testing.T) {
 			{"op":"!=","attributes":["$.host.name"],"regex":"trigger_notifications*"}
 		]
 	}
-}`)
-		managedRule = insertRule("Managed Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"managed_escalations"}}`)
-		triggerNotificationsRule = insertRule("Trigger Notifications Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"trigger_notifications*"}}`)
+}`, rule.TypeEscalation)
+		managedRule = insertRule("Managed Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"managed_escalations"}}`, rule.TypeEscalation)
+		triggerNotificationsRule = insertRule("Trigger Notifications Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"trigger_notifications*"}}`, rule.TypeEscalation)
 
 		insertEntry := func(c *recipient.Contact, position, ruleID int64, condition string) int64 {
 			escalation := &rule.Entry{
@@ -465,6 +466,7 @@ func TestIncidents(t *testing.T) {
 				Kind:       action,
 				ContactID:  unknown.ID,
 				ObjectTags: ev.Tags,
+				EventTypes: types.MakeStringList([]string{"DowntimeStart", "DowntimeEnd"}),
 			}
 
 			// Recipient is not yet known to the runtime config, so nothing should happen here.
@@ -487,11 +489,13 @@ func TestIncidents(t *testing.T) {
 			if action == event.ActionManage {
 				assert.True(t, i.HasManager())
 				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleManager)
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].EventTypes, qa.EventTypes)
 
 				qa.Kind = event.ActionUnmanage
 			} else {
 				assert.False(t, i.HasManager())
 				assert.Equal(t, i.Recipients[recipient.ToKey(incidentSubscriber)].Role, recipient.RoleSubscriber)
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentSubscriber)].EventTypes, qa.EventTypes)
 
 				qa.Kind = event.ActionUnsubscribe
 			}
@@ -502,10 +506,12 @@ func TestIncidents(t *testing.T) {
 			if action == event.ActionManage { // Managers get first demoted to subscribers.
 				assert.False(t, i.HasManager())
 				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleSubscriber)
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].EventTypes, qa.EventTypes)
 
 				// Cannot unmanage an incident that doesn't have a manager.
 				require.Error(t, Process(t.Context(), db, logs, runtimeConfig, qa))
 				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleSubscriber)
+				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].EventTypes, qa.EventTypes)
 
 				qa.Kind = event.ActionUnsubscribe
 				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))

@@ -15,8 +15,9 @@ type ContactRow struct {
 	ID            int64 `db:"id"`
 	IncidentID    int64 `db:"incident_id"`
 	recipient.Key `db:",inline"`
-	Role          recipient.Role  `db:"role"`
-	ChangedAt     types.UnixMilli `db:"changed_at"`
+	Role          recipient.Role   `db:"role"`
+	EventTypes    types.StringList `db:"event_types"`
+	ChangedAt     types.UnixMilli  `db:"changed_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.

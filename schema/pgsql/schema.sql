@@ -350,6 +350,7 @@ CREATE TABLE object_source (
 CREATE INDEX idx_object_source_object_id ON object_source(object_id);
 
 CREATE TYPE severity AS ENUM ('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg');
+CREATE TYPE rule_type AS ENUM ('notification', 'escalation');
 
 CREATE TABLE rule (
     id bigserial,
@@ -357,6 +358,7 @@ CREATE TABLE rule (
     timeperiod_id bigint,
     object_filter text,
     source_type text NOT NULL, -- Which source type this rule is associated with, e.g. 'icinga2', 'custom', ...
+    type rule_type NOT NULL,
 
     changed_at bigint NOT NULL,
     deleted boolenum NOT NULL DEFAULT 'n',
@@ -446,6 +448,7 @@ CREATE TABLE incident_contact (
     contactgroup_id bigint,
     schedule_id bigint,
     role incident_contact_role NOT NULL,
+    event_types text, -- JSON-Array of event types a subscriber/manager is notified about for incident=false events.
     changed_at bigint NOT NULL, -- used only by Notifications Web to show when the recipients role was last changed.
 
     CONSTRAINT pk_incident_contact PRIMARY KEY (id),
