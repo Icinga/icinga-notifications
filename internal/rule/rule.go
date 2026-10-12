@@ -111,6 +111,10 @@ type ChannelOrigin struct {
 	ContactGroupID int64 // Non-zero if the contact was resolved from a contact group.
 	ScheduleID     int64 // Non-zero if the contact was resolved from a schedule.
 	Role           recipient.Role
+
+	// IncidentRelated is true if the contact is notified as a recipient of the incident (escalation recipient,
+	// subscriber, manager) rather than through a notification rule.
+	IncidentRelated bool
 }
 
 // ContactChannels stores, per contact and channel ID, the origins that selected this channel.
@@ -120,20 +124,30 @@ type ChannelOrigin struct {
 // duplicates that would have notified the same contact via the same channel.
 type ContactChannels map[*recipient.Contact][]ChannelOrigin
 
-// LoadFromEntryRecipients loads recipients channel of the specified Entry to the current map.
+// LoadFromEntryRecipients adds the channels of all contacts resolved from entry's recipients at time t.
+//
+// isIncidentRelated is stored on each resulting ChannelOrigin.IncidentRelated, to mark whether these
+// recipients were resolved via an incident-related path (e.g. escalations) rather than a plain
+// notification rule.
 //
 // You can provide this method a callback to control whether the channel of a specific contact should
 // be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
-func (ch ContactChannels) LoadFromEntryRecipients(entry *Entry, t time.Time, isNotifiable func(recipient.Key) bool) {
+func (ch ContactChannels) LoadFromEntryRecipients(entry *Entry, t time.Time, isIncidentRelated bool, isNotifiable func(recipient.Key) bool) {
 	for _, er := range entry.Recipients {
-		ch.LoadRecipientChannel(er, entry.RuleID, t, isNotifiable)
+		ch.LoadRecipientChannel(er, entry.RuleID, t, isIncidentRelated, isNotifiable)
 	}
 }
 
 // LoadRecipientChannel loads recipient channel to the current map.
 // You can provide this method a callback to control whether the channel of a specific contact should
 // be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
-func (ch ContactChannels) LoadRecipientChannel(r *EntryRecipient, ruleID int64, t time.Time, isNotifiable func(recipient.Key) bool) {
+func (ch ContactChannels) LoadRecipientChannel(
+	r *EntryRecipient,
+	ruleID int64,
+	t time.Time,
+	isIncidentRelated bool,
+	isNotifiable func(recipient.Key) bool,
+) {
 	if isNotifiable(r.Key) {
 		origin := ChannelOrigin{
 			ChannelID:      r.ChannelID.Int64,
@@ -142,6 +156,8 @@ func (ch ContactChannels) LoadRecipientChannel(r *EntryRecipient, ruleID int64, 
 			ContactGroupID: r.GroupID.Int64,
 			ScheduleID:     r.ScheduleID.Int64,
 			Role:           recipient.RoleRecipient,
+
+			IncidentRelated: isIncidentRelated,
 		}
 
 		for _, c := range r.Recipient.GetContactsAt(t) {

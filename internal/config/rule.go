@@ -12,7 +12,7 @@ import (
 // The second return value indicates whether there are any rules without an object filter, in which case the events
 // from the provided src should be processed nonetheless, even if they don't carry all the required filter columns
 // unless it was explicitly requested to reject such events by the client.
-func (r *RuntimeConfig) GetRulesFilterColumnsForSource(src *Source) (rule.FilterAttrsType, bool) {
+func (r *RuntimeConfig) GetRulesFilterColumnsForSource(src *Source, ruleType rule.Type) (rule.FilterAttrsType, bool) {
 	r.RLock()
 	defer r.RUnlock()
 
@@ -20,7 +20,7 @@ func (r *RuntimeConfig) GetRulesFilterColumnsForSource(src *Source) (rule.Filter
 	var hasRulesWithoutFilter bool
 	for id := range src.RuleIDs() {
 		eventRule, ok := r.Rules[id]
-		if !ok {
+		if !ok || eventRule.Type != ruleType {
 			continue
 		}
 		columns = append(columns, eventRule.FilterColumns...)

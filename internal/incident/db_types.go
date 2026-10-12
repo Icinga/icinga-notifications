@@ -110,6 +110,10 @@ type NotificationEntry struct {
 
 	HistoryEntry          NotificationHistory          `db:"-"`
 	SkippedHistoryEntries []SkippedNotificationHistory `db:"-"`
+	// IsIncidentRelated marks notifications that belong to the incident.
+	//
+	// Only these have an incident_history row (HistoryRowID) and pass the incident to the channel.
+	IsIncidentRelated bool `db:"-"`
 }
 
 // TableName implements the contracts.TableNamer interface.

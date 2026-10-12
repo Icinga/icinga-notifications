@@ -44,13 +44,33 @@ object in the web interface of the source that submitted the event. Icinga Notif
 interface lives and therefore cannot complete a relative reference, so events carrying one are rejected with a
 `400 Bad Request` status code.
 
-Events sent to Icinga Notifications are expected to match rules that describe further event escalations.
-These rules can be configured in Icinga Notifications Web and should be designed to match the `relations` of the
-submitted events. When submitting an event without the expected relations to evaluate the rules, Icinga Notifications
-will reject the request with a `422 Unprocessable Entity` status code and a message describing the missing relations
-when the `X-Icinga-Reject-If-Relations-Incomplete` header is set to `true`. Otherwise, the request will be accepted
-nonetheless, when either there's an existing incident for the event's objects, the ongoing event causes a new incident
-to be opened, or the source have at least one event rule without a configured object filter.
+Events sent to Icinga Notifications are evaluated against rules configured in Icinga Notifications Web. There are two
+types of rules, and the event's `incident` field decides which of them, if any, are evaluated:
+
+| `incident` | Rules evaluated    | Effect                                                                                                       |
+|------------|--------------------|--------------------------------------------------------------------------------------------------------------|
+| `true`     | Escalation rules   | Opens a new incident or updates the open one, triggers escalations and notifies recipients.                  |
+| `false`    | Notification rules | Notifies the recipients of matching notification rules right away. No incident is opened, closed or changed. |
+| omitted    | None               | Only updates an already open incident (e.g. its message). Without an open incident, the event is dropped.    |
+
+Rules should be designed to match the `relations` of the submitted events. If the event's object already has an open
+incident, an `incident: false` event also notifies that incident's recipients:
+
+- Recipients added by escalations are always notified.
+- Subscribers and managers are only notified if the event's `type` is one of the event types they chose when
+  subscribing or taking over the incident.
+
+These notifications are recorded in the incident's history and carry the incident in the
+[channel request](10-Channels.md#sendnotification). The incident's state itself stays unchanged.
+
+Muting an incident only silences the notifications that belong to it. Its recipients don't receive `incident: false`
+notifications while it's muted, and these are recorded as suppressed in the incident's history. Contacts who are only
+notified because of a notification rule are still notified, since those notifications aren't tied to the incident.
+
+When an event lacks relations required by the rules of the evaluated type, Icinga Notifications rejects it with a
+`422 Unprocessable Entity` status code and a message listing the missing relations. If the
+`X-Icinga-Reject-If-Relations-Incomplete` header isn't set to `true`, the event is accepted anyway as long as the
+source has at least one rule of the evaluated type without an object filter.
 
 Furthermore, the `complete_relations` field of the event can be used to specify which relations or attributes of the
 event should be considered as complete for the purpose of rule evaluation. For instance, if the `complete_relations`

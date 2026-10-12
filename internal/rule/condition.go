@@ -153,3 +153,35 @@ func keyString(key []string) string {
 	}
 	return key[0]
 }
+
+// NotificationFilter is the [filter.Filterable] for notification rule entry conditions.
+//
+// It only knows the event_type attribute and supports equality and existence checks.
+// Using any other operator returns an error.
+type NotificationFilter struct {
+	EventType string
+}
+
+func (n *NotificationFilter) EvalEqual(key []string, value any) (bool, error) {
+	switch keyString(key) {
+	case "event_type":
+		if s, ok := value.(string); ok && n.EventType == s {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (n *NotificationFilter) EvalExists(key []string) bool {
+	return keyString(key) == "event_type"
+}
+
+func (n *NotificationFilter) EvalLike(_ []string, _ any) (bool, error) {
+	return false, fmt.Errorf("notification rule filter does not support wildcard matches")
+}
+func (n *NotificationFilter) EvalLess(_ []string, _ any) (bool, error) {
+	return false, fmt.Errorf("notification rule filter does not support 'less' matches")
+}
+func (n *NotificationFilter) EvalLessOrEqual(_ []string, _ any) (bool, error) {
+	return false, fmt.Errorf("notification rule filter does not support 'less or equal' matches")
+}

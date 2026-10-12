@@ -159,12 +159,12 @@ func (i *Incident) recordRecipientRoleChange(ctx context.Context, tx *sqlx.Tx, r
 	return nil
 }
 
-// generateNotifications generates incident notification histories of the given recipients.
+// generateNotifications creates a NotificationEntry for every contact+channel pair in contactChannels.
 //
-// This function will just insert NotificationStateSuppressed incident histories and return an empty slice if
-// the incident is muted, otherwise a slice of pending *NotificationEntry(ies) that can be used to update
-// the corresponding histories after the actual notifications have been sent out. The given eventID correlates
-// with the generated notification histories so that they can be traced back to the event that triggered them.
+// Incident-related entries (the event opens/escalates the incident, or any of the contact's origins is
+// incident-related) get an incident_history row. If the incident is muted, that row is Suppressed and no
+// pending entry is returned. Entries that are not incident-related get no incident_history row, but might
+// still carry incident ID and are returned as pending regardless of the mute state.
 //
 // A contact+channel pair selected by multiple origins yields a single pending entry for the first origin,
 // plus one NotificationStateSuperfluous entry per additional origin. Superfluous entries are only recorded
@@ -173,7 +173,10 @@ func (i *Incident) recordRecipientRoleChange(ctx context.Context, tx *sqlx.Tx, r
 // Note: handleUnmute clears i.MuteReason before this function runs, and handleMute sets it after, so a single
 // i.IsMuted() check captures the correct transitional state for mute/unmute and steady-state events alike.
 func (i *Incident) generateNotifications(
-	ctx context.Context, tx *sqlx.Tx, ev *event.Event, contactChannels rule.ContactChannels,
+	ctx context.Context,
+	tx *sqlx.Tx,
+	ev *event.Event,
+	contactChannels rule.ContactChannels,
 ) ([]*NotificationEntry, error) {
 	var notificationState NotificationState
 	suppress := i.IsMuted()
@@ -189,33 +192,46 @@ func (i *Incident) generateNotifications(
 			return cmp.Compare(a.ChannelID, b.ChannelID)
 		})
 
+		// Determine if the notification is incident-related. A notification is considered incident-related if
+		// the event is an open or escalate event, or if any of the contact's channel origins are derived from
+		// an incident-related context (e.g., subscribers, escalation recipients, etc.).
+		isIncidentRelated := ev.OpenOrEscalate() || slices.ContainsFunc(channelOrigins, func(origin rule.ChannelOrigin) bool {
+			return origin.IncidentRelated
+		})
+
 		var lastChannelID int64
 		var notificationOfCurrentChannel *NotificationEntry
 		for _, origin := range channelOrigins {
 			if lastChannelID != origin.ChannelID {
 				lastChannelID = origin.ChannelID
-				hr := &HistoryRow{
-					IncidentID:        i.Id,
-					Key:               recipient.ToKey(contact),
-					Time:              types.UnixMilli(time.Now()),
-					Type:              Notified,
-					ChannelID:         types.MakeInt(origin.ChannelID, types.TransformZeroIntToNull),
-					NotificationState: notificationState,
-					Message:           types.MakeString(ev.Message, types.TransformEmptyStringToNull),
-				}
+				var hr *HistoryRow
+				// Only incident-related notifications are recorded in the incident history and are subject to the
+				// incident's mute state. Notifications from notification rules are not tied to the incident, so they
+				// are always sent, even if the incident is muted.
+				if isIncidentRelated {
+					hr = &HistoryRow{
+						IncidentID:        i.Id,
+						Key:               recipient.ToKey(contact),
+						Time:              types.UnixMilli(time.Now()),
+						Type:              Notified,
+						ChannelID:         types.MakeInt(origin.ChannelID, types.TransformZeroIntToNull),
+						NotificationState: notificationState,
+						Message:           types.MakeString(ev.Message, types.TransformEmptyStringToNull),
+					}
 
-				if err := hr.Sync(ctx, i.db, tx); err != nil {
-					i.logger.Errorw("Failed to insert incident notification history",
-						zap.String("contact", contact.FullName),
-						zap.Bool("incident_muted", i.IsMuted()),
-						zap.Error(err))
-					return nil, err
-				}
+					if err := hr.Sync(ctx, i.db, tx); err != nil {
+						i.logger.Errorw("Failed to insert incident notification history",
+							zap.String("contact", contact.FullName),
+							zap.Bool("incident_muted", i.IsMuted()),
+							zap.Error(err))
+						return nil, err
+					}
 
-				if suppress {
-					// If the incident is muted, we don't need to create a pending notification entry,
-					// so we can skip to the next origin.
-					continue
+					if suppress {
+						// If the incident is muted, we don't need to create a pending notification entry,
+						// so we can skip to the next origin.
+						continue
+					}
 				}
 
 				notificationHistory := NotificationHistory{
@@ -225,17 +241,21 @@ func (i *Incident) generateNotifications(
 					ContactgroupID: types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
 					ScheduleID:     types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
 					ChannelID:      origin.ChannelID,
-					IncidentID:     types.MakeInt(i.Id),
+					IncidentID:     types.MakeInt(i.Id, types.TransformZeroIntToNull),
 					EventMessage:   ev.Message,
 					IncidentClosed: types.MakeBool(ev.CloseIncident()),
 				}
 
 				notificationOfCurrentChannel = &NotificationEntry{
-					HistoryRowID: hr.ID,
-					ContactID:    contact.ID,
-					ChannelID:    origin.ChannelID,
-					State:        NotificationStatePending,
-					HistoryEntry: notificationHistory,
+					ContactID:         contact.ID,
+					ChannelID:         origin.ChannelID,
+					State:             NotificationStatePending,
+					HistoryEntry:      notificationHistory,
+					IsIncidentRelated: isIncidentRelated,
+				}
+
+				if hr != nil {
+					notificationOfCurrentChannel.HistoryRowID = hr.ID
 				}
 
 				notifications = append(notifications, notificationOfCurrentChannel)

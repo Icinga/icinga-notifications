@@ -69,8 +69,9 @@ func (e *Entry) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	return nil
 }
 
-// Eval evaluates the configured entry filter for the provided filter.
-// Returns always true if there are no configured entry conditions.
+// Eval reports whether the entry's Condition matches filterable.
+//
+// Entries without a condition always match.
 func (e *Entry) Eval(filterable filter.Filterable) (bool, error) {
 	if e.Condition == nil {
 		return true, nil
