@@ -49,8 +49,8 @@ func TestIncidents(t *testing.T) {
 		"object_id_tag",
 		"object_source",
 		"object",
-		"rule_escalation_recipient",
-		"rule_escalation",
+		"rule_entry_recipient",
+		"rule_entry",
 		"rule",
 		"contact",
 		"channel",
@@ -156,8 +156,8 @@ func TestIncidents(t *testing.T) {
 		managedRule = insertRule("Managed Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"managed_escalations"}}`)
 		triggerNotificationsRule = insertRule("Trigger Notifications Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"trigger_notifications*"}}`)
 
-		insertEscalation := func(c *recipient.Contact, position, ruleID int64, condition string) int64 {
-			escalation := &rule.Escalation{
+		insertEntry := func(c *recipient.Contact, position, ruleID int64, condition string) int64 {
+			escalation := &rule.Entry{
 				RuleID:        ruleID,
 				Position:      types.MakeInt(position),
 				ConditionExpr: types.MakeString(condition),
@@ -165,18 +165,18 @@ func TestIncidents(t *testing.T) {
 				Deleted:       types.MakeBool(false),
 			}
 			id, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, escalation, "id"), escalation)
-			require.NoError(t, err, "populating rule_escalation table should not fail")
+			require.NoError(t, err, "populating rule_entry table should not fail")
 
 			if c == nil {
 				c = makeContact(t, db, cleaner, testutils.MakeRandomString(t), testutils.MakeRandomString(t), ch.ID)
 			}
 
-			escalationRecipient := &rule.EscalationRecipient{
-				EscalationID: id,
-				Recipient:    c,
-				ContactID:    types.MakeInt(c.ID),
-				ChangedAt:    types.UnixMilli(time.Now()),
-				Deleted:      types.MakeBool(false),
+			escalationRecipient := &rule.EntryRecipient{
+				EntryID:   id,
+				Recipient: c,
+				ContactID: types.MakeInt(c.ID),
+				ChangedAt: types.UnixMilli(time.Now()),
+				Deleted:   types.MakeBool(false),
 			}
 			_, err = tx.NamedExecContext(ctx, database.BuildInsertStmtWithout(db, escalationRecipient, "id"), escalationRecipient)
 			require.NoError(t, err, "populating rule_escalation_recipient table should not fail")
@@ -184,22 +184,22 @@ func TestIncidents(t *testing.T) {
 			return id
 		}
 
-		insertEscalation(contact, 2, basicRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"ok"}}`)
-		insertEscalation(contact, 1, basicRule.ID, `{"ast":{"op":">=","attributes":["incident_age"],"value":"1h"}}`)
+		insertEntry(contact, 2, basicRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"ok"}}`)
+		insertEntry(contact, 1, basicRule.ID, `{"ast":{"op":">=","attributes":["incident_age"],"value":"1h"}}`)
 
-		unmanagedEscalationID = insertEscalation(contact, 1, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"n"}}`)
-		managedEscalationID = insertEscalation(contact, 2, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"y"}}`)
+		unmanagedEscalationID = insertEntry(contact, 1, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"n"}}`)
+		managedEscalationID = insertEntry(contact, 2, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"y"}}`)
 
-		insertEscalation(nil, 1, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"info"}}`)
-		insertEscalation(nil, 2, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"warning"}}`)
+		insertEntry(nil, 1, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"info"}}`)
+		insertEntry(nil, 2, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"warning"}}`)
 
 		return nil
 	})
 	require.NoError(t, err)
 	for _, ruleID := range []int64{basicRule.ID, managedRule.ID, triggerNotificationsRule.ID} {
 		cleaner.Add("rule", fmt.Sprintf("id = %d", ruleID))
-		cleaner.Add("rule_escalation", fmt.Sprintf("rule_id = %d", ruleID))
-		cleaner.Add("rule_escalation_recipient", fmt.Sprintf("rule_escalation_id IN (SELECT id FROM rule_escalation WHERE rule_id = %d)", ruleID))
+		cleaner.Add("rule_entry", fmt.Sprintf("rule_id = %d", ruleID))
+		cleaner.Add("rule_entry_recipient", fmt.Sprintf("rule_entry_id IN (SELECT id FROM rule_entry WHERE rule_id = %d)", ruleID))
 	}
 
 	runtimeConfig := config.NewRuntimeConfig(logs, db)

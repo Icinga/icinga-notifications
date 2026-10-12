@@ -299,7 +299,7 @@ func (i *Incident) RetriggerEscalations(ctx context.Context, o *object.Object, e
 
 			channels := make(rule.ContactChannels)
 			for _, escalation := range escalations {
-				channels.LoadFromEscalationRecipients(escalation, ev.Time, i.isRecipientNotifiable)
+				channels.LoadFromEntryRecipients(escalation, ev.Time, i.isRecipientNotifiable)
 			}
 
 			eventIDQuery := `
@@ -635,7 +635,7 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 
 // evaluateEscalations evaluates this incidents rule escalations to be triggered if they aren't already.
 // Returns the newly evaluated escalations to be triggered or an error on database failure.
-func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation, error) {
+func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Entry, error) {
 	if i.EscalationState == nil {
 		i.EscalationState = make(map[int64]*EscalationState)
 	}
@@ -646,7 +646,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 		IsManaged:        i.HasManager(),
 	}
 
-	var escalations []*rule.Escalation
+	var escalations []*rule.Entry
 	retryAfter := rule.RetryNever
 
 	for rID := range i.Rules {
@@ -657,7 +657,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 		}
 
 		// Check if new escalation stages are reached
-		for _, escalation := range r.Escalations {
+		for _, escalation := range r.Entries {
 			if _, ok := i.EscalationState[escalation.ID]; !ok {
 				matched, err := escalation.Eval(filterContext)
 				if err != nil {
@@ -693,7 +693,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Escalation,
 
 // triggerEscalations triggers the given escalations and generates incident history items for each of them.
 // Returns an error on database failure.
-func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, escalations []*rule.Escalation) error {
+func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, escalations []*rule.Entry) error {
 	for _, escalation := range escalations {
 		r := i.runtimeConfig.Rules[escalation.RuleID]
 		if r == nil {
@@ -703,7 +703,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, escalati
 
 		i.logger.Infow("Rule reached escalation", zap.Object("rule", r), zap.Object("escalation", escalation))
 
-		state := &EscalationState{RuleEscalationID: escalation.ID, TriggeredAt: types.UnixMilli(time.Now())}
+		state := &EscalationState{RuleEntryID: escalation.ID, TriggeredAt: types.UnixMilli(time.Now())}
 		i.EscalationState[escalation.ID] = state
 
 		if err := i.AddEscalationTriggered(ctx, tx, state); err != nil {
@@ -715,11 +715,11 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, escalati
 		}
 
 		hr := &HistoryRow{
-			IncidentID:       i.Id,
-			Time:             state.TriggeredAt,
-			RuleEscalationID: types.MakeInt(state.RuleEscalationID, types.TransformZeroIntToNull),
-			RuleID:           types.MakeInt(r.ID, types.TransformZeroIntToNull),
-			Type:             EscalationTriggered,
+			IncidentID:  i.Id,
+			Time:        state.TriggeredAt,
+			RuleEntryID: types.MakeInt(state.RuleEntryID, types.TransformZeroIntToNull),
+			RuleID:      types.MakeInt(r.ID, types.TransformZeroIntToNull),
+			Type:        EscalationTriggered,
 		}
 
 		if err := hr.Sync(ctx, i.db, tx); err != nil {
@@ -826,13 +826,13 @@ func (i *Incident) getRecipientsChannel(t time.Time) rule.ContactChannels {
 	contactChs := make(rule.ContactChannels)
 	// Load all escalations recipients channels
 	for escalationID := range i.EscalationState {
-		escalation := i.runtimeConfig.GetRuleEscalation(escalationID)
+		escalation := i.runtimeConfig.GetRuleEntry(escalationID)
 		if escalation == nil {
 			i.logger.Debugw("Incident refers unknown escalation, might got deleted", zap.Int64("escalation_id", escalationID))
 			continue
 		}
 
-		contactChs.LoadFromEscalationRecipients(escalation, t, i.isRecipientNotifiable)
+		contactChs.LoadFromEntryRecipients(escalation, t, i.isRecipientNotifiable)
 	}
 
 	// Check whether all the incident recipients do have an appropriate contact channel configured.
@@ -909,12 +909,12 @@ func (i *Incident) restoreRelatedState(ctx context.Context, tx *sqlx.Tx) error {
 
 	i.EscalationState = make(map[escalationID]*EscalationState)
 	err = utils.ForEachRow(ctx, i.db, tx, "incident_id", []int64{i.Id}, func(es *EscalationState) {
-		i.EscalationState[es.RuleEscalationID] = es
+		i.EscalationState[es.RuleEntryID] = es
 
 		i.runtimeConfig.RLock()
 		defer i.runtimeConfig.RUnlock()
 
-		if escalation := i.runtimeConfig.GetRuleEscalation(es.RuleEscalationID); escalation != nil {
+		if escalation := i.runtimeConfig.GetRuleEntry(es.RuleEntryID); escalation != nil {
 			i.Rules[escalation.RuleID] = struct{}{}
 		}
 	})
@@ -949,9 +949,9 @@ func (i *Incident) isRecipientNotifiable(key recipient.Key) bool {
 }
 
 type EscalationState struct {
-	IncidentID       int64           `db:"incident_id"`
-	RuleEscalationID int64           `db:"rule_escalation_id"`
-	TriggeredAt      types.UnixMilli `db:"triggered_at"`
+	IncidentID  int64           `db:"incident_id"`
+	RuleEntryID int64           `db:"rule_entry_id"`
+	TriggeredAt types.UnixMilli `db:"triggered_at"`
 }
 
 // TableName implements the contracts.TableNamer interface.
