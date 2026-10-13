@@ -332,7 +332,7 @@ func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request)
 
 		l.logger.Debugw(
 			"Source is authenticated via socket connection",
-			zap.String("source_name", src.Name),
+			zap.Object("source", src),
 			zap.String("username", username),
 		)
 	} else {
@@ -364,7 +364,7 @@ func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request)
 
 			l.logger.Debugw(
 				"Source is authenticated via a TLS client certificate",
-				zap.String("source_name", src.Name),
+				zap.Object("source", src),
 				zap.String("common_name", clientCert.Subject.CommonName),
 			)
 		} else {
@@ -382,7 +382,7 @@ func (l *Listener) sourceFromAuthOrAbort(w http.ResponseWriter, r *http.Request)
 
 			l.logger.Debugw(
 				"Source is authenticated via HTTP Basic Auth",
-				zap.String("source_name", src.Name),
+				zap.Object("source", src),
 				zap.String("username", authUser),
 			)
 		}
@@ -400,7 +400,7 @@ func (l *Listener) abort(w http.ResponseWriter, statusCode int, src *config.Sour
 
 	logger := l.logger.With(zap.Int("status_code", statusCode), zap.String("message", msg))
 	if src != nil {
-		logger = logger.With(zap.String("source", src.Name))
+		logger = logger.With(zap.Object("source", src))
 	}
 
 	http.Error(w, msg, statusCode)
@@ -440,7 +440,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	l.logger.Debugw("Received event", zap.String("source", src.Name), zap.Object("event", &ev))
+	l.logger.Debugw("Received event", zap.Object("source", src), zap.Object("event", &ev))
 
 	// Only events with an explicit "incident" flag evaluate rules (escalation rules for true,
 	// notification rules for false), so only those need their relations checked.
@@ -475,8 +475,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	if err := event.Enqueue(ctx, l.db, &ev); err != nil {
 		l.logger.Errorw("Failed to enqueue event into event queue",
-			zap.String("source", src.Name),
 			zap.String("event_name", ev.Name),
+			zap.Object("source", src),
 			zap.Error(err))
 
 		l.abort(w, http.StatusInternalServerError, src, "internal error: see server logs for details")
@@ -484,8 +484,8 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	l.logger.Debugw("Successfully enqueued event for future processing",
-		zap.String("source", src.Name),
-		zap.String("event_name", ev.Name))
+		zap.String("event_name", ev.Name),
+		zap.Object("source", src))
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -558,7 +558,7 @@ func (l *Listener) getIncidentsHandler(w http.ResponseWriter, r *http.Request, s
 
 	pairCh, errCh := incident.YieldLight(r.Context(), l.db, l.logs, l.runtimeConfig)
 	if err := StreamJsonResults(r.Context(), w, pairCh, errCh, opts...); err != nil {
-		l.logger.Debugw("Error streaming get incidents response", zap.String("source", src.Name), zap.Error(err))
+		l.logger.Debugw("Error streaming get incidents response", zap.Object("source", src), zap.Error(err))
 	}
 }
 
@@ -615,7 +615,7 @@ func (l *Listener) modifyIncidentsHandler(w http.ResponseWriter, r *http.Request
 					// The incident was closed in the meantime, so we cannot modify it anymore!
 
 				case err != nil:
-					l.logger.Errorw("Failed to modify incident", zap.String("source", src.Name), zap.Error(err))
+					l.logger.Errorw("Failed to modify incident", zap.Object("source", src), zap.Error(err))
 					return source.Response[source.ModifiedIncidentResp]{
 						Status: source.ResponseStatusError,
 						Result: source.ModifiedIncidentResp{
@@ -638,7 +638,7 @@ func (l *Listener) modifyIncidentsHandler(w http.ResponseWriter, r *http.Request
 
 	pairCh, errCh := incident.YieldLight(r.Context(), l.db, l.logs, l.runtimeConfig)
 	if err := StreamJsonResults(r.Context(), w, pairCh, errCh, opts...); err != nil {
-		l.logger.Debugw("Error streaming modify incidents response", zap.String("source", src.Name), zap.Error(err))
+		l.logger.Debugw("Error streaming modify incidents response", zap.Object("source", src), zap.Error(err))
 	}
 }
 
@@ -696,7 +696,7 @@ func (l *Listener) NotificationHistoryHandler(w http.ResponseWriter, r *http.Req
 
 	historyEntryCh, errCh := incident.YieldNotificationHistory(r.Context(), l.db, parsedSince)
 	if err := StreamJsonResults(r.Context(), w, historyEntryCh, errCh, opts...); err != nil {
-		l.logger.Debugw("Error streaming get incidents response", zap.String("source", src.Name), zap.Error(err))
+		l.logger.Debugw("Error streaming get incidents response", zap.Object("source", src), zap.Error(err))
 	}
 }
 
@@ -712,10 +712,10 @@ func (l *Listener) createStreamErrFunc(r *http.Request, w http.ResponseWriter, s
 		// still normally closes the connection, the context will be canceled and the DB query will return that
 		// error. In that case, there is no client to send a response to, so debug log it and be done with it.
 		if errors.Is(err, context.Canceled) {
-			l.logger.Debugw("Client disconnected prematurely", zap.String("source", src.Name), zap.Error(err))
+			l.logger.Debugw("Client disconnected prematurely", zap.Object("source", src), zap.Error(err))
 			return
 		}
-		l.logger.Warnw(fmt.Sprintf("Error processing %s request", namePlural), zap.String("source", src.Name), zap.Error(err))
+		l.logger.Warnw(fmt.Sprintf("Error processing %s request", namePlural), zap.Object("source", src), zap.Error(err))
 
 		var code int
 		var errState source.ErrorState
@@ -734,7 +734,7 @@ func (l *Listener) createStreamErrFunc(r *http.Request, w http.ResponseWriter, s
 			*wroteHeader = true
 			l.abort(w, code, src, "%s", errState.Error)
 		} else if err := enc.Encode(source.Response[source.ErrorState]{Status: source.ResponseStatusError, Result: errState}); err != nil {
-			l.logger.Warnw("Error serializing error response", zap.String("source", src.Name), zap.Error(err))
+			l.logger.Warnw("Error serializing error response", zap.Object("source", src), zap.Error(err))
 		}
 	}
 }
@@ -861,7 +861,7 @@ func (l *Listener) DumpRules(w http.ResponseWriter, r *http.Request) {
 func (l *Listener) sendMissingAttrsError(w http.ResponseWriter, src *config.Source, missingAttrs []string) {
 	l.logger.Debugw(
 		"Event is missing attributes required for rule evaluation",
-		zap.String("source", src.Name),
+		zap.Object("source", src),
 		zap.Strings("missing_attributes", missingAttrs),
 	)
 
