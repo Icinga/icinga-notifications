@@ -1,4 +1,3 @@
-CALL assert_correct_schema_version('v0.2.0-4');
 
 ALTER TABLE incident ADD COLUMN mute_reason text DEFAULT NULL;
 
