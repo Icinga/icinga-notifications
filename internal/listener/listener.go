@@ -15,17 +15,21 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/icinga/icinga-go-library/backoff"
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/icinga/icinga-go-library/logging"
 	"github.com/icinga/icinga-go-library/notifications"
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
 	"github.com/icinga/icinga-go-library/notifications/source"
+	"github.com/icinga/icinga-go-library/retry"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
 	"github.com/icinga/icinga-notifications/internal/incident"
+	"github.com/icinga/icinga-notifications/internal/object"
+	"github.com/icinga/icinga-notifications/internal/rule"
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 )
@@ -438,12 +442,17 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 
 	l.logger.Debugw("Received event", zap.String("source", src.Name), zap.Object("event", &ev))
 
-	// Submitting an event without the "incident" field won't cause any new event rules to be evaluated or
-	// escalations to be triggered, but only updates the state of an existing incident without a severity change.
-	if ev.OpenOrEscalate() {
-		filterColumns, hasRulesWithoutFilter := l.runtimeConfig.GetRulesFilterColumnsForSource(src)
+	// Only events with an explicit "incident" flag evaluate rules (escalation rules for true,
+	// notification rules for false), so only those need their relations checked.
+	if ev.Incident.Valid {
+		ruleType := rule.TypeEscalation
+		if ev.NotificationOnly() {
+			ruleType = rule.TypeNotification
+		}
+
+		filterColumns, hasRulesWithoutFilter := l.runtimeConfig.GetRulesFilterColumnsForSource(src, ruleType)
 		missingRelations := ev.ExtractMissingRelations(filterColumns...)
-		if len(missingRelations) > 0 && ShouldRejectRequestOnIncompleteRelations(r, hasRulesWithoutFilter) {
+		if len(missingRelations) > 0 && l.shouldRejectRequestOnIncompleteRelations(r, &ev, hasRulesWithoutFilter) {
 			l.sendMissingAttrsError(w, src, missingRelations)
 			return
 		}
@@ -870,20 +879,43 @@ func (l *Listener) sendMissingAttrsError(w http.ResponseWriter, src *config.Sour
 	}
 }
 
-// ShouldRejectRequestOnIncompleteRelations determines whether a request with incomplete relations should be rejected.
+// shouldRejectRequestOnIncompleteRelations reports whether an event lacking some of the relations required by
+// the rules of the evaluated type must be rejected.
 //
-// This function always returns true if the client explicitly requested to reject such events by setting the
-// [notifications.XIcingaRejectIfRelationsIncomplete] HTTP header. Otherwise, if there are rules without a filter,
-// it returns false as such rules match unconditionally and thus don't necessarily require the missing relations.
+// The event is always rejected if the client set the [notifications.XIcingaRejectIfRelationsIncomplete] HTTP
+// header to "true". Otherwise, it is accepted if any of the following applies:
+//   - hasRulesWithoutFilter is true, i.e., the source has at least one rule of the evaluated type without an
+//     object filter, which matches the event regardless of its relations.
+//   - The event opens or escalates an incident ([baseEv.Event.OpenOrEscalate]).
+//   - The event's object already has an open incident, whose recipients might still be notified.
 //
-// Note that this function assumes that it's guarded by a [baseEv.Event.OpenOrEscalate] check, since only
-// events that open or escalate an incident are subject to relation completeness checks in the first place.
-func ShouldRejectRequestOnIncompleteRelations(r *http.Request, hasRulesWithoutFilter bool) bool {
+// If looking up the object's open incident fails, the error is logged and the event is accepted, so that it
+// isn't dropped because of a database error.
+//
+// Callers must only use this for events with the incident flag set, as all other events don't evaluate any
+// rules and are therefore never checked for relation completeness.
+func (l *Listener) shouldRejectRequestOnIncompleteRelations(r *http.Request, ev *event.Event, hasRulesWithoutFilter bool) bool {
 	if r.Header.Get(notifications.XIcingaRejectIfRelationsIncomplete) == "true" {
 		return true
 	}
-	if hasRulesWithoutFilter {
+	if hasRulesWithoutFilter || ev.OpenOrEscalate() {
 		return false
 	}
-	return true
+	var exists bool
+	incidentQ := `SELECT EXISTS (SELECT 1 FROM incident WHERE object_id = ? AND recovered_at IS NULL)`
+	objectID := object.ID(ev.Tags)
+	err := retry.WithBackoff(
+		r.Context(),
+		func(ctx context.Context) error {
+			return l.db.GetContext(ctx, &exists, l.db.Rebind(incidentQ), objectID)
+		},
+		retry.Retryable,
+		backoff.DefaultBackoff,
+		retry.Settings{Timeout: 5 * time.Second})
+	if err != nil {
+		l.logger.Warnw("Failed to check for existing open incident for relation completeness check",
+			zap.Stringer("object_id", objectID), zap.Error(err))
+		return false
+	}
+	return !exists
 }

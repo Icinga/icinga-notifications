@@ -436,6 +436,16 @@ Within the request's `params`, a JSON object representing a
 [`NotificationRequest`](https://pkg.go.dev/github.com/icinga/icinga-go-library/notifications/plugin#NotificationRequest)
 is passed.
 
+The `incident` field is only set when the notification relates to an incident. That is the case if:
+
+* the event opened or escalated an incident, or
+* the contact is notified as a recipient of the object's open incident (via an escalation, as a subscriber or as
+  the manager).
+
+Otherwise, for example for a contact that is notified only because of a notification rule, `incident` is `null`.
+Channel plugins (and templates such as a `url_template` referencing `.Incident.Id`) must handle this `null` case
+explicitly.
+
 If the channel is unable to send a notification, an `error` response must be replied with the appropriate error code
 and message. This may be due to channel-specific reasons, such as an email channel where the SMTP server is unavailable,
 or if the channel is missing required configuration values.

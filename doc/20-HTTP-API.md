@@ -38,32 +38,91 @@ the specified credentials can be used via HTTP Basic Authentication to submit a 
 [`Event`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/event/event.go).
 See [Authentication](#authentication) for how sources are identified across the supported transports.
 
-The `url` field of an event is optional, but if set, it must be an absolute URL such as
-`https://example.com/icingaweb2/icingadb/host?name=example.com`. It is meant to point the notified contact at the
-object in the web interface of the source that submitted the event. Icinga Notifications does not know where that
-interface lives and therefore cannot complete a relative reference, so events carrying one are rejected with a
-`400 Bad Request` status code.
+### Rule Evaluation
 
-Events sent to Icinga Notifications are expected to match rules that describe further event escalations.
-These rules can be configured in Icinga Notifications Web and should be designed to match the `relations` of the
-submitted events. When submitting an event without the expected relations to evaluate the rules, Icinga Notifications
-will reject the request with a `422 Unprocessable Entity` status code and a message describing the missing relations
-when the `X-Icinga-Reject-If-Relations-Incomplete` header is set to `true`. Otherwise, the request will be accepted
-nonetheless, when either there's an existing incident for the event's objects, the ongoing event causes a new incident
-to be opened, or the source have at least one event rule without a configured object filter.
+Events are evaluated against event rules configured in Icinga Notifications Web. There are two types of event rules,
+and the event's `incident` field decides which of them, if any, are evaluated:
 
-Furthermore, the `complete_relations` field of the event can be used to specify which relations or attributes of the
-event should be considered as complete for the purpose of rule evaluation. For instance, if the `complete_relations`
-field contains `host.vars` and `services[*].vars`, Icinga Notifications will not reject the event even if there are
-rules that require custom variables that are not included in the event. This effectively tells Icinga Notifications
-to ignore any missing custom variables because the source has explicitly declared that the event is complete and no
-further information will be provided.
+| `incident` | Rules evaluated    | Effect                                                                                                       |
+|------------|--------------------|--------------------------------------------------------------------------------------------------------------|
+| `true`     | Escalation rules   | Opens a new incident or updates the open one, triggers escalations and notifies recipients.                  |
+| `false`    | Notification rules | Notifies the recipients of matching notification rules right away. No incident is opened, closed or changed. |
+| omitted    | None               | Only updates an already open incident (e.g. its message). Without an open incident, the event is dropped.    |
+
+A rule's object filter is evaluated against the event's `relations`, so rules should be designed to match the
+relations the source submits. Each entry of a notification rule may additionally restrict its recipients by the
+event's `type`, e.g. `event_type=downtime_start`.
+
+For `incident: false` events whose object already has an open incident, that incident's recipients are notified too,
+according to the following rules:
+
+- Recipients added by escalations are always notified.
+- Subscribers and managers are only notified if the event's `type` is one of the event types they chose when
+  subscribing or taking over the incident.
+
+These notifications are recorded in the incident's history and carry the incident in the
+[channel request](10-Channels.md#sendnotification). The incident's state itself stays unchanged.
+
+Muting an incident only silences the notifications that belong to it. Its recipients aren't notified while it's
+muted, and these notifications are recorded as suppressed in the incident's history. Contacts who are only notified
+because of a notification rule are still notified, since those notifications aren't tied to the incident.
+
+### Incomplete Relations
+
+Only events with the `incident` field set are checked for missing relations. If such an event lacks relations that
+the rules of the evaluated type require, Icinga Notifications responds with 422 if the
+`X-Icinga-Reject-If-Relations-Incomplete` header is set to `true`. Without that header, the event is accepted anyway
+if any of the following applies:
+
+- the event has `incident: true`, i.e. it opens or escalates an incident,
+- the event's object already has an open incident, or
+- the source has at least one rule of the evaluated type without an object filter.
+
+Otherwise, it's rejected with 422 as well. The response body lists the missing relations, so the source can
+resubmit the event with them included:
+
+```json
+{"type": "attribute negotiation", "attributes": ["$[\"host\"][\"vars\"][\"foo\"]","$[\"services\"][*][\"vars\"][\"bar\"]"]}
+```
+
+Each entry in `attributes` is a missing relation, written as a normalized JSONPath expression. For example,
+`$["host"]["vars"]["foo"]` is the `foo` custom variable of the host, and the same path can be expressed as
+`host.vars.foo`. To mark such a relation as complete instead of sending it, add it or one of its parents
+(e.g. `host.vars`) to `complete_relations`.
+
+The `complete_relations` field of the event declares relations as complete, even if they don't contain everything
+the rules refer to. For instance, if `complete_relations` contains `host.vars` and `services[*].vars`, the event
+isn't rejected due to missing custom variables, because the source has stated that it has no further variables to send.
+
+### Responses <a id="process-event-responses"></a>
+
+The `/process-event` endpoint returns the following HTTP status codes:
+
+| Status | Meaning                                                                                                 |
+|--------|---------------------------------------------------------------------------------------------------------|
+| 204    | The event was accepted and queued for processing.                                                       |
+| 400    | The body isn't valid JSON, contains unknown fields, or fails validation (e.g. no tags, relative `url`). |
+| 401    | Authentication failed, see [Authentication](#authentication).                                           |
+| 405    | The request method isn't `POST`.                                                                        |
+| 422    | Required relations are missing, see [Incomplete Relations](#incomplete-relations).                      |
+| 500    | The event couldn't be queued. Details are in the server log.                                            |
+
+The `url` field of an event is optional. If set, it must be an absolute URL such as
+`https://example.com/icingaweb2/icingadb/host?name=example.com`, pointing the notified contact at the object in the
+source's web interface. Icinga Notifications doesn't know where that interface lives and can't resolve a relative
+URL, so such events are rejected with `400`.
+
+A `204` HTTP code means the event was accepted and successfully queued. Events that turn out to be invalid during
+processing, such as a severity change without the `incident` field, are dropped and only logged.
+
+### Example Request
 
 An example request to submit an event looks like this:
 
 ```
 curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomplete: true' -d '@-' 'http://localhost:5680/process-event' <<EOF
 {
+  "incident": true,
   "name": "dummy-809: random fortune",
   "url": "http://localhost/icingaweb2/icingadb/service?name=random%20fortune&host.name=dummy-809",
   "tags": {
@@ -118,7 +177,8 @@ EOF
 
 All responses from the Icinga Notifications HTTP API endpoints are JSON-encoded and follow a consistent structure.
 The only exception to this is the [`/process-event`](#process-event) endpoint, which returns a `204 No Content` status
-code with an empty body in the successful case and a proper HTTP error status code in the error case.
+code with an empty body in the successful case, see [Responses](#process-event-responses) and a proper HTTP error
+status code in the error case.
 
 The general structure of the response for all other endpoints consists of the following attributes:
 
