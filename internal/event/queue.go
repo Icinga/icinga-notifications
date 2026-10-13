@@ -213,7 +213,7 @@ func Enqueue(ctx context.Context, db *database.DB, ev *Event) error {
 		},
 		retry.Retryable,
 		backoff.DefaultBackoff,
-		db.GetDefaultRetrySettings())
+		retry.Settings{})
 }
 
 // ProcessQueue processes events from the job queue in the database and invokes the provided callbacks for each event.
