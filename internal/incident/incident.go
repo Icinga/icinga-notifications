@@ -1,6 +1,7 @@
 package incident
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -43,7 +44,9 @@ type Incident struct {
 	Severity    baseEv.Severity `db:"severity"`
 	// MuteReason indicates whether this incident is currently muted; its non-null value contains the mute reason.
 	MuteReason types.String `db:"mute_reason"`
+	Summary    string       `db:"summary"`
 	Message    types.String `db:"message"`
+	SourceID   int64        `db:"source_id"`
 
 	// NextEscalationCheckAt stores when this Incident's time-based escalations should be reevaluated next. It is used
 	// in the ReevaluateEscalations function to reevaluate incident escalations.
@@ -118,6 +121,34 @@ func (i *Incident) HasManager() bool {
 	return false
 }
 
+// Manager returns the full name of the incident's current manager and true, or ("", false) if unmanaged.
+func (i *Incident) Manager() (string, bool) {
+	i.runtimeConfig.RLock()
+	defer i.runtimeConfig.RUnlock()
+
+	for recipientKey, state := range i.Recipients {
+		if state.Role != recipient.RoleManager {
+			continue
+		}
+		if r := i.runtimeConfig.GetRecipient(recipientKey); r != nil {
+			return r.String(), true
+		}
+		break
+	}
+	return "", false
+}
+
+// SourceName returns the configured name of the source that originally opened this incident, or "" if unknown.
+func (i *Incident) SourceName() string {
+	i.runtimeConfig.RLock()
+	defer i.runtimeConfig.RUnlock()
+
+	if src, ok := i.runtimeConfig.Sources[i.SourceID]; ok {
+		return src.Name
+	}
+	return ""
+}
+
 // IsNotifiable returns whether the given recipient state is eligible to be notified for this incident.
 //
 // For a managed incident, only managers and subscribers should be notified, unless the recipient is new
@@ -158,6 +189,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 	i.logger = i.logger.With(zap.String("object", obj.DisplayName()))
 
 	triggerNotifications := ev.NotificationOnly()
+	var reason notifyReason
 	isNew := i.IsNew()
 	if isNew && !ev.NotificationOnly() {
 		if !ev.OpenOrEscalate() {
@@ -175,15 +207,57 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 
 		i.logger = i.logger.With(zap.String("incident", i.String()))
+		reason = notifyReason{
+			Kind:           ReasonOpened,
+			IsNewIncident:  true,
+			Closing:        ev.CloseIncident(),
+			CurrentlyMuted: ev.IsMuted(),
+		}
 	} else if !ev.NotificationOnly() {
 		i.logger = i.logger.With(zap.String("incident", i.String()))
-		if sevChanged, err := i.processSeverityChangedEvent(ctx, tx, ev); err != nil {
+
+		wasMuted := i.IsMuted()
+		sevChanged, oldSeverity, err := i.processSeverityChangedEvent(ctx, tx, ev)
+		if err != nil {
 			return err
-		} else if ev.OpenOrEscalate() {
+		}
+
+		if ev.OpenOrEscalate() {
 			triggerNotifications = sevChanged || ev.NotifyRecipients()
 		} else {
 			// Events that don't open or escalate an incident are allowed to generate notifications unconditionally.
 			triggerNotifications = true
+		}
+
+		reason = notifyReason{
+			Kind:             ReasonUpdated,
+			SeverityImproved: sevChanged && ev.Severity < oldSeverity,
+			SeverityWorsened: sevChanged && ev.Severity > oldSeverity,
+			OldSeverity:      oldSeverity,
+			Closing:          ev.CloseIncident(),
+			CurrentlyMuted:   wasMuted,
+		}
+
+		if ev.Muted.Valid {
+			if ev.IsMuted() && !wasMuted {
+				reason.JustMuted = true
+				reason.CurrentlyMuted = true
+			} else if !ev.IsMuted() && wasMuted {
+				reason.JustUnmuted = true
+				reason.UnmuteReason = ev.MutedReason
+				reason.CurrentlyMuted = false
+			}
+		}
+
+		switch {
+		case reason.Closing:
+			reason.Kind = ReasonResolved
+		case reason.SeverityImproved, reason.SeverityWorsened:
+			// Keep reason.Kind at ReasonUpdated for existing recipients.
+		case reason.JustMuted:
+			reason.Kind = ReasonMuted
+		case reason.JustUnmuted:
+			reason.Kind = ReasonUnmuted
 		}
 	}
 
@@ -214,6 +288,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 			if !isNew {
 				// Even if the severity didn't change, we want to update the message nonetheless.
 				i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
+				i.Summary = ev.Summary
 			}
 
 		}
@@ -229,7 +304,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 
 		if triggerNotifications {
-			notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev))
+			notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev), reason)
 			if err != nil {
 				return err
 			}
@@ -325,7 +400,8 @@ func (i *Incident) RetriggerEscalations(ctx context.Context, o *object.Object, e
 			}
 
 			ev.Tags = o.Tags
-			notifications, err = i.generateNotifications(ctx, tx, ev, channels)
+			reason := notifyReason{Kind: ReasonUpdated, CurrentlyMuted: i.IsMuted()}
+			notifications, err = i.generateNotifications(ctx, tx, ev, channels, reason)
 			if err != nil {
 				return fmt.Errorf("cannot generate notifications for reevaluated escalations: %w", err)
 			}
@@ -428,7 +504,8 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			var err error
 			message := fmt.Sprintf("Recipient %s has been added as the new incident manager", r.String())
 			ev = &event.Event{ID: qa.ID, Time: qa.Time, Message: message}
-			notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev))
+			reason := notifyReason{Kind: ReasonManaged, ManagerName: r.String()}
+			notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev), reason)
 			return err
 
 		case event.ActionUnmanage, event.ActionSubscribe:
@@ -439,8 +516,24 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				return fmt.Errorf("incident has no manager, cannot demote recipient %q", r)
 			}
 
+			if qa.Kind == event.ActionUnmanage && i.Recipients[recipientKey].Role != recipient.RoleManager {
+				return fmt.Errorf("cannot unmanage incident where recipient %s is not the manager", r.String())
+			}
+
 			if err := i.addRecipient(ctx, tx, r, recipient.RoleSubscriber, qa.EventTypes); err != nil {
 				return fmt.Errorf("cannot add recipient %q as subscriber: %w", r, err)
+			}
+
+			if qa.Kind == event.ActionUnmanage {
+				// Remove the recipient for the same reasons as stated in event.ActionManage above.
+				delete(i.Recipients, recipientKey)
+
+				message := fmt.Sprintf("Recipient %s has been removed as the incident manager", r.String())
+				ev = &event.Event{ID: qa.ID, Time: qa.Time, Message: message}
+				reason := notifyReason{Kind: ReasonUnmanaged, ManagerName: r.String()}
+				var err error
+				notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev), reason)
+				return err
 			}
 			return nil
 
@@ -482,12 +575,14 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 //
 // Returns an error if fails to persist the generated history or [ErrSeverityChangeWithoutIncidentFlag]
 // if the event does not set the 'incident' flag.
-func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) (bool, error) {
+func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) (bool, baseEv.Severity, error) {
+	oldSeverity := i.Severity
+
 	sevChanged := ev.Severity != baseEv.SeverityNone && i.Severity != ev.Severity
 	if sevChanged {
 		if !ev.OpenOrEscalate() {
 			i.logger.Errorw("Cannot change incident severity with an event that doesn't set the 'incident' flag")
-			return false, ErrSeverityChangeWithoutIncidentFlag
+			return false, oldSeverity, ErrSeverityChangeWithoutIncidentFlag
 		}
 		i.logger.Infof("Incident severity changed from %s to %s", i.Severity.String(), ev.Severity.String())
 
@@ -503,19 +598,21 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 
 		if err := hr.Sync(ctx, i.db, tx); err != nil {
 			i.logger.Errorw("Failed to insert incident severity changed history", zap.Error(err))
-			return false, err
+			return false, oldSeverity, err
 		}
 
 		i.Severity = ev.Severity
 	}
 
-	return sevChanged, nil
+	return sevChanged, oldSeverity, nil
 }
 
 func (i *Incident) processIncidentOpenedEvent(ctx context.Context, tx *sqlx.Tx, ev *event.Event) error {
 	i.StartedAt = types.UnixMilli(ev.Time)
 	i.Severity = ev.Severity
 	i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
+	i.Summary = ev.Summary
+	i.SourceID = ev.SourceId
 	if err := i.Sync(ctx, tx); err != nil {
 		i.logger.Errorw("Cannot insert incident to the database", zap.Error(err))
 		return err
@@ -773,12 +870,36 @@ func (i *Incident) notifyContacts(
 	ev *event.Event,
 	notifications []*NotificationEntry,
 ) error {
+	if sourceNames, err := object.Sources(ctx, i.db, i.ObjectID); err != nil {
+		i.logger.Warnw("Failed to fetch object sources for notification", zap.Error(err))
+	} else {
+		obj.Sources = sourceNames
+	}
+
+	managerName, _ := i.Manager()
+	rctx := &renderCtx{
+		ObjectName:      obj.DisplayName(),
+		ObjectURL:       cmp.Or(ev.URL, obj.URL.String),
+		Severity:        i.Severity,
+		IncidentMessage: i.Message.String,
+		IncidentSummary: i.Summary,
+		SourceName:      i.SourceName(),
+		EventMessage:    ev.Message,
+		EventSummary:    ev.Summary,
+		StartedAt:       i.StartedAt.Time(),
+		RecoveredAt:     i.RecoveredAt.Time(),
+		Age:             ev.Time.Sub(i.StartedAt.Time()),
+		ManagerName:     managerName,
+		MuteReason:      i.MuteReason.String,
+	}
+
 	for _, notification := range notifications {
 		i.runtimeConfig.RLock()
 		contact := i.runtimeConfig.Contacts[notification.ContactID]
 		if contact == nil {
 			i.runtimeConfig.RUnlock()
-			i.logger.Debugw("Incident refers unknown contact, might got deleted", zap.Int64("contact_id", notification.ContactID))
+			i.logger.Debugw("Incident refers unknown contact, might got deleted",
+				zap.Int64("contact_id", notification.ContactID))
 			continue
 		}
 		contactName := contact.String()
@@ -791,7 +912,7 @@ func (i *Incident) notifyContacts(
 		}
 		i.runtimeConfig.RUnlock()
 
-		err := i.notifyContact(obj, contact, ev, ch, notification.IsIncidentRelated)
+		err := i.notifyContact(obj, contact, ev, ch, notification, rctx)
 		if err != nil {
 			notification.State = NotificationStateFailed
 		} else {
@@ -837,15 +958,36 @@ func (i *Incident) notifyContact(
 	contact *recipient.Contact,
 	ev *event.Event,
 	ch *channel.Channel,
-	isIncidentRelated bool,
+	notification *NotificationEntry,
+	rctx *renderCtx,
 ) error {
 	i.logger.Infof("Notifying contact %q via %q of type %q", contact.FullName, ch.Name, ch.Type)
 
 	var incidentPlugin *plugin.Incident
-	if isIncidentRelated {
-		incidentPlugin = &plugin.Incident{Id: i.Id, Severity: i.Severity}
+	reason := &notification.Reason
+	if notification.IsIncidentRelated {
+		managerName, managed := i.Manager()
+
+		incidentPlugin = &plugin.Incident{
+			Id:             i.Id,
+			Severity:       i.Severity,
+			IsMuted:        i.IsMuted(),
+			IsRecovered:    ev.CloseIncident(),
+			Message:        i.Message.String,
+			Summary:        i.Summary,
+			StartedAt:      i.StartedAt.Time(),
+			RecoveredAt:    i.RecoveredAt.Time(),
+			MutedReason:    i.MuteReason.String,
+			Managed:        managed,
+			ManagedBy:      managerName,
+			OpenedBySource: i.SourceName(),
+		}
+	} else {
+		reason = &notifyReason{Kind: ReasonEvent}
 	}
-	if err := ch.Notify(contact, incidentPlugin, obj, ev); err != nil {
+
+	summary, body := renderNotification(reason, rctx)
+	if err := ch.Notify(contact, incidentPlugin, obj, ev, summary, body); err != nil {
 		i.logger.Errorw("Failed to send notification via channel plugin", zap.String("type", ch.Type), zap.Error(err))
 		return err
 	}

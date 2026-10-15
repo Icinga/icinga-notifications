@@ -737,7 +737,7 @@ func TestIncidents(t *testing.T) {
 				require.NoError(t, i.applyMatchingRules(ctx, tx, ev))
 
 				var err error
-				notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev))
+				notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev), notifyReason{Kind: ReasonEvent})
 				require.NoError(t, err)
 
 				return nil
@@ -773,7 +773,7 @@ func TestIncidents(t *testing.T) {
 				require.NoError(t, i.applyMatchingRules(ctx, tx, ev))
 
 				var err error
-				notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev))
+				notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev), notifyReason{Kind: ReasonEvent})
 				require.NoError(t, err)
 
 				return nil
@@ -897,6 +897,7 @@ func makeEvent(t *testing.T, sourceID int64, opts ...eventOption) *event.Event {
 		SourceId: sourceID,
 		ID:       types.MakeUUID(uuid.New()),
 		Name:     testutils.MakeRandomString(t),
+		Summary:  testutils.MakeRandomString(t),
 	}
 	for _, opt := range opts {
 		opt(ev)

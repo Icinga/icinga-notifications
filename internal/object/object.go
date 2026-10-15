@@ -20,6 +20,9 @@ type Object struct {
 	URL  types.String `db:"url"`
 
 	Tags map[string]string `db:"-"`
+
+	// Sources is populated with the display names of every Source that has ever reported an event for this Object.
+	Sources []string `db:"-"`
 }
 
 // New creates a new object from the given event.
@@ -50,6 +53,22 @@ func Get(ctx context.Context, db *database.DB, id types.Binary) (*Object, error)
 	}
 
 	return o, nil
+}
+
+// Sources returns the names of every source that has ever reported an event for the given object.
+func Sources(ctx context.Context, db *database.DB, id types.Binary) ([]string, error) {
+	var sourceNames []string
+	query := `
+		SELECT source.name
+		FROM object_source
+		INNER JOIN source ON object_source.source_id = source.id
+		WHERE
+			object_source.object_id = ? AND
+			source.deleted = 'n'`
+	if err := db.SelectContext(ctx, &sourceNames, db.Rebind(query), id); err != nil {
+		return nil, fmt.Errorf("cannot fetch object source associations for %q: %w", id, err)
+	}
+	return sourceNames, nil
 }
 
 // SyncFromEvent syncs the object in the database with the given event.
