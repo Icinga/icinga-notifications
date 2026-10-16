@@ -164,8 +164,9 @@ func (i *Incident) recordRecipientRoleChange(ctx context.Context, tx *sqlx.Tx, r
 //
 // Incident-related entries (the event opens/escalates the incident, or any of the contact's origins is
 // incident-related) get an incident_history row. If the incident is muted, that row is Suppressed and no
-// pending entry is returned. Entries that are not incident-related get no incident_history row, but might
-// still carry incident ID and are returned as pending regardless of the mute state.
+// pending entry is returned, unless the origin has BypassSuppression set. Entries that are not incident-related
+// get no incident_history row, but might still carry incident ID and are returned as pending regardless
+// of the mute state.
 //
 // A contact+channel pair selected by multiple origins yields a single pending entry for the first origin,
 // plus one NotificationStateSuperfluous entry per additional origin. Superfluous entries are only recorded
@@ -180,18 +181,17 @@ func (i *Incident) generateNotifications(
 	contactChannels rule.ContactChannels,
 	reason notifyReason,
 ) ([]*NotificationEntry, error) {
-	var notificationState NotificationState
-	suppress := i.IsMuted()
-	if suppress {
-		notificationState = NotificationStateSuppressed
-	} else {
-		notificationState = NotificationStatePending
-	}
-
 	var notifications []*NotificationEntry
+	suppress := i.IsMuted()
+
 	for contact, channelOrigins := range contactChannels {
 		slices.SortStableFunc(channelOrigins, func(a, b rule.ChannelOrigin) int {
-			return cmp.Compare(a.ChannelID, b.ChannelID)
+			// Within the same channel, origins that bypass the suppression come first, so that the
+			// notification is attributed to them and the others are recorded as skipped.
+			return cmp.Or(
+				cmp.Compare(a.ChannelID, b.ChannelID),
+				cmp.Compare(boolToInt(b.BypassSuppression), boolToInt(a.BypassSuppression)),
+			)
 		})
 
 		// Determine if the notification is incident-related. A notification is considered incident-related if
@@ -201,28 +201,37 @@ func (i *Incident) generateNotifications(
 			return origin.IncidentRelated
 		})
 
-		recipientIsNew := slices.ContainsFunc(
-			channelOrigins,
-			func(o rule.ChannelOrigin) bool { return i.Recipients[o.RecipientKey(contact)].IsNew })
+		recipientIsNew := slices.ContainsFunc(channelOrigins, func(o rule.ChannelOrigin) bool {
+			return o.BypassSuppression || i.Recipients[o.RecipientKey(contact)].IsNew
+		})
 		effectiveReason := reason.reasonFor(ev.NotificationOnly() && !i.IsNew(), recipientIsNew)
 
 		var lastChannelID int64
 		var notificationOfCurrentChannel *NotificationEntry
 		for _, origin := range channelOrigins {
 			if lastChannelID != origin.ChannelID {
+				// Since origins may bypass the suppression individually, a contact can have both suppressed and
+				// pending channels. Reset the notification of the previous channel, so that further origins of a
+				// suppressed channel aren't recorded as skipped entries of another channel's notification.
+				notificationOfCurrentChannel = nil
 				lastChannelID = origin.ChannelID
+
 				var hr *HistoryRow
 				// Only incident-related notifications are recorded in the incident history and are subject to the
 				// incident's mute state. Notifications from notification rules are not tied to the incident, so they
 				// are always sent, even if the incident is muted.
 				if isIncidentRelated {
+					state := NotificationStatePending
+					if suppress && !origin.BypassSuppression {
+						state = NotificationStateSuppressed
+					}
 					hr = &HistoryRow{
 						IncidentID:        i.Id,
 						Key:               recipient.ToKey(contact),
 						Time:              types.UnixMilli(time.Now()),
 						Type:              Notified,
 						ChannelID:         types.MakeInt(origin.ChannelID, types.TransformZeroIntToNull),
-						NotificationState: notificationState,
+						NotificationState: state,
 						Message:           types.MakeString(ev.Message, types.TransformEmptyStringToNull),
 					}
 
@@ -234,9 +243,8 @@ func (i *Incident) generateNotifications(
 						return nil, err
 					}
 
-					if suppress {
-						// If the incident is muted, we don't need to create a pending notification entry,
-						// so we can skip to the next origin.
+					if suppress && !origin.BypassSuppression {
+						// The incident is muted and the origin does not bypass suppression, so we skip it.
 						continue
 					}
 				}
@@ -282,4 +290,12 @@ func (i *Incident) generateNotifications(
 	}
 
 	return notifications, nil
+}
+
+// boolToInt converts a boolean value to an integer (1 for true, 0 for false).
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

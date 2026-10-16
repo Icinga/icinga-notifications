@@ -115,6 +115,11 @@ type ChannelOrigin struct {
 	// IncidentRelated is true if the contact is notified as a recipient of the incident (escalation recipient,
 	// subscriber, manager) rather than through a notification rule.
 	IncidentRelated bool
+
+	// BypassSuppression marks an origin that may be notified even though the incident is muted.
+	//
+	// It is set for recipient+channel pairs of a newly triggered escalation that are not yet known to the incident.
+	BypassSuppression bool
 }
 
 // RecipientKey returns the key of the recipient based on its origin.
@@ -129,63 +134,55 @@ func (o ChannelOrigin) RecipientKey(contact *recipient.Contact) recipient.Key {
 	}
 }
 
-// ContactChannels stores, per contact and channel ID, the origins that selected this channel.
-//
-// When multiple entry recipients resolve to the same contact and channel, all their origins are
-// recorded: the first origin is the one the notification is attributed to, any further ones denote
-// duplicates that would have notified the same contact via the same channel.
-type ContactChannels map[*recipient.Contact][]ChannelOrigin
+type (
+	// ContactChannels stores, per contact and channel ID, the origins that selected this channel.
+	//
+	// When multiple entry recipients resolve to the same contact and channel, all their origins are
+	// recorded: the first origin is the one the notification is attributed to, any further ones denote
+	// duplicates that would have notified the same contact via the same channel.
+	ContactChannels map[*recipient.Contact][]ChannelOrigin
+
+	// IsNotifiableFn is a callback function type that determines whether a specific recipient
+	// should be considered for notification.
+	IsNotifiableFn func(recipient.Key) bool
+
+	// LoadRecipientOption is a functional option type that allows customization of the ChannelOrigin
+	// when loading recipient channels.
+	LoadRecipientOption func(*EntryRecipient, *ChannelOrigin)
+)
 
 // LoadFromEntryRecipients adds the channels of all contacts resolved from entry's recipients at time t.
 //
-// isIncidentRelated is stored on each resulting ChannelOrigin.IncidentRelated, to mark whether these
-// recipients were resolved via an incident-related path (e.g. escalations) rather than a plain
-// notification rule.
-//
-// You can provide this method a callback to control whether the channel of a specific contact should
-// be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
-func (ch ContactChannels) LoadFromEntryRecipients(entry *Entry, t time.Time, isIncidentRelated bool, isNotifiable func(recipient.Key) bool) {
-	for _, er := range entry.Recipients {
-		ch.LoadRecipientChannel(er, entry.RuleID, t, isIncidentRelated, isNotifiable)
-	}
-}
-
-// LoadRecipientChannel loads recipient channel to the current map.
-// You can provide this method a callback to control whether the channel of a specific contact should
-// be loaded, and it will skip those for whom the callback returns false. Pass AlwaysNotifiable for default actions.
-func (ch ContactChannels) LoadRecipientChannel(
-	r *EntryRecipient,
-	ruleID int64,
-	t time.Time,
-	isIncidentRelated bool,
-	isNotifiable func(recipient.Key) bool,
-) {
-	if isNotifiable(r.Key) {
-		origin := ChannelOrigin{
-			ChannelID:      r.ChannelID.Int64,
-			RuleID:         ruleID,
-			RuleEntryID:    r.EntryID,
-			ContactGroupID: r.GroupID.Int64,
-			ScheduleID:     r.ScheduleID.Int64,
-			Role:           recipient.RoleRecipient,
-
-			IncidentRelated: isIncidentRelated,
-		}
-
-		for _, c := range r.Recipient.GetContactsAt(t) {
-			if r.ChannelID.Valid {
-				origin.ChannelID = r.ChannelID.Int64
-			} else {
-				origin.ChannelID = c.DefaultChannelID
+// The isNotifiable callback is used to filter out recipients that should not be notified. Additionally,
+// LoadRecipientOption opts can be provided to customize the ChannelOrigin for each loaded recipient channel.
+func (ch ContactChannels) LoadFromEntryRecipients(entry *Entry, t time.Time, isNotifiable IsNotifiableFn, opts ...LoadRecipientOption) {
+	for _, r := range entry.Recipients {
+		if isNotifiable(r.Key) {
+			origin := ChannelOrigin{
+				RuleID:         entry.RuleID,
+				RuleEntryID:    r.EntryID,
+				ContactGroupID: r.GroupID.Int64,
+				ScheduleID:     r.ScheduleID.Int64,
+				Role:           recipient.RoleRecipient,
 			}
-			ch[c] = append(ch[c], origin)
+
+			for _, opt := range opts {
+				opt(r, &origin)
+			}
+
+			for _, c := range r.Recipient.GetContactsAt(t) {
+				if r.ChannelID.Valid {
+					origin.ChannelID = r.ChannelID.Int64
+				} else {
+					origin.ChannelID = c.DefaultChannelID
+				}
+				ch[c] = append(ch[c], origin)
+			}
 		}
 	}
 }
 
-// AlwaysNotifiable (checks) whether the given recipient is notifiable and returns always true.
-// This function is usually passed as an argument to ContactChannels.LoadFromEntryRecipients whenever you do
-// not want to perform any custom actions.
-func AlwaysNotifiable(_ recipient.Key) bool {
-	return true
+// WithIncidentRelated returns a LoadRecipientOption that sets the IncidentRelated flag on the ChannelOrigin.
+func WithIncidentRelated() LoadRecipientOption {
+	return func(_ *EntryRecipient, o *ChannelOrigin) { o.IncidentRelated = true }
 }
