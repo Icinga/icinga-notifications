@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
+	"unicode/utf8"
 
 	"github.com/icinga/icinga-go-library/backoff"
 	"github.com/icinga/icinga-go-library/database"
@@ -181,8 +182,8 @@ func (c *Channel) pluginControlLoop(currentConfig newConfig) {
 						zap.String("new_type", newConf.ctype))
 
 					// If the plugin type has changed, we need to clean up the plugin state in the database,
-					// as it's no longer relevant for the new plugin type. It'll will the query internally
-					// for 5m before giving up, so we don't need to retry here.
+					// as it's no longer relevant for the new plugin type. It'll retry the query internally
+					// for 10s before giving up, and any leftovers will be cleaned up by the retention policy.
 					if err := deleteByChannelID(c.pluginCtx, c.db, c.ID); err != nil {
 						c.Logger.Warnw("Failed to clean up channel plugin state after plugin type change",
 							zap.String("old_type", currentConfig.ctype),
@@ -223,29 +224,48 @@ func (c *Channel) Stop(chDeleted bool) {
 	}
 }
 
-// Restart signals to restart the channel plugin with the updated channel config
+// Restart signals to restart the channel plugin with the updated channel config.
 func (c *Channel) Restart(logger *zap.SugaredLogger) {
 	c.Logger = logger.With(zap.Object("channel", c))
 	c.Logger.Info("Restarting the channel plugin due to a config change")
 	c.restartCh <- newConfig{c.Type, c.Config, c.ValidationResult}
 }
 
-// Notify prepares and sends the notification request, returns a non-error on fails, nil on success
+// Notify sends a notification about the given incident, object and event to the contact via this channel's plugin.
+//
+// Only the contact's addresses matching the plugin type are passed to the plugin. If an incident is given and the
+// contact has at least one such address, the channel state for this channel, incident and contact is looked up
+// and included in the request, so the plugin can e.g. reply to a previously sent message.
+//
+// If the plugin returns a valid state for a non-recovered incident, it is persisted for subsequent notifications.
+// Failures in any of these state operations are logged but don't fail the notification, unless ctx or the plugin
+// context has been canceled.
+//
+// The provided ctx bounds the whole operation. Canceling it aborts any pending database operation and the RPC call.
+//
+// It returns the plugin's delivery result (maybe nil) on success, or an error if the notification couldn't be sent.
 func (c *Channel) Notify(
+	ctx context.Context,
 	contact *recipient.Contact,
 	i *plugin.Incident,
 	o *object.Object,
 	ev *event.Event,
 	summary string,
 	body string,
-) error {
+	incidentID int64,
+) (*plugin.DeliveryResult, error) {
 	p := c.getPlugin()
 	if p == nil {
-		return errors.New("plugin could not be started")
+		return nil, errors.New("plugin could not be started")
 	}
 
 	contactStruct := &plugin.Contact{FullName: contact.FullName}
 	for _, addr := range contact.Addresses {
+		// Not every plugin needs to know about every address that a contact has, so we filter
+		// the addresses by type to only include those that are relevant for the plugin.
+		if addr.Type != p.pluginType {
+			continue
+		}
 		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
 	}
 
@@ -268,7 +288,67 @@ func (c *Channel) Notify(
 		Body:    body,
 	}
 
-	return p.SendNotification(c.pluginCtx, req)
+	// Abort the RPC call when either the plugin is stopped or ctx is done, whichever comes first.
+	rpcCtx, cancel := context.WithCancelCause(p.ctx)
+	stopAfterFunc := context.AfterFunc(ctx, func() { cancel(context.Cause(ctx)) })
+	defer stopAfterFunc()
+	defer cancel(nil)
+
+	if i != nil {
+		req.State = plugin.State{Key: p.composeStateKey(req.Contact, incidentID)}
+		if !req.State.Key.IsZero() {
+			s, err := getStateByKey(rpcCtx, p.db, req.State.Key)
+			if err != nil && rpcCtx.Err() != nil {
+				return nil, err
+			} else if err != nil {
+				// This is not that critical for sending the notification, so don't error out.
+				p.logger.Warnw("Failed to retrieve channel state for incident",
+					zap.Stringer("state_key", req.State.Key),
+					zap.Int64("incident_id", incidentID),
+					zap.Error(err))
+			}
+			req.State.Value = s.Value
+		}
+
+		if i.IsRecovered && req.State.Value == "" {
+			// If the incident is recovering and there is no persistent state for it, we don't need to
+			// send the state key to the plugin, as we won't be able to persist any state for it anyway.
+			req.State = plugin.State{}
+		}
+	}
+
+	result, err := p.SendNotification(rpcCtx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	if i == nil || i.IsRecovered || req.State.IsZero() || result == nil || result.State.IsZero() {
+		return result, nil
+	}
+
+	if result.State.Key != req.State.Key {
+		p.logger.Warnw("Received a different state key from the plugin than expected, skipping state persistence",
+			zap.Stringer("expected_state_key", req.State.Key),
+			zap.Stringer("received_state_key", result.State.Key))
+		return result, nil
+	}
+
+	if result.State.Value == "" || utf8.RuneCountInString(result.State.Value) > maxStateValueLen {
+		p.logger.Warnw("Received an invalid state value from the plugin, skipping state persistence",
+			zap.Stringer("state_key", result.State.Key),
+			zap.Int64("incident_id", incidentID))
+		return result, nil
+	}
+
+	s := &State{ChannelID: p.ChannelID, IncidentID: incidentID, State: result.State}
+	if err := upsertState(rpcCtx, p.db, s); err != nil {
+		p.logger.Warnw("Failed to upsert channel state received from plugin",
+			zap.Stringer("state_key", result.State.Key),
+			zap.Int64("incident_id", incidentID),
+			zap.Error(err))
+	}
+
+	return result, nil
 }
 
 // persistValidationError persists the validation error in the database for the channel.

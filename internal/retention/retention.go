@@ -137,6 +137,7 @@ var dbPruners = []Pruner{
 			// Incident history references `incident_rule_escalation_state` too, so must appear before it in the cascade.
 			{Table: "incident_history", PKorFK: "incident_id"},
 			{Table: "incident_rule_escalation_state", PKorFK: "incident_id"},
+			{Table: "channel_state", PKorFK: "incident_id"}, // Cleanup any state leftover for the incident.
 		},
 	},
 	// Extra pruners for the job_queue.

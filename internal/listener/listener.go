@@ -24,6 +24,7 @@ import (
 	"github.com/icinga/icinga-go-library/retry"
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal"
+	"github.com/icinga/icinga-notifications/internal/channel"
 	"github.com/icinga/icinga-notifications/internal/config"
 	"github.com/icinga/icinga-notifications/internal/daemon"
 	"github.com/icinga/icinga-notifications/internal/event"
@@ -626,6 +627,14 @@ func (l *Listener) modifyIncidentsHandler(w http.ResponseWriter, r *http.Request
 						},
 					}, nil
 				default:
+					if attrs.Close.Valid {
+						if err := channel.DeleteStateByIncidentID(r.Context(), l.db, pair.Incident.Id); err != nil {
+							l.logger.Warnw("Failed to delete channel state for closed incident",
+								zap.Object("source", src),
+								zap.Error(err))
+						}
+					}
+
 					return source.Response[source.ModifiedIncidentResp]{
 						Status: source.ResponseStatusSuccess,
 						Result: source.ModifiedIncidentResp{ObjectTags: pair.Object.Tags},
