@@ -308,7 +308,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		}
 
 		if triggerNotifications {
-			notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev), reason)
+			notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev, i.bypassSuppressionOption()), reason)
 			if err != nil {
 				return err
 			}
@@ -388,9 +388,14 @@ func (i *Incident) RetriggerEscalations(ctx context.Context, o *object.Object, e
 				return fmt.Errorf("cannot trigger reevaluated escalations: %w", err)
 			}
 
+			opts := []rule.LoadRecipientOption{rule.WithIncidentRelated()}
+			if bypassOpt := i.bypassSuppressionOption(); bypassOpt != nil {
+				opts = append(opts, bypassOpt)
+			}
+
 			channels := make(rule.ContactChannels)
 			for _, escalation := range escalations {
-				channels.LoadFromEntryRecipients(escalation, ev.Time, true, i.isRecipientNotifiable)
+				channels.LoadFromEntryRecipients(escalation, ev.Time, i.isRecipientNotifiable, opts...)
 			}
 
 			eventIDQuery := `
@@ -505,11 +510,16 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			// own promotion to manager. We only want to notify the other recipients that a new manager has been added.
 			delete(i.Recipients, recipientKey)
 
-			var err error
 			message := fmt.Sprintf("Recipient %s has been added as the new incident manager", r.String())
 			ev = &event.Event{ID: qa.ID, Time: qa.Time, Message: message}
 			reason := notifyReason{Kind: ReasonManaged, ManagerName: r.String()}
-			notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev), reason)
+			channels := i.collectContactChannels(ev, func(_ *rule.EntryRecipient, o *rule.ChannelOrigin) {
+				// Incident managed/unmanaged quick actions should always bypass suppression for the other recipient.
+				o.BypassSuppression = true
+			})
+
+			var err error
+			notifications, err = i.generateNotifications(ctx, tx, ev, channels, reason)
 			return err
 
 		case event.ActionUnmanage, event.ActionSubscribe:
@@ -535,8 +545,13 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				message := fmt.Sprintf("Recipient %s has been removed as the incident manager", r.String())
 				ev = &event.Event{ID: qa.ID, Time: qa.Time, Message: message}
 				reason := notifyReason{Kind: ReasonUnmanaged, ManagerName: r.String()}
+				channels := i.collectContactChannels(ev, func(_ *rule.EntryRecipient, o *rule.ChannelOrigin) {
+					// Incident managed/unmanaged quick actions should always bypass suppression for the other recipient.
+					o.BypassSuppression = true
+				})
+
 				var err error
-				notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev), reason)
+				notifications, err = i.generateNotifications(ctx, tx, ev, channels, reason)
 				return err
 			}
 			return nil
@@ -831,7 +846,7 @@ func (i *Incident) triggerEscalations(ctx context.Context, tx *sqlx.Tx, escalati
 
 		i.logger.Infow("Rule reached escalation", zap.Object("rule", r), zap.Object("escalation", escalation))
 
-		state := &EscalationState{RuleEntryID: escalation.ID, TriggeredAt: types.UnixMilli(time.Now())}
+		state := &EscalationState{RuleEntryID: escalation.ID, TriggeredAt: types.UnixMilli(time.Now()), IsNew: true}
 		i.EscalationState[escalation.ID] = state
 
 		if err := i.AddEscalationTriggered(ctx, tx, state); err != nil {
@@ -1053,17 +1068,21 @@ func (i *Incident) notifyContact(
 // It returns recipients of triggered escalations, incident recipients (for notification-only events, subscribers
 // and managers only if ev.Type is in their [RecipientState.EventTypes]), and, for notification-only events,
 // recipients of matched notification rule entries. Only the latter are marked as not incident-related.
-func (i *Incident) collectContactChannels(ev *event.Event) rule.ContactChannels {
+func (i *Incident) collectContactChannels(ev *event.Event, bypassOpt rule.LoadRecipientOption) rule.ContactChannels {
 	contactChs := make(rule.ContactChannels)
 	// Load all escalations recipients channels if any.
-	for escalationID := range i.EscalationState {
-		escalation := i.runtimeConfig.GetRuleEntry(escalationID)
+	for id := range i.EscalationState {
+		escalation := i.runtimeConfig.GetRuleEntry(id)
 		if escalation == nil {
-			i.logger.Debugw("Incident refers unknown escalation, might got deleted", zap.Int64("escalation_id", escalationID))
+			i.logger.Debugw("Incident refers unknown escalation, might got deleted", zap.Int64("escalation_id", id))
 			continue
 		}
 
-		contactChs.LoadFromEntryRecipients(escalation, ev.Time, true, i.isRecipientNotifiable)
+		opts := []rule.LoadRecipientOption{rule.WithIncidentRelated()}
+		if bypassOpt != nil {
+			opts = append(opts, bypassOpt)
+		}
+		contactChs.LoadFromEntryRecipients(escalation, ev.Time, i.isRecipientNotifiable, opts...)
 	}
 
 	// Check whether all the incident recipients do have an appropriate contact channel configured.
@@ -1118,7 +1137,7 @@ func (i *Incident) collectContactChannels(ev *event.Event) rule.ContactChannels 
 						zap.Object("entry", entry),
 						zap.Error(err))
 				} else if matched {
-					contactChs.LoadFromEntryRecipients(entry, ev.Time, false, func(key recipient.Key) bool {
+					contactChs.LoadFromEntryRecipients(entry, ev.Time, func(key recipient.Key) bool {
 						return i.runtimeConfig.GetRecipient(key) != nil
 					})
 				}
@@ -1225,10 +1244,66 @@ func (i *Incident) isRecipientNotifiable(key recipient.Key) bool {
 	return i.IsNotifiable(state)
 }
 
+// bypassSuppressionOption returns a [rule.LoadRecipientOption] that allows recipient+channel pairs of newly triggered
+// escalations to bypass the incident's mute state once, i.e., if the pair is not already known to the incident.
+//
+// Known pairs are those of all escalations triggered before the current transaction, as well as all incident
+// recipients not covered by a previous escalation, with their default channel.
+func (i *Incident) bypassSuppressionOption() rule.LoadRecipientOption {
+	if !i.IsMuted() {
+		return nil
+	}
+
+	// recipientChannel identifies an incident recipient (contact, group or schedule) together with
+	// the channel it is notified through. A NULL channel denotes the contact's default channel.
+	type recipientChannel struct {
+		key  recipient.Key
+		chID types.Int
+	}
+
+	knownPairs := make(map[recipientChannel]struct{})
+	escalated := make(map[recipient.Key]struct{})
+	for id, state := range i.EscalationState {
+		if state.IsNew {
+			continue
+		}
+		if es := i.runtimeConfig.GetRuleEntry(id); es != nil {
+			for _, r := range es.Recipients {
+				knownPairs[recipientChannel{key: r.Key, chID: r.ChannelID}] = struct{}{}
+				escalated[r.Key] = struct{}{}
+			}
+		}
+	}
+
+	// Recipients not covered by any previous escalation (subscribers, managers, or recipients of escalations
+	// deleted in the meantime) are notified via their default channel, see collectContactChannels, so load
+	// them as known pairs to not bypass the incident's mute state.
+	for key, state := range i.Recipients {
+		if state.IsNew {
+			continue
+		}
+		if _, ok := escalated[key]; !ok {
+			knownPairs[recipientChannel{key: key}] = struct{}{}
+		}
+	}
+
+	return func(er *rule.EntryRecipient, o *rule.ChannelOrigin) {
+		if _, seen := knownPairs[recipientChannel{key: er.Key, chID: er.ChannelID}]; !seen {
+			o.BypassSuppression = true
+		}
+	}
+}
+
 type EscalationState struct {
 	IncidentID  int64           `db:"incident_id"`
 	RuleEntryID int64           `db:"rule_entry_id"`
 	TriggeredAt types.UnixMilli `db:"triggered_at"`
+
+	// IsNew defines whether the escalation triggered during the current transaction.
+	//
+	// Every escalation state loaded from the database isn't new, so IsNew is false. For all other escalations
+	// added in Incident.triggerEscalations due to the ongoing event, IsNew is set true.
+	IsNew bool `db:"-"`
 }
 
 // TableName implements the contracts.TableNamer interface.
@@ -1244,7 +1319,7 @@ type RecipientState struct {
 
 	// IsNew defines whether the associated recipient was added to the incident during the current transaction.
 	//
-	// Every recipient loaded from the database aren't new, so IsNew is false. For all other recipients
+	// Every recipient loaded from the database isn't new, so IsNew is false. For all other recipients
 	// added in Incident.AddRecipient due to the ongoing event, IsNew is set true.
 	IsNew bool
 }

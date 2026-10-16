@@ -131,9 +131,15 @@ func TestIncidents(t *testing.T) {
 	notificationContact := makeContact(t, db, cleaner, "notification_testuser", "notification_testuser", ch.ID)
 	notificationContact2 := makeContact(t, db, cleaner, "notification_testuser_2", "notification_testuser_2", ch2.ID)
 	passiveNotificationContact := makeContact(t, db, cleaner, "passive_notification_testuser", "passive_notification_testuser", ch.ID)
+	bypassContact := makeContact(t, db, cleaner, "suppression_bypass_testuser", "suppression_bypass_testuser", ch.ID)
+	knownContact := makeContact(t, db, cleaner, "suppression_known_testuser", "suppression_known_testuser", ch.ID)
+	knownSubscriber := makeContact(t, db, cleaner, "suppression_known_subscriber", "suppression_known_subscriber", ch.ID)
+	freshContact := makeContact(t, db, cleaner, "suppression_fresh_testuser", "suppression_fresh_testuser", ch.ID)
+	escalatedContact := makeContact(t, db, cleaner, "suppression_escalated_testuser", "suppression_escalated_testuser", ch.ID)
 
 	var unmanagedEscalationID, managedEscalationID int64
-	var basicRule, managedRule, notificationRule, triggerNotificationsRule, escalationsPassivelyNotifiedRule *rule.Rule
+	var basicRule, managedRule, notificationRule, triggerNotificationsRule, escalationsPassivelyNotifiedRule,
+		suppressionBypassRule, suppressionBypassKnownRule *rule.Rule
 	err = db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
 		insertRule := func(name, filter string, ruleType rule.Type) *rule.Rule {
 			r := &rule.Rule{
@@ -157,7 +163,8 @@ func TestIncidents(t *testing.T) {
 			{"op":"!=","attributes":["$.host.name"],"value":"managed_escalations"},
 			{"op":"!=","attributes":["$.host.name"],"regex":"trigger_notifications*"},
 			{"op":"!=","attributes":["$.host.name"],"value":"notification_rule"},
-			{"op":"!=","attributes":["$.host.name"],"regex":"passive_notifications*"}
+			{"op":"!=","attributes":["$.host.name"],"regex":"passive_notifications*"},
+			{"op":"!=","attributes":["$.host.name"],"regex":"suppression_bypass*"}
 		]
 	}
 }`, rule.TypeEscalation)
@@ -165,8 +172,10 @@ func TestIncidents(t *testing.T) {
 		triggerNotificationsRule = insertRule("Trigger Notifications Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"trigger_notifications*"}}`, rule.TypeEscalation)
 		escalationsPassivelyNotifiedRule = insertRule("Passively Notify Escalation Recipients Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"passive_notifications*"}}`, rule.TypeEscalation)
 		notificationRule = insertRule("Notification Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"notifications_rule*"}}`, rule.TypeNotification)
+		suppressionBypassRule = insertRule("Suppression Bypass Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"suppression_bypass"}}`, rule.TypeEscalation)
+		suppressionBypassKnownRule = insertRule("Suppression Bypass Known Recipients Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"suppression_bypass_known_recipients"}}`, rule.TypeEscalation)
 
-		insertEntry := func(c *recipient.Contact, position, ruleID int64, condition string) int64 {
+		insertEntryVia := func(c *recipient.Contact, channelID types.Int, position, ruleID int64, condition string) int64 {
 			escalation := &rule.Entry{
 				RuleID:        ruleID,
 				Position:      types.MakeInt(position),
@@ -183,6 +192,7 @@ func TestIncidents(t *testing.T) {
 
 			escalationRecipient := &rule.EntryRecipient{
 				EntryID:   id,
+				ChannelID: channelID,
 				Recipient: c,
 				ContactID: types.MakeInt(c.ID),
 				ChangedAt: types.UnixMilli(time.Now()),
@@ -192,6 +202,10 @@ func TestIncidents(t *testing.T) {
 			require.NoError(t, err, "populating rule_escalation_recipient table should not fail")
 
 			return id
+		}
+		// insertEntry inserts an entry whose recipient is notified via the contact's default channel.
+		insertEntry := func(c *recipient.Contact, position, ruleID int64, condition string) int64 {
+			return insertEntryVia(c, types.Int{}, position, ruleID, condition)
 		}
 
 		insertEntry(contact, 2, basicRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"ok"}}`)
@@ -208,10 +222,30 @@ func TestIncidents(t *testing.T) {
 		insertEntry(passiveNotificationContact, 3, notificationRule.ID, `{"ast":{"op":"=","attributes":["event_type"],"value":"test-type"}}`)
 		insertEntry(passiveNotificationContact, 1, escalationsPassivelyNotifiedRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"ok"}}`)
 
+		// See the "Suppression Bypass" test case that makes use of these entries.
+		insertEntry(bypassContact, 1, suppressionBypassRule.ID, `{"ast":{"op":">=","attributes":["incident_age"],"value":"30m"}}`)
+		insertEntry(bypassContact, 2, suppressionBypassRule.ID, `{"ast":{"op":">=","attributes":["incident_age"],"value":"1h"}}`)
+		insertEntryVia(bypassContact, types.MakeInt(ch2.ID), 3, suppressionBypassRule.ID, `{"ast":{"op":">=","attributes":["incident_age"],"value":"1h"}}`)
+
+		// These entries are used in the ""Suppression Bypass Known Recipients" test case.
+		insertEntry(knownContact, 1, suppressionBypassKnownRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"error"}}`)
+		insertEntry(knownContact, 2, suppressionBypassKnownRule.ID, `{"ast":{"op":">=","attributes":["incident_age"],"value":"30m"}}`)
+		insertEntry(knownSubscriber, 3, suppressionBypassKnownRule.ID, `{"ast":{"op":">=","attributes":["incident_age"],"value":"30m"}}`)
+		insertEntry(freshContact, 4, suppressionBypassKnownRule.ID, `{"ast":{"op":">=","attributes":["incident_age"],"value":"30m"}}`)
+		insertEntry(escalatedContact, 5, suppressionBypassKnownRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"critical"}}`)
+
 		return nil
 	})
 	require.NoError(t, err)
-	for _, r := range []*rule.Rule{basicRule, managedRule, notificationRule, triggerNotificationsRule, escalationsPassivelyNotifiedRule} {
+	for _, r := range []*rule.Rule{
+		basicRule,
+		managedRule,
+		notificationRule,
+		triggerNotificationsRule,
+		escalationsPassivelyNotifiedRule,
+		suppressionBypassRule,
+		suppressionBypassKnownRule,
+	} {
 		cleaner.Add("rule", fmt.Sprintf("id = %d", r.ID))
 		cleaner.Add("rule_entry", fmt.Sprintf("rule_id = %d", r.ID))
 		cleaner.Add("rule_entry_recipient", fmt.Sprintf("rule_entry_id IN (SELECT id FROM rule_entry WHERE rule_id = %d)", r.ID))
@@ -224,7 +258,7 @@ func TestIncidents(t *testing.T) {
 	require.NotNil(t, runtimeConfig.Rules[managedRule.ID])
 	require.NotNil(t, runtimeConfig.Rules[notificationRule.ID])
 	require.NotNil(t, runtimeConfig.Rules[triggerNotificationsRule.ID])
-	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 5)
+	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 7)
 
 	t.Run("YieldIncidents", func(t *testing.T) {
 		t.Parallel()
@@ -572,9 +606,10 @@ func TestIncidents(t *testing.T) {
 		}
 	})
 
+	// This test mustn't run in parallel with any other test, as ReevaluateEscalations reevaluates the escalations
+	// of all due incidents, not only of the one created here, and would thus interfere with other tests relying
+	// on time-based escalations being reached at well-defined incident ages.
 	t.Run("Time-Based Escalation", func(t *testing.T) {
-		t.Parallel()
-
 		i := makeIncident(db, logs, runtimeConfig, t,
 			makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityCritical)))
 		assert.NotNil(t, i)
@@ -595,6 +630,137 @@ func TestIncidents(t *testing.T) {
 		assert.Len(t, i.EscalationState, 2)
 		i = reloadIncident(t, db, i)
 		assert.Zero(t, i.NextEscalationCheckAt)
+	})
+
+	t.Run("Suppression Bypass", func(t *testing.T) {
+		t.Parallel()
+
+		relations := map[string]any{"host": map[string]string{"name": "suppression_bypass"}}
+		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+			withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityError), withMuted(true)))
+
+		// No escalation should be triggered yet, because the incident isn't old enough.
+		verifyIncident(t, db, i, 1, 0, 0, 0, baseEv.SeverityError)
+		assert.True(t, i.IsMuted())
+
+		obj := mustIncidentObject(t, i)
+
+		// The first escalation is reached, and its recipient+channel pair isn't known to the incident yet,
+		// so it bypasses the suppression once.
+		require.NoError(t, i.RetriggerEscalations(t.Context(), obj,
+			&event.Event{Time: i.StartedAt.Time().Add(31 * time.Minute), Incident: types.MakeBool(true)}))
+		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityError)
+		assert.Equal(t, []NotificationState{NotificationStateSent}, notifiedStates(t, db, i, bypassContact, ch.ID))
+
+		// The second escalation selects the very same recipient+channel pair, so it's suppressed, whereas the third
+		// one notifies that recipient via another channel, so it bypasses the suppression once again.
+		require.NoError(t, i.RetriggerEscalations(t.Context(), obj,
+			&event.Event{Time: i.StartedAt.Time().Add(61 * time.Minute), Incident: types.MakeBool(true)}))
+		verifyIncident(t, db, i, 1, 1, 3, 3, baseEv.SeverityError)
+		assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSuppressed},
+			notifiedStates(t, db, i, bypassContact, ch.ID))
+		assert.Equal(t, []NotificationState{NotificationStateSent}, notifiedStates(t, db, i, bypassContact, ch2.ID))
+	})
+
+	t.Run("Suppression Bypass Known Recipients", func(t *testing.T) {
+		t.Parallel()
+
+		relations := map[string]any{"host": map[string]string{"name": "suppression_bypass_known_recipients"}}
+		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+			withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityError)))
+
+		// Only the severity-based escalation is reached, and the incident isn't muted yet, so it's notified as usual.
+		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityError)
+		assert.Equal(t, []NotificationState{NotificationStateSent}, notifiedStates(t, db, i, knownContact, ch.ID))
+
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, &event.QuickAction{
+			ID:         types.MakeUUID(uuid.New()),
+			Time:       time.Now(),
+			Kind:       event.ActionSubscribe,
+			ContactID:  knownSubscriber.ID,
+			ObjectTags: mustIncidentObject(t, i).Tags,
+		}))
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+			withTime(i.StartedAt.Time().Add(time.Minute)), withIncident(true), withMuted(true), withRelations(relations),
+			withSeverity(baseEv.SeverityError), withTags(mustIncidentObject(t, i).Tags))))
+		assert.True(t, reloadIncident(t, db, i).IsMuted())
+		subscriberStates := notifiedStates(t, db, i, knownSubscriber, ch.ID)
+
+		require.NoError(t, i.RetriggerEscalations(t.Context(), mustIncidentObject(t, i),
+			&event.Event{Time: i.StartedAt.Time().Add(31 * time.Minute), Incident: types.MakeBool(true)}))
+		reloaded := reloadIncidentRecursive(t, db, i)
+		assert.Len(t, reloaded.EscalationState, 4)
+		assert.Len(t, reloaded.Recipients, 3)
+
+		// The known contact was already notified via its default channel by the severity-based escalation, and the
+		// subscriber is known to the incident as well, so both are suppressed. Only the fresh contact bypasses it.
+		assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSuppressed},
+			notifiedStates(t, db, i, knownContact, ch.ID))
+		assert.Equal(t, append(subscriberStates, NotificationStateSuppressed), notifiedStates(t, db, i, knownSubscriber, ch.ID))
+		assert.Equal(t, []NotificationState{NotificationStateSent}, notifiedStates(t, db, i, freshContact, ch.ID))
+
+		// Escalations triggered while processing an event bypass the suppression the same way, while
+		// all the other recipients remain suppressed.
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+			withTime(i.StartedAt.Time().Add(32*time.Minute)), withIncident(true), withRelations(relations),
+			withSeverity(baseEv.SeverityCritical), withTags(mustIncidentObject(t, i).Tags))))
+		reloaded = reloadIncidentRecursive(t, db, i)
+		assert.Len(t, reloaded.EscalationState, 5)
+		assert.Len(t, reloaded.Recipients, 4)
+		assert.True(t, reloaded.IsMuted())
+
+		assert.Equal(t, []NotificationState{NotificationStateSent}, notifiedStates(t, db, i, escalatedContact, ch.ID))
+		assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSuppressed, NotificationStateSuppressed},
+			notifiedStates(t, db, i, knownContact, ch.ID))
+		assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSuppressed},
+			notifiedStates(t, db, i, freshContact, ch.ID))
+		assert.Equal(t, append(subscriberStates, NotificationStateSuppressed, NotificationStateSuppressed),
+			notifiedStates(t, db, i, knownSubscriber, ch.ID))
+
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, &event.QuickAction{
+			ID:         types.MakeUUID(uuid.New()),
+			Time:       time.Now(),
+			Kind:       event.ActionManage,
+			ContactID:  freshContact.ID,
+			ObjectTags: mustIncidentObject(t, i).Tags,
+		}))
+		reloaded = reloadIncidentRecursive(t, db, i)
+		assert.Len(t, reloaded.EscalationState, 5)
+		assert.Len(t, reloaded.Recipients, 4)
+		assert.True(t, reloaded.HasManager())
+
+		// The fresh contact is now the manager of the incident, so all the other recipients should
+		// have received a notification bypassing the suppression.
+		assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSent}, notifiedStates(t, db, i, escalatedContact, ch.ID))
+		assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSuppressed, NotificationStateSuppressed,
+			NotificationStateSent}, notifiedStates(t, db, i, knownContact, ch.ID))
+		// Nothing new for the manager, since we don't notify managers about their own actions.
+		assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSuppressed},
+			notifiedStates(t, db, i, freshContact, ch.ID))
+		assert.Equal(t, append(subscriberStates, NotificationStateSuppressed, NotificationStateSuppressed,
+			NotificationStateSent), notifiedStates(t, db, i, knownSubscriber, ch.ID))
+
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, &event.QuickAction{
+			ID:         types.MakeUUID(uuid.New()),
+			Time:       time.Now(),
+			Kind:       event.ActionUnmanage,
+			ContactID:  freshContact.ID,
+			ObjectTags: mustIncidentObject(t, i).Tags,
+		}))
+		reloaded = reloadIncidentRecursive(t, db, i)
+		assert.False(t, reloaded.HasManager())
+
+		// The fresh contact is no longer the manager of the incident, so all the other recipients should
+		// have received a notification bypassing the suppression.
+		assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSent, NotificationStateSent},
+			notifiedStates(t, db, i, escalatedContact, ch.ID))
+		assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSuppressed, NotificationStateSuppressed,
+			NotificationStateSent, NotificationStateSent}, notifiedStates(t, db, i, knownContact, ch.ID))
+		// Again, nothing new for the manager, since we don't notify managers about their own actions.
+		assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSuppressed},
+			notifiedStates(t, db, i, freshContact, ch.ID))
+		assert.Equal(t, append(subscriberStates, NotificationStateSuppressed, NotificationStateSuppressed,
+			NotificationStateSent, NotificationStateSent), notifiedStates(t, db, i, knownSubscriber, ch.ID))
 	})
 
 	t.Run("Managed Escalation", func(t *testing.T) {
@@ -722,7 +888,7 @@ func TestIncidents(t *testing.T) {
 				require.NoError(t, i.applyMatchingRules(ctx, tx, ev))
 
 				var err error
-				notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev), notifyReason{Kind: ReasonEvent})
+				notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev, nil), notifyReason{Kind: ReasonEvent})
 				require.NoError(t, err)
 
 				return nil
@@ -758,7 +924,7 @@ func TestIncidents(t *testing.T) {
 				require.NoError(t, i.applyMatchingRules(ctx, tx, ev))
 
 				var err error
-				notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev), notifyReason{Kind: ReasonEvent})
+				notifications, err = i.generateNotifications(ctx, tx, ev, i.collectContactChannels(ev, nil), notifyReason{Kind: ReasonEvent})
 				require.NoError(t, err)
 
 				return nil
@@ -926,6 +1092,18 @@ func assertHistoryNotified(t *testing.T, db *database.DB, i *Incident, expected 
 		db.Rebind(`SELECT COUNT(*) FROM incident_history WHERE incident_id = ? AND type = 'notified'`),
 		i.Id))
 	assert.Equal(t, int64(expected), notifiedCount)
+}
+
+// notifiedStates returns the notification states of all "notified" incident history entries of the given
+// incident, contact and channel in the order they were recorded.
+func notifiedStates(t *testing.T, db *database.DB, i *Incident, c *recipient.Contact, channelID int64) []NotificationState {
+	var states []NotificationState
+	require.NoError(t, db.SelectContext(t.Context(), &states, db.Rebind(
+		`SELECT notification_state FROM incident_history
+		WHERE incident_id = ? AND type = 'notified' AND contact_id = ? AND channel_id = ?
+		ORDER BY id`),
+		i.Id, c.ID, channelID))
+	return states
 }
 
 func verifyIncident(t *testing.T, db *database.DB, i *Incident, ruleCount, recipientCount, escalationCount, notifiedCount int, severity baseEv.Severity) {
