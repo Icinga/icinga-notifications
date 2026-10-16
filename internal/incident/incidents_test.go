@@ -326,7 +326,7 @@ func TestIncidents(t *testing.T) {
 		verifyIncident(t, db, i, 1, 2, 2, 3, baseEv.SeverityWarning)
 		assert.False(t, reloadIncident(t, db, i).IsMuted())
 
-		err := Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+		err := Process(t.Context(), db, logs, runtimeConfig, makeEventNoValidate(t, source.ID,
 			withMuted(false), withSeverity(baseEv.SeverityNotice), withTags(mustIncidentObject(t, i).Tags)))
 		require.ErrorIs(t, err, ErrSeverityChangeWithoutIncidentFlag)
 		assert.Equal(t, baseEv.SeverityWarning, reloadIncident(t, db, i).Severity)
@@ -893,6 +893,12 @@ func makeContact(t *testing.T, db *database.DB, cleaner *testutils.DBCleaner, fu
 
 // makeEvent returns a fully initialized event based on the given parameters.
 func makeEvent(t *testing.T, sourceID int64, opts ...eventOption) *event.Event {
+	ev := makeEventNoValidate(t, sourceID, opts...)
+	require.NoError(t, ev.Validate(), "failed to validate event")
+	return ev
+}
+
+func makeEventNoValidate(t *testing.T, sourceID int64, opts ...eventOption) *event.Event {
 	ev := &event.Event{
 		SourceId: sourceID,
 		ID:       types.MakeUUID(uuid.New()),
@@ -920,7 +926,6 @@ func makeEvent(t *testing.T, sourceID int64, opts ...eventOption) *event.Event {
 	if ev.Muted.Valid {
 		ev.MutedReason = "You're gonna have a bad time!"
 	}
-	require.NoError(t, ev.Validate(), "failed to validate event")
 	return ev
 }
 
