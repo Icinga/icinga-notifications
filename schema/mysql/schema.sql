@@ -371,7 +371,7 @@ CREATE TABLE incident (
     started_at bigint NOT NULL,
     recovered_at bigint,
     -- NOT NULL is enforced via CHECK not to default to 'ok'
-    severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg'),
+    severity enum('ok', 'warning', 'error', 'critical'),
     -- mute_reason indicates whether this incident is currently muted, and its non-null value is mapped to true.
     mute_reason mediumtext,
     summary longtext NOT NULL, -- contains the latest plugin event summary of the respective object.
@@ -451,8 +451,8 @@ CREATE TABLE incident_history (
     -- Order to be honored for events with identical millisecond timestamps.
     -- NOT NULL is enforced via CHECK not to default to 'opened'
     type enum('opened', 'muted', 'unmuted', 'incident_severity_changed', 'rule_matched', 'escalation_triggered', 'recipient_role_changed', 'closed', 'notified'),
-    new_severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg'),
-    old_severity enum('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg'),
+    new_severity enum('ok', 'warning', 'error', 'critical'),
+    old_severity enum('ok', 'warning', 'error', 'critical'),
     new_recipient_role enum('recipient', 'subscriber', 'manager'),
     old_recipient_role enum('recipient', 'subscriber', 'manager'),
     notification_state enum('suppressed', 'pending', 'sent', 'failed'),
@@ -565,4 +565,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-27', UNIX_TIMESTAMP() * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-28', UNIX_TIMESTAMP() * 1000);

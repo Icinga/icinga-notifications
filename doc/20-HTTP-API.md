@@ -220,7 +220,7 @@ section will contain the following attributes for each incident that matches the
 |-------------|-----------------------------------------------------------------------------------------------|
 | is_muted    | A boolean indicating whether the incident is muted or not.                                    |
 | object_tags | A dictionary containing the object ID tags associated with the incident.                      |
-| severity    | The severity level of the incident (e.g., `crit`, `err`, `warning`, etc.).                    |
+| severity    | The severity level of the incident, i.e., `ok`, `warning`, `error` or `critical`.             |
 
 For error cases, the response result will contain the following attributes:
 
@@ -235,8 +235,8 @@ specific Icinga DB environment. The following example shows how to retrieve all 
 ```
 $ curl -u 'example:insecureinsecure' 'http://localhost:5680/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b"}'
 ...
-{"status":"success","result":{"is_muted":false,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"},"severity":"crit"}}
-{"status":"success","result":{"is_muted":true,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"severity":"err"}}
+{"status":"success","result":{"is_muted":false,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"},"severity":"critical"}}
+{"status":"success","result":{"is_muted":true,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"severity":"error"}}
 ```
 
 ### Modifying Incidents

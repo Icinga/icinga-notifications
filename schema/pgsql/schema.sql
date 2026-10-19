@@ -338,7 +338,7 @@ CREATE TABLE object_source (
 -- Indexes for object_source to speed up the cleanup queries by object id.
 CREATE INDEX idx_object_source_object_id ON object_source(object_id);
 
-CREATE TYPE severity AS ENUM ('ok', 'debug', 'info', 'notice', 'warning', 'err', 'crit', 'alert', 'emerg');
+CREATE TYPE severity AS ENUM ('ok', 'warning', 'error', 'critical');
 CREATE TYPE rule_type AS ENUM ('notification', 'escalation');
 
 CREATE TABLE rule (
@@ -624,4 +624,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 );
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-27', EXTRACT(EPOCH from NOW()) * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-28', EXTRACT(EPOCH from NOW()) * 1000);

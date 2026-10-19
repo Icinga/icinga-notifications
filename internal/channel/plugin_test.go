@@ -367,7 +367,7 @@ func makePersistedIncidentData(
 			"source_id":    sourceID,
 			"started_at":   startedAt,
 			"recovered_at": recoveredAt,
-			"severity":     "crit",
+			"severity":     "critical",
 			"summary":      "Test incident summary",
 		}
 		incidentID, err = database.InsertObtainID(ctx, tx, incidentInsertStmt, args)

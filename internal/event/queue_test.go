@@ -262,7 +262,7 @@ func makeEvent(t *testing.T, ids *[]types.UUID, mu *sync.Mutex) *Event {
 			"host":    testutils.MakeRandomString(t),
 			"service": testutils.MakeRandomString(t),
 		},
-		Severity: baseEv.SeverityCrit,
+		Severity: baseEv.SeverityCritical,
 		Summary:  "Oops",
 		Message:  "You're gonna have a bad time.",
 	}

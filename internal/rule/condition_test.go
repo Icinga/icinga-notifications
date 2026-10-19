@@ -16,7 +16,7 @@ func TestEscalationFilter(t *testing.T) {
 	t.Run("ReevaluateAfter", func(t *testing.T) {
 		t.Parallel()
 
-		incident := &EscalationFilter{IncidentAge: 2 * time.Hour, IncidentSeverity: event.SeverityCrit}
+		incident := &EscalationFilter{IncidentAge: 2 * time.Hour, IncidentSeverity: event.SeverityCritical}
 
 		tests := []struct {
 			expr     string
@@ -25,9 +25,9 @@ func TestEscalationFilter(t *testing.T) {
 			{expr: `{"op":">","attributes":["incident_age"],"value":"1h"}`, expected: RetryNever},
 			{expr: `{"op":">","attributes":["incident_age"],"value":"2h"}`, expected: RetryNever},
 			{expr: `{"op":">","attributes":["incident_age"],"value":"3h"}`, expected: 1 * time.Hour},
-			{expr: `{"op":"&","rules":[{"op":">","attributes":["incident_age"],"value":"3h"},{"op":"=","attributes":["incident_severity"],"value":"crit"}]}`, expected: 1 * time.Hour},
+			{expr: `{"op":"&","rules":[{"op":">","attributes":["incident_age"],"value":"3h"},{"op":"=","attributes":["incident_severity"],"value":"critical"}]}`, expected: 1 * time.Hour},
 			{expr: `{"op":"&","rules":[{"op":">","attributes":["incident_age"],"value":"3h"},{"op":"=","attributes":["incident_severity"],"value":"warn"}]}`, expected: 1 * time.Hour},
-			{expr: `{"op":"|","rules":[{"op":">","attributes":["incident_age"],"value":"3h"},{"op":"=","attributes":["incident_severity"],"value":"crit"}]}`, expected: 1 * time.Hour},
+			{expr: `{"op":"|","rules":[{"op":">","attributes":["incident_age"],"value":"3h"},{"op":"=","attributes":["incident_severity"],"value":"critical"}]}`, expected: 1 * time.Hour},
 			{expr: `{"op":"|","rules":[{"op":">","attributes":["incident_age"],"value":"3h"},{"op":"=","attributes":["incident_severity"],"value":"warn"}]}`, expected: 1 * time.Hour},
 		}
 
@@ -41,8 +41,8 @@ func TestEscalationFilter(t *testing.T) {
 	t.Run("IsManaged", func(t *testing.T) {
 		t.Parallel()
 
-		managed := &EscalationFilter{IncidentAge: 2 * time.Hour, IncidentSeverity: event.SeverityCrit, IsManaged: true}
-		unmanaged := &EscalationFilter{IncidentAge: 2 * time.Hour, IncidentSeverity: event.SeverityCrit}
+		managed := &EscalationFilter{IncidentAge: 2 * time.Hour, IncidentSeverity: event.SeverityCritical, IsManaged: true}
+		unmanaged := &EscalationFilter{IncidentAge: 2 * time.Hour, IncidentSeverity: event.SeverityCritical}
 
 		tests := []struct {
 			expr        string
