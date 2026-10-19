@@ -2,6 +2,7 @@ package channel
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -46,6 +47,13 @@ type (
 
 		// pluginType is the type of the plugin associated with this supervisor.
 		pluginType string
+
+		// supportedRequestVersions is a list of request versions that the channel's plugin supports.
+		//
+		// It is used to determine which version of the notification request to send to the plugin.
+		// If there are multiple supported versions, Icinga Notifications will choose the highest version that it
+		// also supports. It is sorted in descending order, so the first element is the highest supported version.
+		supportedRequestVersions []plugin.RequestVersion
 	}
 
 	// rpcHandler handles the JSON-RPC requests made by any channel plugins to Icinga Notifications.
@@ -147,6 +155,40 @@ func newPluginSupervisor(ctx context.Context, db *database.DB, logger *zap.Sugar
 
 	ps := &pluginSupervisor{cmd: cmd, db: db, logger: l, ctx: ctx, cancel: cancel, ChannelID: chID, pluginType: pluginType}
 	ps.rpc = jsonrpc.New(ctx, pr, pw, rpcHandler{ps: ps}, l)
+
+	info, err := ps.GetInfo(ctx)
+	if err != nil {
+		l.Errorw("Failed to get channel plugin info, terminating the plugin", zap.Error(err))
+		ps.Stop()
+		return nil, err
+	}
+
+	if len(info.SupportedRequestVersions) == 0 {
+		ps.Stop()
+		return nil, fmt.Errorf("plugin %q does not advertise any supported request versions", pluginType)
+	}
+
+	var validVersions []plugin.RequestVersion
+	for _, v := range info.SupportedRequestVersions {
+		switch v {
+		case plugin.RequestVersionV1:
+			if !slices.Contains(validVersions, plugin.RequestVersionV1) {
+				validVersions = append(validVersions, plugin.RequestVersionV1)
+			}
+		}
+	}
+
+	if len(validVersions) == 0 {
+		ps.Stop()
+		return nil, fmt.Errorf(
+			"plugin %q advertises request versions that are not supported by Icinga Notifications: %v",
+			pluginType, info.SupportedRequestVersions)
+	}
+	ps.supportedRequestVersions = validVersions
+	slices.SortFunc(ps.supportedRequestVersions, func(a, b plugin.RequestVersion) int {
+		return cmp.Compare(b, a)
+	})
+
 	return ps, nil
 }
 

@@ -210,7 +210,16 @@ process, which can be useful for debugging purposes.
 
 ### RPC Methods
 
-The following methods must be implemented by a channel.
+The following methods must be implemented by a channel plugin, and are called by Icinga Notifications to interact
+with the channel:
+
+| Method           | Description                                                                |
+|------------------|----------------------------------------------------------------------------|
+| GetInfo          | Returns meta information about the channel, such as its name, version etc. |
+| SetConfig        | Configures the channel with the provided configuration options.            |
+| SendNotification | Requests the channel to send a notification.                               |
+
+Each of these methods is described in detail below, including the expected request and response formats.
 
 #### GetInfo
 
@@ -218,6 +227,23 @@ The parameterless `GetInfo` method returns information about the channel.
 
 Its `result` is expected to be a JSON object with the `json` fields defined in the
 [`Info` type](https://pkg.go.dev/github.com/icinga/icinga-go-library/notifications/plugin#Info).
+
+| Field                      | Type   | Description                                                  |
+|----------------------------|--------|--------------------------------------------------------------|
+| name                       | String | **Required.** The display name of the channel.               |
+| version                    | String | **Required.** The version of the channel.                    |
+| author                     | String | **Required.** The author of the channel.                     |
+| supported_request_versions | Array  | **Required.** The supported request versions of the channel. |
+| config_attrs               | Array  | **Required.** The configuration options of the channel.      |
+
+Everything except `supported_request_versions` will be persisted in the database and used to configure the channel
+in Icinga Notifications Web. The `supported_request_versions` field tells Icinga Notifications which request versions
+the channel plugin supports, and is used to ensure compatibility between the channel plugin and Icinga Notifications.
+Icinga Notifications is expected to support all past request versions the channel plugin advertises, but will refuse
+versions it does not support. For example, if a channel plugin advertises support for request version 2 (doesn't exist
+yet) and Icinga Notifications knows only about request version 1, it will refuse to start the channel plugin and log
+an error message.
+
 The `config_attrs` field must be an array of JSON objects according to the
 [`ConfigOption` type](https://pkg.go.dev/github.com/icinga/icinga-go-library/notifications/plugin#ConfigOption).
 These attributes define configuration options for the channel to be set by the `SetConfig` method.
@@ -242,6 +268,7 @@ They are also used for channel configuration in Icinga Notifications Web.
     "name": "Minified Webhook",
     "version": "0.0.0-gf369a11-dirty",
     "author": "Icinga GmbH",
+    "supported_request_versions": [1],
     "config_attrs": [
       {
         "name": "url_template",
@@ -374,44 +401,49 @@ object with the following optional fields:
   "jsonrpc": "2.0",
   "method": "SendNotification",
   "params": {
-    "contact": {
-      "full_name": "icingaadmin",
-      "addresses": [
-        {
-          "type": "email",
-          "address": "icingaaadmin@example.com"
+    "version": 1,
+    "payload": {
+      "contact": {
+        "full_name": "icingaadmin",
+        "addresses": [
+          {
+            "type": "email",
+            "address": "icingaaadmin@example.com"
+          }
+        ]
+      },
+      "object": {
+        "name": "example-809!disk /",
+        "url": "http://localhost/icingaweb2/icingadb/service?name=disk%20%2F&host.name=example-809",
+        "sources": [
+          "icinga2-master"
+        ],
+        "tags": {
+          "host": "example-809",
+          "service": "disk /"
         }
-      ]
-    },
-    "object": {
-      "name": "example-809!disk /",
-      "url": "http://localhost/icingaweb2/icingadb/service?name=disk%20%2F&host.name=example-809",
-      "sources": ["icinga2-master"],
-      "tags": {
-        "host": "example-809",
-        "service": "disk /"
+      },
+      "incident": {
+        "severity": "critical",
+        "muted": false,
+        "recovered": false,
+        "message": "[CRITICAL] - Filesystem checks failed\n        \\_[CRITICAL] - / (ffs)\n                \\_[CRITICAL] - Free space absolute: 42 MiB (of 985 MiB)\n                \\_[CRITICAL] - Free space percentage: 4.264%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=943718400B;826918502.400000;930283315.200000;0;1033648128",
+        "summary": "[CRITICAL] - Filesystem checks failed",
+        "started_at": "2024-07-12T10:40:00Z",
+        "managed": false,
+        "opened_by_source": "icinga2-master"
+      },
+      "event": {
+        "time": "2024-07-12T10:47:30.445439055Z",
+        "message": "[CRITICAL] - Filesystem checks failed\n        \\_[CRITICAL] - / (ffs)\n                \\_[CRITICAL] - Free space absolute: 42 MiB (of 985 MiB)\n                \\_[CRITICAL] - Free space percentage: 4.264%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=943718400B;826918502.400000;930283315.200000;0;1033648128",
+        "summary": "[CRITICAL] - Filesystem checks failed"
+      },
+      "summary": "[example-809!disk /] Incident opened: [CRITICAL] - Filesystem checks failed",
+      "body": "A new incident has been opened by icinga2-master for example-809!disk /.\n\nSeverity: Critical\nOpened:   2024-07-12 10:40:00 +0000\nDetails:  http://localhost/icingaweb2/icingadb/service?name=disk%20%2F&host.name=example-809\n\n[CRITICAL] - Filesystem checks failed\n        \\_[CRITICAL] - / (ffs)\n                \\_[CRITICAL] - Free space absolute: 42 MiB (of 985 MiB)\n                \\_[CRITICAL] - Free space percentage: 4.264%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=943718400B;826918502.400000;930283315.200000;0;1033648128",
+      "state": {
+        "state_key": "0d6a5bd1-3c1e-5f0e-9d43-6f1f6c2b7a10",
+        "value": "{\"last_message_id\": \"<bb7364a5-8f24-4b6a-a2d8-4658f42cd5cd-sender@example.com>\"}"
       }
-    },
-    "incident": {
-      "severity": "critical",
-      "muted": false,
-      "recovered": false,
-      "message": "[CRITICAL] - Filesystem checks failed\n        \\_[CRITICAL] - / (ffs)\n                \\_[CRITICAL] - Free space absolute: 42 MiB (of 985 MiB)\n                \\_[CRITICAL] - Free space percentage: 4.264%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=943718400B;826918502.400000;930283315.200000;0;1033648128",
-      "summary": "[CRITICAL] - Filesystem checks failed",
-      "started_at": "2024-07-12T10:40:00Z",
-      "managed": false,
-      "opened_by_source": "icinga2-master"
-    },
-    "event": {
-      "time": "2024-07-12T10:47:30.445439055Z",
-      "message": "[CRITICAL] - Filesystem checks failed\n        \\_[CRITICAL] - / (ffs)\n                \\_[CRITICAL] - Free space absolute: 42 MiB (of 985 MiB)\n                \\_[CRITICAL] - Free space percentage: 4.264%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=943718400B;826918502.400000;930283315.200000;0;1033648128",
-      "summary": "[CRITICAL] - Filesystem checks failed"
-    },
-    "summary": "[example-809!disk /] Incident opened: [CRITICAL] - Filesystem checks failed",
-    "body": "A new incident has been opened by icinga2-master for example-809!disk /.\n\nSeverity: Critical\nOpened:   2024-07-12 10:40:00 +0000\nDetails:  http://localhost/icingaweb2/icingadb/service?name=disk%20%2F&host.name=example-809\n\n[CRITICAL] - Filesystem checks failed\n        \\_[CRITICAL] - / (ffs)\n                \\_[CRITICAL] - Free space absolute: 42 MiB (of 985 MiB)\n                \\_[CRITICAL] - Free space percentage: 4.264%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=943718400B;826918502.400000;930283315.200000;0;1033648128",
-    "state": {
-      "state_key": "0d6a5bd1-3c1e-5f0e-9d43-6f1f6c2b7a10",
-      "value": "{\"last_message_id\": \"<bb7364a5-8f24-4b6a-a2d8-4658f42cd5cd-sender@example.com>\"}"
     }
   },
   "id": 3
