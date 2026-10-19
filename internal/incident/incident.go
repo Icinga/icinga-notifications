@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -506,8 +507,8 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			if err := i.addRecipient(ctx, tx, r, recipient.RoleManager, qa.EventTypes); err != nil {
 				return fmt.Errorf("cannot add recipient %q as manager: %w", r, err)
 			}
-			// Remove the recipient from the incident's recipients list for now, so that we don't notify him about his
-			// own promotion to manager. We only want to notify the other recipients that a new manager has been added.
+			// Remove the recipient from the incident's Recipients map, so the i.IsNotifiable check doesn't
+			// return false for all other existing recipients when generating notifications below.
 			delete(i.Recipients, recipientKey)
 
 			message := fmt.Sprintf("Recipient %s has been added as the new incident manager", r.String())
@@ -516,6 +517,12 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			channels := i.collectContactChannels(ev, func(_ *rule.EntryRecipient, o *rule.ChannelOrigin) {
 				// Incident managed/unmanaged quick actions should always bypass suppression for the other recipient.
 				o.BypassSuppression = true
+			})
+			// Remove the new manager from the list of channels to notify, so that we don't notify him about his
+			// own promotion. Deleting the recipient from the i.Recipients map is not enough since the same recipient
+			// can also be loaded from already triggered escalations, so we need to filter it out here as well.
+			maps.DeleteFunc(channels, func(contact *recipient.Contact, _ []rule.ChannelOrigin) bool {
+				return recipient.ToKey(contact) == recipientKey
 			})
 
 			var err error
@@ -548,6 +555,10 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				channels := i.collectContactChannels(ev, func(_ *rule.EntryRecipient, o *rule.ChannelOrigin) {
 					// Incident managed/unmanaged quick actions should always bypass suppression for the other recipient.
 					o.BypassSuppression = true
+				})
+				// See event.ActionManage above for why we need to filter out the recipient here.
+				maps.DeleteFunc(channels, func(contact *recipient.Contact, _ []rule.ChannelOrigin) bool {
+					return recipient.ToKey(contact) == recipientKey
 				})
 
 				var err error

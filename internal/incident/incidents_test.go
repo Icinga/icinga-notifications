@@ -538,6 +538,9 @@ func TestIncidents(t *testing.T) {
 		ev := makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityError), withMsg("Something went wrong!"))
 		i := makeIncident(db, logs, runtimeConfig, t, ev)
 
+		// The first notification should have been sent to the default "contact" recipient of the escalation rule.
+		assert.Equal(t, []NotificationState{NotificationStateSent}, notifiedStates(t, db, i, contact, ch.ID))
+
 		for _, action := range []event.Action{event.ActionSubscribe, event.ActionManage} {
 			unknown := makeContact(t, db, cleaner, "Unknown", "unknown"+action.String(), ch.ID)
 			qa := &event.QuickAction{
@@ -570,12 +573,17 @@ func TestIncidents(t *testing.T) {
 				assert.True(t, i.HasManager())
 				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleManager)
 				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].EventTypes, qa.EventTypes)
+				// One notification was caused by the escalation rule, and there should be a second
+				// notification caused by the quick action.
+				assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSent}, notifiedStates(t, db, i, contact, ch.ID))
 
 				qa.Kind = event.ActionUnmanage
 			} else {
 				assert.False(t, i.HasManager())
 				assert.Equal(t, i.Recipients[recipient.ToKey(incidentSubscriber)].Role, recipient.RoleSubscriber)
 				assert.Equal(t, i.Recipients[recipient.ToKey(incidentSubscriber)].EventTypes, qa.EventTypes)
+				// There should be only one notification caused by the escalation rule.
+				assert.Equal(t, []NotificationState{NotificationStateSent}, notifiedStates(t, db, i, contact, ch.ID))
 
 				qa.Kind = event.ActionUnsubscribe
 			}
@@ -587,6 +595,8 @@ func TestIncidents(t *testing.T) {
 				assert.False(t, i.HasManager())
 				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleSubscriber)
 				assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].EventTypes, qa.EventTypes)
+				// First one is caused by the escalation rule, and the two others are manage/unmanage notifications.
+				assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSent, NotificationStateSent}, notifiedStates(t, db, i, contact, ch.ID))
 
 				// Cannot unmanage an incident that doesn't have a manager.
 				require.Error(t, Process(t.Context(), db, logs, runtimeConfig, qa))
