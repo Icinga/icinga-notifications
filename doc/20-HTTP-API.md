@@ -4,6 +4,13 @@ Icinga Notifications exposes an HTTP API for submitting events, retrieving and m
 Please refer to the [Configuration](03-Configuration.md#http-api-configuration) section for details on how to
 configure the HTTP listener and the supported transports.
 
+## Versioning
+
+All HTTP API endpoints, except for the [debug endpoints](#debugging-endpoints), are versioned and prefixed with the
+API version, e.g. `/v1/process-event`. The current version of the HTTP API is `v1`.
+Within a version, the API stays backwards compatible, i.e. existing endpoints, parameters and response fields are
+neither removed nor changed in an incompatible way. Incompatible changes result in a new API version.
+
 ## Authentication
 
 Icinga Notifications identifies the source of an HTTP API request differently depending on the transport used to
@@ -31,7 +38,7 @@ to an arbitrary username, regardless of transport.
 
 ## Process Event
 
-Events can be submitted to Icinga Notifications using the `/process-event` HTTP API endpoint.
+Events can be submitted to Icinga Notifications using the `/v1/process-event` HTTP API endpoint.
 
 After creating a source in Icinga Notifications Web,
 the specified credentials can be used via HTTP Basic Authentication to submit a JSON-encoded
@@ -96,7 +103,7 @@ isn't rejected due to missing custom variables, because the source has stated th
 
 ### Responses <a id="process-event-responses"></a>
 
-The `/process-event` endpoint returns the following HTTP status codes:
+The `/v1/process-event` endpoint returns the following HTTP status codes:
 
 | Status | Meaning                                                                                                 |
 |--------|---------------------------------------------------------------------------------------------------------|
@@ -120,7 +127,7 @@ processing, such as a severity change without the `incident` field, are dropped 
 An example request to submit an event looks like this:
 
 ```
-curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomplete: true' -d '@-' 'http://localhost:5680/process-event' <<EOF
+curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomplete: true' -d '@-' 'http://localhost:5680/v1/process-event' <<EOF
 {
   "incident": true,
   "name": "example-809: disk /",
@@ -176,7 +183,7 @@ EOF
 ## Response Format
 
 All responses from the Icinga Notifications HTTP API endpoints are JSON-encoded and follow a consistent structure.
-The only exception to this is the [`/process-event`](#process-event) endpoint, which returns a `204 No Content` status
+The only exception to this is the [`/v1/process-event`](#process-event) endpoint, which returns a `204 No Content` status
 code with an empty body in the successful case, see [Responses](#process-event-responses) and a proper HTTP error
 status code in the error case.
 
@@ -202,7 +209,7 @@ attribute containing a JSON object that describes the error.
 
 ## Incidents
 
-The `/incidents` Icinga Notifications HTTP API endpoint allows sources to query and modify a list of open incidents.
+The `/v1/incidents` Icinga Notifications HTTP API endpoint allows sources to query and modify a list of open incidents.
 Incidents can be retrieved by sending a `GET` request to the endpoint, and can be modified by sending a `POST` request
 with the desired changes. The endpoint requires a `filter` query parameter to specify which incidents the source wants
 to retrieve or modify. Please refer to the [API Filtering](#api-filtering) section for more details on how to construct
@@ -212,7 +219,7 @@ See [Authentication](#authentication) for the transport-specific rules that appl
 
 ### Getting Incidents
 
-In order to retrieve incidents, one can send a `GET` request to the `/incidents` endpoint with the appropriate `filter`
+In order to retrieve incidents, one can send a `GET` request to the `/v1/incidents` endpoint with the appropriate `filter`
 query parameter. In successful cases, the response result as described in the [Response Format](#response-format)
 section will contain the following attributes for each incident that matches the filter:
 
@@ -233,7 +240,7 @@ specific Icinga DB environment. The following example shows how to retrieve all 
 `08434a503ec43bb67cd380c5d0b6217a1ebf924b` environment:
 
 ```
-$ curl -u 'example:insecureinsecure' 'http://localhost:5680/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b"}'
+$ curl -u 'example:insecureinsecure' 'http://localhost:5680/v1/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b"}'
 ...
 {"status":"success","result":{"is_muted":false,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"},"severity":"critical"}}
 {"status":"success","result":{"is_muted":true,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"severity":"error"}}
@@ -241,7 +248,7 @@ $ curl -u 'example:insecureinsecure' 'http://localhost:5680/incidents' -G --data
 
 ### Modifying Incidents
 
-Modifying incidents can be done by sending a `POST` request to the `/incidents` endpoint with the appropriate
+Modifying incidents can be done by sending a `POST` request to the `/v1/incidents` endpoint with the appropriate
 `filter` query parameter and a JSON-encoded body that describes the desired changes. The request body should be a JSON
 object that contains the attributes to be modified, set to their new values. The list of attributes that currently can
 be modified are listed in the following table.
@@ -251,7 +258,7 @@ be modified are listed in the following table.
 | close     | Closes the incident matching the filter. This attribute can only be set to `true`. |
 | message   | Updates the incident's message. This attribute can be set to any string value.     |
 
-As opposed to the `/process-event` endpoint, closing an incident this way will not have any side effects other than
+As opposed to the `/v1/process-event` endpoint, closing an incident this way will not have any side effects other than
 marking the incident as closed. For instance, it will not trigger any notifications or trigger any escalations. Also,
 note that the `close` attribute can only be set to `true`, otherwise Icinga Notifications will reject the request with
 a 400 status code. The `message` attribute can be used to update the incident's message without any side effects, as
@@ -272,7 +279,7 @@ The following example shows how to close the incident for the `mailserver` host 
 `08434a503ec43bb67cd380c5d0b6217a1ebf924b` environment:
 
 ```
-$ curl -u 'example:insecureinsecure' -X POST 'http://localhost:5680/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"}' -d '@-' <<EOF
+$ curl -u 'example:insecureinsecure' -X POST 'http://localhost:5680/v1/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"}' -d '@-' <<EOF
 {
   "close": true
 }
@@ -284,7 +291,7 @@ attribute set to the new message. For instance, the following example shows how 
 for the `database` host and `load` service in the `08434a503ec43bb67cd380c5d0b6217a1ebf924b` environment:
 
 ```
-$ curl -u 'example:insecureinsecure' -X POST 'http://localhost:5680/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"}' -d '@-' <<EOF
+$ curl -u 'example:insecureinsecure' -X POST 'http://localhost:5680/v1/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"}' -d '@-' <<EOF
 {
   "message": "The load on the database server has returned to normal."
 }
@@ -308,7 +315,7 @@ some server-side error.
 
 See [Authentication](#authentication) for the transport-specific rules that apply here.
 
-In order to retrieve notification history entries, send a `GET` request to the `/notification-history` endpoint
+In order to retrieve notification history entries, send a `GET` request to the `/v1/notification-history` endpoint
 with the query parameters `filter` described in [API Filtering](#api-filtering) and `since` set to a Unix timestamp in
 milliseconds. Only entries whose `triggered_at` is greater than or equal to this value are returned. Failed notification
 attempts are not included, i.e. the response only contains notifications that were successfully sent to a contact.
@@ -341,7 +348,7 @@ The following example shows how to retrieve all notification history entries rec
 2026-01-01T00:00:00Z (`1767225600000`):
 
 ```
-$ curl -u 'example:insecureinsecure' 'http://localhost:5680/notification-history?since=1767225600000' -G --data-urlencode 'filter={"host":"test-host"}'
+$ curl -u 'example:insecureinsecure' 'http://localhost:5680/v1/notification-history?since=1767225600000' -G --data-urlencode 'filter={"host":"test-host"}'
 ...
 {"status":"success","result":{"event_id":"b56665fc-70f1-48b9-a19c-b15beeb0152e","triggered_at":1788518901863,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"PING OK - Packet loss = 0%, RTA = 0.09 ms","incident_closed":false}}
 {"status":"success","result":{"event_id":"48bb1a43-4066-4b69-a14f-7d3d1fd76927","triggered_at":1788518901865,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"LOAD OK - total load average: 1.93, 0.98, 0.66","incident_closed":false}}
@@ -350,7 +357,7 @@ $ curl -u 'example:insecureinsecure' 'http://localhost:5680/notification-history
 ## API Filtering
 
 Some of the Icinga Notifications API endpoints require to explicitly specify which objects the request should be
-filtered for. For instance, the `/incidents` endpoint requires a `filter` query parameter to specify which incidents
+filtered for. For instance, the `/v1/incidents` endpoint requires a `filter` query parameter to specify which incidents
 it should either retrieve or modify. The `filter` query parameter is a JSON-encoded object that describes the
 filtering criteria. The filter syntax and semantics are as follows:
 

@@ -82,9 +82,9 @@ func NewListener(db *database.DB, runtimeConfig *config.RuntimeConfig, logs *log
 	debugMux.HandleFunc("/dump-rules", l.DumpRules)
 
 	l.mux.Handle("/debug/", http.StripPrefix("/debug", l.requireDebugAuth(debugMux)))
-	l.mux.HandleFunc("/process-event", l.ProcessEvent)
-	l.mux.HandleFunc("/incidents", l.IncidentsHandler)
-	l.mux.HandleFunc("/notification-history", l.NotificationHistoryHandler)
+	l.mux.HandleFunc("/v1/process-event", l.ProcessEvent)
+	l.mux.HandleFunc("/v1/incidents", l.IncidentsHandler)
+	l.mux.HandleFunc("/v1/notification-history", l.NotificationHistoryHandler)
 	return l
 }
 
@@ -491,7 +491,7 @@ func (l *Listener) ProcessEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// IncidentsHandler handles GET and POST requests to the /incidents endpoint.
+// IncidentsHandler handles GET and POST requests to the /v1/incidents endpoint.
 //
 // It performs authentication using HTTP Basic Auth and delegates the actual handling to [Listener.getIncidents]
 // for GET requests and [Listener.modifyIncident] for POST requests. If the request method is neither GET nor POST,
@@ -530,7 +530,7 @@ func (l *Listener) IncidentsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// getIncidentsHandler handles GET requests to the /incidents endpoint.
+// getIncidentsHandler handles GET requests to the /v1/incidents endpoint.
 //
 // It retrieves all the current open incidents, applies any filters provided in the query
 // parameters, and streams the filtered incidents back to the client in NDJSON format.
@@ -563,7 +563,7 @@ func (l *Listener) getIncidentsHandler(w http.ResponseWriter, r *http.Request, s
 	}
 }
 
-// modifyIncidentsHandler handles POST requests to the /incidents endpoint.
+// modifyIncidentsHandler handles POST requests to the /v1/incidents endpoint.
 //
 // It retrieves all the current open incidents, applies any filters provided in the query params, and modifies the
 // filtered incidents based on the JSON body of the request. The JSON body can contain a "message" field to update
@@ -651,7 +651,7 @@ func (l *Listener) modifyIncidentsHandler(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// NotificationHistoryHandler handles GET requests to the /notification-history endpoint.
+// NotificationHistoryHandler handles GET requests to the /v1/notification-history endpoint.
 func (l *Listener) NotificationHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		l.abort(w, http.StatusMethodNotAllowed, nil, "GET required")
