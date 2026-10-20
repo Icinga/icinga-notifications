@@ -83,7 +83,7 @@ has been renamed to `channels_dir` as well.
 
 The `icingaweb2-url` global option has been dropped without replacement and you will have to remove it from your config.
 Icinga Notifications no longer builds any URLs on its own and can therefore no longer complete an event's relative `url`.
-The field itself stays optional, but if an event carries one, `/process-event` now rejects anything but an absolute URL.
+The field itself stays optional, but if an event carries one, `/v1/process-event` now rejects anything but an absolute URL.
 If you are running a source that submits relative URLs, upgrade it to the version that submits absolute ones before
 upgrading Icinga Notifications.
 
