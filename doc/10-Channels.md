@@ -393,7 +393,7 @@ object with the following optional fields:
       }
     },
     "incident": {
-      "severity": "crit",
+      "severity": "critical",
       "muted": false,
       "recovered": false,
       "message": "[CRITICAL] - Filesystem checks failed\n        \\_[CRITICAL] - / (ffs)\n                \\_[CRITICAL] - Free space absolute: 42 MiB (of 985 MiB)\n                \\_[CRITICAL] - Free space percentage: 4.264%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=943718400B;826918502.400000;930283315.200000;0;1033648128",

@@ -66,22 +66,12 @@ func severityDisplay(s baseEv.Severity) string {
 	switch s {
 	case baseEv.SeverityOK:
 		return "OK"
-	case baseEv.SeverityDebug:
-		return "Debug"
-	case baseEv.SeverityInfo:
-		return "Info"
-	case baseEv.SeverityNotice:
-		return "Notice"
 	case baseEv.SeverityWarning:
 		return "Warning"
-	case baseEv.SeverityErr:
+	case baseEv.SeverityError:
 		return "Error"
-	case baseEv.SeverityCrit:
+	case baseEv.SeverityCritical:
 		return "Critical"
-	case baseEv.SeverityAlert:
-		return "Alert"
-	case baseEv.SeverityEmerg:
-		return "Emergency"
 	default:
 		return s.String()
 	}

@@ -200,8 +200,8 @@ func TestIncidents(t *testing.T) {
 		unmanagedEscalationID = insertEntry(contact, 1, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"n"}}`)
 		managedEscalationID = insertEntry(contact, 2, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"y"}}`)
 
-		insertEntry(nil, 1, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"info"}}`)
-		insertEntry(nil, 2, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"warning"}}`)
+		insertEntry(nil, 1, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"warning"}}`)
+		insertEntry(nil, 2, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"error"}}`)
 
 		insertEntry(notificationContact, 1, notificationRule.ID, `{"ast":{"op":"=","attributes":["event_type"],"value":"test-type"}}`)
 		insertEntry(notificationContact2, 2, notificationRule.ID, `{"ast":{"op":"=","attributes":["event_type"],"value":"test-type"}}`)
@@ -232,7 +232,7 @@ func TestIncidents(t *testing.T) {
 		activeIncidents := make(map[string]*Incident, 48)
 		recoveredIncidents := make(map[string]*Incident, 16)
 		for n := range 64 {
-			ev := makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityCrit), withTime(time.Now()))
+			ev := makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityCritical), withTime(time.Now()))
 			i := makeIncident(db, logs, runtimeConfig, t, ev)
 			if n%4 == 0 { // 64 / 4 => 16 existing incidents will be marked as recovered!
 				require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
@@ -282,39 +282,39 @@ func TestIncidents(t *testing.T) {
 
 		relations := map[string]any{"host": map[string]string{"name": "trigger_notifications_severity_change"}}
 		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
-			withTime(time.Now()), withRelations(relations), withIncident(true), withSeverity(baseEv.SeverityDebug)))
+			withTime(time.Now()), withRelations(relations), withIncident(true), withSeverity(baseEv.SeverityOK)))
 
 		// No escalation should be triggered yet, because the incident severity is below the escalation condition.
-		verifyIncident(t, db, i, 1, 0, 0, 0, baseEv.SeverityDebug)
+		verifyIncident(t, db, i, 1, 0, 0, 0, baseEv.SeverityOK)
 
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
-			withTime(time.Now()), withRelations(relations), withIncident(true), withSeverity(baseEv.SeverityInfo),
+			withTime(time.Now()), withRelations(relations), withIncident(true), withSeverity(baseEv.SeverityWarning),
 			withTags(mustIncidentObject(t, i).Tags))))
 
-		// Now, the first escalation with condition >=info should have been triggered, and the recipient
+		// Now, the first escalation with condition >=warning should have been triggered, and the recipient
 		// should have been added to the incident.
-		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityInfo)
+		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityWarning)
 
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withTime(time.Now()), withMuted(true), withRelations(relations), withIncident(true),
-			withSeverity(baseEv.SeverityInfo), withTags(mustIncidentObject(t, i).Tags))))
+			withSeverity(baseEv.SeverityWarning), withTags(mustIncidentObject(t, i).Tags))))
 
 		// Same severity, but muted, so the incident should still be muted and no new notification should have been sent.
-		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityInfo)
+		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityWarning)
 		assert.True(t, reloadIncident(t, db, i).IsMuted())
 
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withTime(time.Now()), withMuted(false), withRelations(relations), withIncident(true),
-			withSeverity(baseEv.SeverityWarning), withTags(mustIncidentObject(t, i).Tags))))
+			withSeverity(baseEv.SeverityError), withTags(mustIncidentObject(t, i).Tags))))
 
 		// Severity increased, so the incident should be unmuted and a new notification should have been sent.
-		verifyIncident(t, db, i, 1, 2, 2, 3, baseEv.SeverityWarning)
+		verifyIncident(t, db, i, 1, 2, 2, 3, baseEv.SeverityError)
 		assert.False(t, reloadIncident(t, db, i).IsMuted())
 
 		err := Process(t.Context(), db, logs, runtimeConfig, makeEventNoValidate(t, source.ID,
-			withMuted(false), withSeverity(baseEv.SeverityNotice), withTags(mustIncidentObject(t, i).Tags)))
+			withMuted(false), withSeverity(baseEv.SeverityWarning), withTags(mustIncidentObject(t, i).Tags)))
 		require.ErrorIs(t, err, ErrSeverityChangeWithoutIncidentFlag)
-		assert.Equal(t, baseEv.SeverityWarning, reloadIncident(t, db, i).Severity)
+		assert.Equal(t, baseEv.SeverityError, reloadIncident(t, db, i).Severity)
 	})
 
 	t.Run("Incident Open", func(t *testing.T) {
@@ -323,8 +323,8 @@ func TestIncidents(t *testing.T) {
 		relations := map[string]any{"host": map[string]string{"name": "trigger_notifications_incident_open"}}
 
 		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
-			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityDebug)))
-		verifyIncident(t, db, i, 1, 0, 0, 0, baseEv.SeverityDebug)
+			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityOK)))
+		verifyIncident(t, db, i, 1, 0, 0, 0, baseEv.SeverityOK)
 
 		// Attempting to open an incident without a severity should fail.
 		ev := makeEvent(t, source.ID, withIncident(true))
@@ -332,18 +332,18 @@ func TestIncidents(t *testing.T) {
 		require.ErrorIs(t, Process(t.Context(), db, logs, runtimeConfig, ev), ErrOpenIncidentWithoutSeverity)
 
 		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
-			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityEmerg), withMsg("Incident opened!")))
-		verifyIncident(t, db, i, 1, 2, 2, 2, baseEv.SeverityEmerg)
+			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityCritical), withMsg("Incident opened!")))
+		verifyIncident(t, db, i, 1, 2, 2, 2, baseEv.SeverityCritical)
 		assert.Equal(t, "Incident opened!", reloadIncident(t, db, i).Message.String)
 
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withTime(time.Now()),
 			withIncident(true),
 			withRelations(relations),
-			withSeverity(baseEv.SeverityEmerg),
+			withSeverity(baseEv.SeverityCritical),
 			withMsg("Incident updated!"),
 			withTags(mustIncidentObject(t, i).Tags))))
-		verifyIncident(t, db, i, 1, 2, 2, 2, baseEv.SeverityEmerg) // Nothing changed.
+		verifyIncident(t, db, i, 1, 2, 2, 2, baseEv.SeverityCritical) // Nothing changed.
 		assert.Equal(t, "Incident updated!", reloadIncident(t, db, i).Message.String)
 
 		// We shouldn't be able to update the incident message without the incident flag set.
@@ -405,29 +405,29 @@ func TestIncidents(t *testing.T) {
 
 		// Incident opened and closed immediately, so it's no longer active.
 		require.Nil(t, makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
-			withTime(time.Now()), withIncident(true), withClose(), withRelations(relations), withSeverity(baseEv.SeverityDebug))))
+			withTime(time.Now()), withIncident(true), withClose(), withRelations(relations), withSeverity(baseEv.SeverityOK))))
 
 		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
-			withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityInfo)))
-		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityInfo)
+			withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityWarning)))
+		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityWarning)
 
 		// Closing incident with a new severity will update the severity and mark it as recovered.
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
-			withTime(time.Now()), withIncident(true), withClose(), withRelations(relations), withSeverity(baseEv.SeverityEmerg),
+			withTime(time.Now()), withIncident(true), withClose(), withRelations(relations), withSeverity(baseEv.SeverityCritical),
 			withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.NotZero(t, i.RecoveredAt)
-		assert.Equal(t, baseEv.SeverityEmerg, i.Severity)
+		assert.Equal(t, baseEv.SeverityCritical, i.Severity)
 
 		i = makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
-			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityWarning)))
-		verifyIncident(t, db, i, 1, 2, 2, 2, baseEv.SeverityWarning)
+			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityError)))
+		verifyIncident(t, db, i, 1, 2, 2, 2, baseEv.SeverityError)
 
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withTime(time.Now()), withIncident(true), withClose(), withRelations(relations), withTags(mustIncidentObject(t, i).Tags))))
 		i = reloadIncident(t, db, i)
 		assert.NotZero(t, i.RecoveredAt)
-		assert.Equal(t, baseEv.SeverityInfo, i.Severity)
+		assert.Equal(t, baseEv.SeverityWarning, i.Severity)
 	})
 
 	t.Run("Notify Flag", func(t *testing.T) {
@@ -436,28 +436,28 @@ func TestIncidents(t *testing.T) {
 		relations := map[string]any{"host": map[string]string{"name": "trigger_notifications_incident_notify"}}
 
 		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
-			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityNotice)))
-		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityNotice)
+			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityWarning)))
+		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityWarning)
 
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
-			withTime(time.Now()), withIncident(true), withNotify(), withRelations(relations), withSeverity(baseEv.SeverityNotice),
+			withTime(time.Now()), withIncident(true), withNotify(), withRelations(relations), withSeverity(baseEv.SeverityWarning),
 			withTags(mustIncidentObject(t, i).Tags))))
 
 		// No severity change, but the notify flag was set to true, so a new notification should have been sent.
-		verifyIncident(t, db, i, 1, 1, 1, 2, baseEv.SeverityNotice)
+		verifyIncident(t, db, i, 1, 1, 1, 2, baseEv.SeverityWarning)
 
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
-			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityCrit), withTags(mustIncidentObject(t, i).Tags))))
+			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityCritical), withTags(mustIncidentObject(t, i).Tags))))
 
 		// Severity increased, so two new notifications should have been sent.
-		verifyIncident(t, db, i, 1, 2, 2, 4, baseEv.SeverityCrit)
+		verifyIncident(t, db, i, 1, 2, 2, 4, baseEv.SeverityCritical)
 
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
-			withTime(time.Now()), withIncident(true), withNotify(), withRelations(relations), withSeverity(baseEv.SeverityCrit),
+			withTime(time.Now()), withIncident(true), withNotify(), withRelations(relations), withSeverity(baseEv.SeverityCritical),
 			withTags(mustIncidentObject(t, i).Tags))))
 
 		// No severity change, but the notify flag was set to true, so a new notification should have been sent to both recipients.
-		verifyIncident(t, db, i, 1, 2, 2, 6, baseEv.SeverityCrit)
+		verifyIncident(t, db, i, 1, 2, 2, 6, baseEv.SeverityCritical)
 	})
 
 	t.Run("Muted Flag", func(t *testing.T) {
@@ -466,8 +466,8 @@ func TestIncidents(t *testing.T) {
 		relations := map[string]any{"host": map[string]string{"name": "trigger_notifications_incident_muted"}}
 
 		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
-			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityInfo), withMuted(true)))
-		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityInfo)
+			withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityWarning), withMuted(true)))
+		verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityWarning)
 
 		i = reloadIncident(t, db, i)
 		assert.True(t, i.IsMuted())
@@ -476,23 +476,23 @@ func TestIncidents(t *testing.T) {
 		// Sending the muted flag again without the incident flag set should trigger new notifications.
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withTime(time.Now()), withMuted(true), withRelations(relations), withTags(mustIncidentObject(t, i).Tags))))
-		verifyIncident(t, db, i, 1, 1, 1, 2, baseEv.SeverityInfo)
+		verifyIncident(t, db, i, 1, 1, 1, 2, baseEv.SeverityWarning)
 
 		// Unmute it with the incident flag still set...
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withTime(time.Now()), withIncident(true), withMuted(false), withRelations(relations), withTags(mustIncidentObject(t, i).Tags))))
 		// Since we didn't change the severity, no new notifications should have been sent.
-		verifyIncident(t, db, i, 1, 1, 1, 2, baseEv.SeverityInfo)
+		verifyIncident(t, db, i, 1, 1, 1, 2, baseEv.SeverityWarning)
 		assert.False(t, reloadIncident(t, db, i).IsMuted())
 
 		// Re-sending the muted flag without the incident flag set should trigger new notifications again.
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withTime(time.Now()), withMuted(false), withRelations(relations), withTags(mustIncidentObject(t, i).Tags))))
-		verifyIncident(t, db, i, 1, 1, 1, 3, baseEv.SeverityInfo)
+		verifyIncident(t, db, i, 1, 1, 1, 3, baseEv.SeverityWarning)
 
 		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
 			withTime(time.Now()), withMuted(false), withRelations(relations), withTags(mustIncidentObject(t, i).Tags))))
-		verifyIncident(t, db, i, 1, 1, 1, 4, baseEv.SeverityInfo)
+		verifyIncident(t, db, i, 1, 1, 1, 4, baseEv.SeverityWarning)
 
 		// Muted flag without the incident flag has no effect on non-existing incidents.
 		require.Nil(t, makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withMuted(true))))
@@ -501,7 +501,7 @@ func TestIncidents(t *testing.T) {
 	t.Run("QuickAction", func(t *testing.T) {
 		t.Parallel()
 
-		ev := makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityWarning), withMsg("Something went wrong!"))
+		ev := makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityError), withMsg("Something went wrong!"))
 		i := makeIncident(db, logs, runtimeConfig, t, ev)
 
 		for _, action := range []event.Action{event.ActionSubscribe, event.ActionManage} {
@@ -576,7 +576,7 @@ func TestIncidents(t *testing.T) {
 		t.Parallel()
 
 		i := makeIncident(db, logs, runtimeConfig, t,
-			makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityCrit)))
+			makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityCritical)))
 		assert.NotNil(t, i)
 		assert.NotZero(t, i.NextEscalationCheckAt)
 		assert.WithinDuration(t, i.StartedAt.Time().Add(time.Hour), i.NextEscalationCheckAt.Time(), time.Second)
@@ -601,7 +601,7 @@ func TestIncidents(t *testing.T) {
 		t.Parallel()
 
 		relations := map[string]any{"host": map[string]string{"name": "managed_escalations"}}
-		ev := makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityCrit), withRelations(relations))
+		ev := makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityCritical), withRelations(relations))
 		i := reloadIncidentRecursive(t, db, makeIncident(db, logs, runtimeConfig, t, ev))
 		require.NotNil(t, i)
 
@@ -644,12 +644,12 @@ func TestIncidents(t *testing.T) {
 
 		tags := map[string]string{"notification_history_test": "true"}
 		msg := testutils.MakeRandomString(t)
-		ev := makeEvent(t, source.ID, withIncident(true), withTime(time.Now()), withSeverity(baseEv.SeverityDebug), withTags(tags), withMsg(msg))
+		ev := makeEvent(t, source.ID, withIncident(true), withTime(time.Now()), withSeverity(baseEv.SeverityOK), withTags(tags), withMsg(msg))
 		assert.NotZero(t, ev.ID)
 		i := makeIncident(db, logs, runtimeConfig, t, ev)
 		assert.NotZero(t, i.Id)
 		assert.Zero(t, i.RecoveredAt)
-		assert.Equal(t, baseEv.SeverityDebug, i.Severity)
+		assert.Equal(t, baseEv.SeverityOK, i.Severity)
 
 		t.Run("Fetch Everything", func(t *testing.T) {
 			t.Parallel()
@@ -743,7 +743,7 @@ func TestIncidents(t *testing.T) {
 			tags := map[string]string{"generate_notification_test": "with-incident"}
 			msg := testutils.MakeRandomString(t)
 			relations := map[string]any{"host": map[string]string{"name": "passive_notifications_rule_by_non_state_event"}}
-			ev := makeEvent(t, source.ID, withIncident(true), withTags(tags), withRelations(relations), withSeverity(baseEv.SeverityCrit))
+			ev := makeEvent(t, source.ID, withIncident(true), withTags(tags), withRelations(relations), withSeverity(baseEv.SeverityCritical))
 			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, ev))
 
 			var notifications []*NotificationEntry
@@ -870,7 +870,7 @@ func makeEventNoValidate(t *testing.T, sourceID int64, opts ...eventOption) *eve
 		ev.Time = time.Now().Add(-2 * time.Hour).Truncate(time.Second)
 	}
 	if ev.OpenOrEscalate() && ev.Severity == baseEv.SeverityNone {
-		ev.Severity = baseEv.SeverityInfo
+		ev.Severity = baseEv.SeverityWarning
 	}
 	if ev.Muted.Valid {
 		ev.MutedReason = "You're gonna have a bad time!"

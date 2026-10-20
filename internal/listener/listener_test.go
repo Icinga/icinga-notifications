@@ -55,7 +55,7 @@ func TestListener(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, rw.Code)
 			assert.Equal(t, "cannot parse JSON body: EOF\n", rw.Body.String())
 
-			body := `{"severity": "crit", "message": "test message"`
+			body := `{"severity": "critical", "message": "test message"`
 			req = withPeerUsername(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)), username)
 			rw = httptest.NewRecorder()
 
@@ -68,7 +68,7 @@ func TestListener(t *testing.T) {
 		t.Run("Unknown Fields", func(t *testing.T) {
 			t.Parallel()
 
-			body := `{"severity": "crit","unknown_field": "value"}`
+			body := `{"severity": "critical","unknown_field": "value"}`
 			req := withPeerUsername(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)), username)
 			rw := httptest.NewRecorder()
 

@@ -12,7 +12,7 @@ func TestRenderNotification(t *testing.T) {
 	baseCtx := renderCtx{
 		ObjectName:      "server01: disk /",
 		ObjectURL:       "https://example.com/object",
-		Severity:        baseEv.SeverityCrit,
+		Severity:        baseEv.SeverityCritical,
 		IncidentMessage: "Disk CRITICAL - no space left on device",
 		IncidentSummary: "Disk CRITICAL - no space left on device",
 		SourceName:      "icinga2-master",
@@ -94,7 +94,7 @@ func TestRenderNotification(t *testing.T) {
 			name: "escalated: age only",
 			reason: notifyReason{
 				Kind:        ReasonEscalated,
-				OldSeverity: baseEv.SeverityCrit,
+				OldSeverity: baseEv.SeverityCritical,
 			},
 			ctx: func() renderCtx {
 				c := baseCtx
@@ -130,7 +130,7 @@ func TestRenderNotification(t *testing.T) {
 			reason: notifyReason{
 				Kind:           ReasonEscalated,
 				CurrentlyMuted: true,
-				OldSeverity:    baseEv.SeverityCrit,
+				OldSeverity:    baseEv.SeverityCritical,
 			},
 			ctx: func() renderCtx {
 				c := baseCtx
@@ -170,7 +170,7 @@ func TestRenderNotification(t *testing.T) {
 			reason: notifyReason{
 				Kind:        ReasonEscalated,
 				Closing:     true,
-				OldSeverity: baseEv.SeverityCrit,
+				OldSeverity: baseEv.SeverityCritical,
 			},
 			ctx:           baseCtx,
 			expectSummary: "[server01: disk /] Incident escalated: Disk CRITICAL - no space left on device",
@@ -185,7 +185,7 @@ func TestRenderNotification(t *testing.T) {
 			name: "escalated: unmuted without severity change",
 			reason: notifyReason{
 				Kind:         ReasonEscalated,
-				OldSeverity:  baseEv.SeverityCrit,
+				OldSeverity:  baseEv.SeverityCritical,
 				JustUnmuted:  true,
 				UnmuteReason: "Maintenance over",
 			},
@@ -208,7 +208,7 @@ func TestRenderNotification(t *testing.T) {
 			reason: notifyReason{
 				Kind:             ReasonUpdated,
 				SeverityImproved: true,
-				OldSeverity:      baseEv.SeverityErr,
+				OldSeverity:      baseEv.SeverityError,
 			},
 			ctx:           baseCtx,
 			expectSummary: "[server01: disk /] Incident improved: Disk CRITICAL - no space left on device",
@@ -237,7 +237,7 @@ func TestRenderNotification(t *testing.T) {
 			reason: notifyReason{
 				Kind:             ReasonUpdated,
 				SeverityImproved: true,
-				OldSeverity:      baseEv.SeverityAlert,
+				OldSeverity:      baseEv.SeverityOK,
 				JustUnmuted:      true,
 				UnmuteReason:     "Maintenance over",
 			},
@@ -247,7 +247,7 @@ func TestRenderNotification(t *testing.T) {
 				"has improved",
 				"The incident was muted until now. You will receive further notifications from now on.",
 				"Unmute Reason: Maintenance over",
-				"Severity:    Critical (was Alert)",
+				"Severity:    Critical (was OK)",
 			},
 		},
 		{
@@ -423,7 +423,7 @@ func TestRenderNotification(t *testing.T) {
 func TestRenderNotificationDetails(t *testing.T) {
 	ctx := renderCtx{
 		ObjectName:      "server01: disk /",
-		Severity:        baseEv.SeverityCrit,
+		Severity:        baseEv.SeverityCritical,
 		IncidentMessage: "Disk CRITICAL - no space left on device",
 		IncidentSummary: "Disk CRITICAL - no space left on device",
 		SourceName:      "icinga2-master",
