@@ -58,10 +58,11 @@ func (ch *RocketChat) GetInfo() *plugin.Info {
 	}
 
 	return &plugin.Info{
-		Name:             "Rocket.Chat",
-		Version:          internal.Version.Version,
-		Author:           "Icinga GmbH",
-		ConfigAttributes: configAttrs,
+		Name:                     "Rocket.Chat",
+		Version:                  internal.Version.Version,
+		Author:                   "Icinga GmbH",
+		SupportedRequestVersions: []plugin.RequestVersion{plugin.RequestVersionV1},
+		ConfigAttributes:         configAttrs,
 	}
 }
 
@@ -86,20 +87,25 @@ func (ch *RocketChat) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *RocketChat) SendNotification(req *plugin.NotificationRequest) (*plugin.DeliveryResult, error) {
-	if len(req.Contact.Addresses) == 0 {
-		return nil, fmt.Errorf("contact user %s does not specify a rocketchat channel or username", req.Contact.FullName)
+	payload, err := req.PayloadAs[plugin.PayloadV1]()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(payload.Contact.Addresses) == 0 {
+		return nil, fmt.Errorf("contact user %s does not specify a rocketchat channel or username", payload.Contact.FullName)
 	}
 
 	var output bytes.Buffer
-	_, _ = fmt.Fprintln(&output, req.Summary)
+	_, _ = fmt.Fprintln(&output, payload.Summary)
 	_, _ = fmt.Fprintln(&output)
-	_, _ = fmt.Fprintln(&output, req.Body)
+	_, _ = fmt.Fprintln(&output, payload.Body)
 
 	message := struct {
 		Channel string `json:"channel"`
 		Text    string `json:"text"`
 	}{
-		Channel: req.Contact.Addresses[0].Address,
+		Channel: payload.Contact.Addresses[0].Address,
 		Text:    output.String(),
 	}
 

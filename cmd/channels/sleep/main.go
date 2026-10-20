@@ -44,9 +44,10 @@ func (s *Sleep) ReceiveEndpoint(ctx context.Context, ep *jsonrpc.Endpoint) {
 
 func (s *Sleep) GetInfo() *plugin.Info {
 	return &plugin.Info{
-		Name:    "Sleep",
-		Version: internal.Version.Version,
-		Author:  "Icinga GmbH",
+		Name:                     "Sleep",
+		Version:                  internal.Version.Version,
+		Author:                   "Icinga GmbH",
+		SupportedRequestVersions: []plugin.RequestVersion{plugin.RequestVersionV1},
 		ConfigAttributes: plugin.ConfigOptions{
 			{
 				Name: "duration",
@@ -116,6 +117,11 @@ func (s *Sleep) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (s *Sleep) SendNotification(nr *plugin.NotificationRequest) (*plugin.DeliveryResult, error) {
+	payload, err := nr.PayloadAs[plugin.PayloadV1]()
+	if err != nil {
+		return nil, err
+	}
+
 	s.mu.Lock()
 	duration := s.duration
 	persistState := s.PersistState
@@ -140,8 +146,8 @@ func (s *Sleep) SendNotification(nr *plugin.NotificationRequest) (*plugin.Delive
 			},
 		}
 
-		if persistState && !nr.State.IsZero() && !nr.Incident.IsRecovered {
-			result.State.Key = nr.State.Key
+		if persistState && !payload.State.IsZero() && !payload.Incident.IsRecovered {
+			result.State.Key = payload.State.Key
 			if useInvalidStateV {
 				// This exceeds the Unicode character limit of 4096 by two characters, which should trigger an error on
 				// the Icinga Notifications side. Using builtin len() function would have reported 4098*4 bytes instead.

@@ -81,7 +81,7 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 				"de_DE": "URL-Template",
 			},
 			Help: map[string]string{
-				"en_US": "URL, optionally as a Go template over the current plugin.NotificationRequest.",
+				"en_US": "URL, optionally as a Go template over the current plugin.NotificationRequest.Payload.",
 				"de_DE": "URL, optional als Go-Template über das zu verarbeitende plugin.NotificationRequest.",
 			},
 			Required: true,
@@ -94,7 +94,7 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 				"de_DE": "Request Header-Template",
 			},
 			Help: map[string]string{
-				"en_US": "Line-separated 'HTTP-HEADER:TEMPLATE' entries, where TEMPLATE is a Go template over the current plugin.NotificationRequest.",
+				"en_US": "Line-separated 'HTTP-HEADER:TEMPLATE' entries, where TEMPLATE is a Go template over the current plugin.NotificationRequest.Payload.",
 				"de_DE": "Zeilengetrennte 'HTTP-HEADER:TEMPLATE' Einträge, wobei TEMPLATE ein Go-Template über das zu verarbeitende plugin.NotificationRequest ist.",
 			},
 		},
@@ -106,7 +106,7 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 				"de_DE": "Anfragedaten-Template",
 			},
 			Help: map[string]string{
-				"en_US": "Go template applied to the current plugin.NotificationRequest to create an request body.",
+				"en_US": "Go template applied to the current plugin.NotificationRequest.Payload to create an request body.",
 				"de_DE": "Go-Template über das zu verarbeitende plugin.NotificationRequest zum Erzeugen der mitgesendeten Anfragedaten.",
 			},
 			Default: "{{json .}}",
@@ -207,10 +207,11 @@ func (ch *Webhook) GetInfo() *plugin.Info {
 	}
 
 	return &plugin.Info{
-		Name:             "Webhook",
-		Version:          internal.Version.Version,
-		Author:           "Icinga GmbH",
-		ConfigAttributes: configAttrs,
+		Name:                     "Webhook",
+		Version:                  internal.Version.Version,
+		Author:                   "Icinga GmbH",
+		SupportedRequestVersions: []plugin.RequestVersion{plugin.RequestVersionV1},
+		ConfigAttributes:         configAttrs,
 	}
 }
 
@@ -327,6 +328,11 @@ func (ch *Webhook) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) (*plugin.DeliveryResult, error) {
+	payload, err := req.PayloadAs[plugin.PayloadV1]()
+	if err != nil {
+		return nil, err
+	}
+
 	ch.mu.Lock()
 	method := ch.Method
 	tmplUrl := ch.tmplUrl
@@ -340,10 +346,10 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) (*plugin.De
 	ch.mu.Unlock()
 
 	var urlBuff, reqBodyBuff, respBuffer bytes.Buffer
-	if err := tmplUrl.Execute(&urlBuff, req); err != nil {
+	if err := tmplUrl.Execute(&urlBuff, payload); err != nil {
 		return nil, fmt.Errorf("cannot execute URL template: %w", err)
 	}
-	if err := tmplRequestBody.Execute(&reqBodyBuff, req); err != nil {
+	if err := tmplRequestBody.Execute(&reqBodyBuff, payload); err != nil {
 		return nil, fmt.Errorf("cannot execute Request Body template: %w", err)
 	}
 
@@ -355,7 +361,7 @@ func (ch *Webhook) SendNotification(req *plugin.NotificationRequest) (*plugin.De
 	httpReq.Header.Set("User-Agent", "icinga-notifications-webhook/"+internal.Version.Version)
 	for key, tmplValue := range tmplRequestHeaders {
 		var valueBuff bytes.Buffer
-		if err := tmplValue.Execute(&valueBuff, req); err != nil {
+		if err := tmplValue.Execute(&valueBuff, payload); err != nil {
 			return nil, fmt.Errorf("cannot execute Request Header template for key %q: %w", key, err)
 		}
 		httpReq.Header.Set(key, valueBuff.String())

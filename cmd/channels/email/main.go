@@ -275,10 +275,11 @@ func (ch *Email) GetInfo() *plugin.Info {
 	}
 
 	return &plugin.Info{
-		Name:             "Email",
-		Version:          internal.Version.Version,
-		Author:           "Icinga GmbH",
-		ConfigAttributes: configAttrs,
+		Name:                     "Email",
+		Version:                  internal.Version.Version,
+		Author:                   "Icinga GmbH",
+		SupportedRequestVersions: []plugin.RequestVersion{plugin.RequestVersionV1},
+		ConfigAttributes:         configAttrs,
 	}
 }
 
@@ -360,38 +361,43 @@ func (ch *Email) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *Email) SendNotification(req *plugin.NotificationRequest) (*plugin.DeliveryResult, error) {
-	if len(req.Contact.Addresses) == 0 {
-		return nil, fmt.Errorf("contact user %s does not have an e-mail address", req.Contact.FullName)
+	payload, err := req.PayloadAs[plugin.PayloadV1]()
+	if err != nil {
+		return nil, err
 	}
-	to := &mail.Address{Name: req.Contact.FullName, Address: req.Contact.Addresses[0].Address}
+
+	if len(payload.Contact.Addresses) == 0 {
+		return nil, fmt.Errorf("contact user %s does not have an e-mail address", payload.Contact.FullName)
+	}
+	to := &mail.Address{Name: payload.Contact.FullName, Address: payload.Contact.Addresses[0].Address}
 
 	ch.mu.Lock()
 	messageID := fmt.Sprintf("<%s-%s>", uuid.New().String(), ch.SenderMail)
 	b := enmime.Builder().
 		ToAddrs([]mail.Address{*to}).
 		From(ch.SenderName, ch.SenderMail).
-		Subject(req.Summary).
+		Subject(payload.Summary).
 		Header("Message-Id", messageID)
 	ch.mu.Unlock()
 
-	if req.State.Value != "" {
+	if payload.State.Value != "" {
 		var s state
-		if err := json.Unmarshal([]byte(req.State.Value), &s); err != nil {
+		if err := json.Unmarshal([]byte(payload.State.Value), &s); err != nil {
 			ch.notifyLog(zapcore.WarnLevel, "Failed to unmarshal channel state",
-				"state_key", req.State.Key, "state_value", req.State.Value, "error", err)
+				"state_key", payload.State.Key, "state_value", payload.State.Value, "error", err)
 		} else {
 			b = b.Header("In-Reply-To", s.LastMessageID).Header("References", s.LastMessageID)
 		}
 	}
 
-	if err := b.Text([]byte(req.Body)).Send(ch); err != nil {
+	if err := b.Text([]byte(payload.Body)).Send(ch); err != nil {
 		return nil, err
 	}
 
-	if req.Incident != nil && !req.Incident.IsRecovered {
+	if payload.Incident != nil && !payload.Incident.IsRecovered {
 		return &plugin.DeliveryResult{
 			State: plugin.State{
-				Key:   req.State.Key,
+				Key:   payload.State.Key,
 				Value: state{LastMessageID: messageID}.String(),
 			},
 		}, nil

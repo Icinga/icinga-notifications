@@ -81,10 +81,11 @@ func (ch *Telegram) GetInfo() *plugin.Info {
 	}
 
 	return &plugin.Info{
-		Name:             "Telegram",
-		Version:          internal.Version.Version,
-		Author:           "Icinga GmbH",
-		ConfigAttributes: configAttrs,
+		Name:                     "Telegram",
+		Version:                  internal.Version.Version,
+		Author:                   "Icinga GmbH",
+		SupportedRequestVersions: []plugin.RequestVersion{plugin.RequestVersionV1},
+		ConfigAttributes:         configAttrs,
 	}
 }
 
@@ -102,15 +103,20 @@ func (ch *Telegram) SetConfig(jsonStr json.RawMessage) error {
 }
 
 func (ch *Telegram) SendNotification(req *plugin.NotificationRequest) (*plugin.DeliveryResult, error) {
-	if len(req.Contact.Addresses) == 0 {
-		return nil, fmt.Errorf("contact %q has no Telegram address", req.Contact.FullName)
+	payload, err := req.PayloadAs[plugin.PayloadV1]()
+	if err != nil {
+		return nil, err
 	}
-	chatID := req.Contact.Addresses[0].Address
+
+	if len(payload.Contact.Addresses) == 0 {
+		return nil, fmt.Errorf("contact %q has no Telegram address", payload.Contact.FullName)
+	}
+	chatID := payload.Contact.Addresses[0].Address
 
 	var output bytes.Buffer
-	_, _ = fmt.Fprintln(&output, req.Summary)
+	_, _ = fmt.Fprintln(&output, payload.Summary)
 	_, _ = fmt.Fprintln(&output)
-	_, _ = fmt.Fprintln(&output, req.Body)
+	_, _ = fmt.Fprintln(&output, payload.Body)
 
 	message := struct {
 		ChatID                string           `json:"chat_id"`
@@ -126,11 +132,11 @@ func (ch *Telegram) SendNotification(req *plugin.NotificationRequest) (*plugin.D
 	}
 
 	// When this chat has already been notified about this incident, reply to the last message sent for it.
-	if req.State.Value != "" {
+	if payload.State.Value != "" {
 		var st state
-		if err := json.Unmarshal([]byte(req.State.Value), &st); err != nil {
+		if err := json.Unmarshal([]byte(payload.State.Value), &st); err != nil {
 			ch.notifyLog(zapcore.WarnLevel, "Failed to unmarshal channel state",
-				"state_key", req.State.Key, "state_value", req.State.Value, "error", err)
+				"state_key", payload.State.Key, "state_value", payload.State.Value, "error", err)
 		} else {
 			message.ReplyParameters = &replyParameters{MessageID: st.MessageID, AllowSendingWithoutReply: true}
 		}
@@ -141,11 +147,11 @@ func (ch *Telegram) SendNotification(req *plugin.NotificationRequest) (*plugin.D
 		return nil, err
 	}
 
-	if req.Incident != nil && !req.Incident.IsRecovered {
+	if payload.Incident != nil && !payload.Incident.IsRecovered {
 		// Remember this message so that the next notification for this incident replies to it.
 		return &plugin.DeliveryResult{
 			State: plugin.State{
-				Key:   req.State.Key,
+				Key:   payload.State.Key,
 				Value: state{MessageID: messageID}.String(),
 			},
 		}, nil

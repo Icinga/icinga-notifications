@@ -2,7 +2,9 @@ package channel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 	"unicode/utf8"
 
@@ -86,20 +88,25 @@ func (c *Channel) Start(ctx context.Context, db *database.DB, logger *zap.Sugare
 func (c *Channel) instantiatePluginSupervisor(conf newConfig) *pluginSupervisor {
 	c.Logger.Debug("Initializing channel plugin")
 
+	persistError := func(err error) {
+		if rpcErr, ok := errors.AsType[*jsonrpc.Error](err); ok {
+			c.persistValidationError(c.pluginCtx, rpcErr.Message)
+		} else {
+			c.persistValidationError(c.pluginCtx, err.Error())
+		}
+	}
+
 	p, err := newPluginSupervisor(c.pluginCtx, c.db, c.Logger, conf.ctype, c.ID)
 	if err != nil {
 		c.Logger.Errorw("Failed to initialize channel plugin", zap.Error(err))
+		persistError(err)
 		return nil
 	}
 
 	if err := p.SetConfig(c.pluginCtx, conf.config); err != nil {
 		c.Logger.Errorw("Failed to set channel plugin config, terminating the plugin", zap.Error(err))
 		p.Stop()
-		if rpcErr, ok := errors.AsType[*jsonrpc.Error](err); ok {
-			c.persistValidationError(c.pluginCtx, rpcErr.Message)
-		} else {
-			c.persistValidationError(c.pluginCtx, err.Error())
-		}
+		persistError(err)
 		return nil
 	} else if conf.validationResult.Valid {
 		c.persistValidationError(c.pluginCtx, "")
@@ -259,33 +266,14 @@ func (c *Channel) Notify(
 		return nil, errors.New("plugin could not be started")
 	}
 
-	contactStruct := &plugin.Contact{FullName: contact.FullName}
+	pc := &plugin.Contact{FullName: contact.FullName}
 	for _, addr := range contact.Addresses {
 		// Not every plugin needs to know about every address that a contact has, so we filter
 		// the addresses by type to only include those that are relevant for the plugin.
 		if addr.Type != p.pluginType {
 			continue
 		}
-		contactStruct.Addresses = append(contactStruct.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
-	}
-
-	req := &plugin.NotificationRequest{
-		Contact: contactStruct,
-		Object: &plugin.Object{
-			Name:    o.DisplayName(),
-			Url:     ev.URL,
-			Sources: o.Sources,
-			Tags:    o.Tags,
-		},
-		Incident: i,
-		Event: &plugin.Event{
-			Type:    ev.Type,
-			Time:    ev.Time,
-			Message: ev.Message,
-			Summary: ev.Summary,
-		},
-		Summary: summary,
-		Body:    body,
+		pc.Addresses = append(pc.Addresses, &plugin.Address{Type: addr.Type, Address: addr.Address})
 	}
 
 	// Abort the RPC call when either the plugin is stopped or ctx is done, whichever comes first.
@@ -294,41 +282,80 @@ func (c *Channel) Notify(
 	defer stopAfterFunc()
 	defer cancel(nil)
 
+	var state plugin.State
 	if i != nil {
-		req.State = plugin.State{Key: p.composeStateKey(req.Contact, incidentID)}
-		if !req.State.Key.IsZero() {
-			s, err := getStateByKey(rpcCtx, p.db, req.State.Key)
+		state = plugin.State{Key: p.composeStateKey(pc, incidentID)}
+		if !state.Key.IsZero() {
+			s, err := getStateByKey(rpcCtx, p.db, state.Key)
 			if err != nil && rpcCtx.Err() != nil {
 				return nil, err
 			} else if err != nil {
 				// This is not that critical for sending the notification, so don't error out.
 				p.logger.Warnw("Failed to retrieve channel state for incident",
-					zap.Stringer("state_key", req.State.Key),
+					zap.Stringer("state_key", state.Key),
 					zap.Int64("incident_id", incidentID),
 					zap.Error(err))
 			}
-			req.State.Value = s.Value
+			state.Value = s.Value
 		}
 
-		if i.IsRecovered && req.State.Value == "" {
+		if i.IsRecovered && state.Value == "" {
 			// If the incident is recovering and there is no persistent state for it, we don't need to
 			// send the state key to the plugin, as we won't be able to persist any state for it anyway.
-			req.State = plugin.State{}
+			state = plugin.State{}
 		}
 	}
 
+	var (
+		payload json.RawMessage
+		version plugin.RequestVersion
+	)
+
+	switch v := p.supportedRequestVersions[0]; v {
+	case plugin.RequestVersionV1:
+		version = plugin.RequestVersionV1
+		var err error
+		payload, err = json.Marshal(&plugin.PayloadV1{
+			Contact: pc,
+			Object: &plugin.Object{
+				Name:    o.DisplayName(),
+				Url:     ev.URL,
+				Sources: o.Sources,
+				Tags:    o.Tags,
+			},
+			Incident: i,
+			Event: &plugin.Event{
+				Type:    ev.Type,
+				Time:    ev.Time,
+				Message: ev.Message,
+				Summary: ev.Summary,
+			},
+			Summary: summary,
+			Body:    body,
+			State:   state,
+		})
+		if err != nil {
+			return nil, err
+		}
+	default:
+		// Unreachable because the pluginSupervisor constructor already checks for supported versions,
+		// but we keep it here for future-proofing.
+		return nil, fmt.Errorf("unsupported request version %d for plugin type %s", v, p.pluginType)
+	}
+
+	req := &plugin.NotificationRequest{Version: version, Payload: payload}
 	result, err := p.SendNotification(rpcCtx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	if i == nil || i.IsRecovered || req.State.IsZero() || result == nil || result.State.IsZero() {
+	if i == nil || i.IsRecovered || state.IsZero() || result == nil || result.State.IsZero() {
 		return result, nil
 	}
 
-	if result.State.Key != req.State.Key {
+	if result.State.Key != state.Key {
 		p.logger.Warnw("Received a different state key from the plugin than expected, skipping state persistence",
-			zap.Stringer("expected_state_key", req.State.Key),
+			zap.Stringer("expected_state_key", state.Key),
 			zap.Stringer("received_state_key", result.State.Key))
 		return result, nil
 	}
