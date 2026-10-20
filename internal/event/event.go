@@ -62,14 +62,17 @@ func (e *Event) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 		encoder.AddBool("muted", e.Muted.Bool)
 		encoder.AddString("muted_reason", e.MutedReason)
 	}
-	if e.OpenOrEscalate() {
-		encoder.AddBool("incident", true)
+	if e.Incident.Valid {
+		encoder.AddBool("incident", e.Incident.Bool)
 	}
 	if e.CloseIncident() {
 		encoder.AddBool("close", true)
 	}
 	if e.NotifyRecipients() {
 		encoder.AddBool("notify", true)
+	}
+	if e.NotificationOnly() {
+		encoder.AddString("event_type", e.Type)
 	}
 
 	return encoder.AddObject("tags", zapcore.ObjectMarshalerFunc(func(objectEncoder zapcore.ObjectEncoder) error {
