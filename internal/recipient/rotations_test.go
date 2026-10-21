@@ -2,12 +2,13 @@ package recipient
 
 import (
 	"database/sql"
+	"testing"
+	"time"
+
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func Test_rotationResolver_getCurrentRotations(t *testing.T) {

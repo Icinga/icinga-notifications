@@ -2,11 +2,12 @@ package recipient
 
 import (
 	"database/sql"
+	"time"
+
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"go.uber.org/zap/zapcore"
-	"time"
 )
 
 type Schedule struct {

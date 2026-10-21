@@ -3,13 +3,14 @@ package timeperiod_test
 import (
 	"database/sql"
 	"fmt"
+	"testing"
+	"time"
+
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/teambition/rrule-go"
-	"testing"
-	"time"
 )
 
 func TestEntry(t *testing.T) {

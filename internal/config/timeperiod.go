@@ -2,8 +2,9 @@ package config
 
 import (
 	"fmt"
-	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"slices"
+
+	"github.com/icinga/icinga-notifications/internal/timeperiod"
 )
 
 // applyPendingTimePeriods synchronizes changed time periods.

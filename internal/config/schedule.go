@@ -2,10 +2,11 @@ package config
 
 import (
 	"fmt"
+	"slices"
+
 	"github.com/icinga/icinga-notifications/internal/recipient"
 	"github.com/icinga/icinga-notifications/internal/timeperiod"
 	"go.uber.org/zap"
-	"slices"
 )
 
 // applyPendingSchedules synchronizes changed schedules.

@@ -2,9 +2,10 @@ package recipient
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/icinga/icinga-go-library/types"
 	"go.uber.org/zap/zapcore"
-	"time"
 )
 
 type Recipient interface {
