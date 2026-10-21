@@ -42,8 +42,71 @@ Events can be submitted to Icinga Notifications using the `/v1/process-event` HT
 
 After creating a source in Icinga Notifications Web,
 the specified credentials can be used via HTTP Basic Authentication to submit a JSON-encoded
-[`Event`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/event/event.go).
+[`Event`](#event-fields) with a `POST` request.
 See [Authentication](#authentication) for how sources are identified across the supported transports.
+
+### Event Fields <a id="event-fields"></a>
+
+An event is a JSON object with the following fields. Fields that aren't listed here are rejected with a `400`, see
+[Responses](#process-event-responses). The same type is available as
+[`Event`](https://github.com/Icinga/icinga-go-library/blob/main/notifications/event/event.go) in the
+icinga-go-library for sources written in Go, including its `Validate()` method, which implements the checks below.
+
+| Field                | Type    | Required                                  | Description                                                                                                                                                                                                                                                                      |
+|----------------------|---------|-------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `id`                 | string  | no                                        | A globally unique UUID of the event. See [Event IDs](#event-ids).                                                                                                                                                                                                                |
+| `name`               | string  | no                                        | The display name of the object the event is about. If empty, the object is displayed by its `tags` instead. It isn't used to identify the object.                                                                                                                                |
+| `url`                | string  | no                                        | An absolute URL pointing at the object in the source's web interface, passed on to the notified contacts. Relative URLs are rejected.                                                                                                                                            |
+| `tags`               | object  | yes                                       | String key-value pairs that uniquely identify the object the event is about, e.g. `{"host": "example-809", "service": "disk /"}`. Events with identical tags refer to the same object and incident. At least one tag is required; keys and values must not be empty, and keys are limited to 255 characters. |
+| `severity`           | string  | if `incident` is `true`, otherwise never  | The severity of the object, one of `ok`, `warning`, `error` or `critical`.                                                                                                                                                                                                       |
+| `summary`            | string  | yes                                       | A single-line description of the event, used where space is limited, e.g. email subjects. At most 1024 characters, without line breaks. The complete output belongs into `message`.                                                                                              |
+| `message`            | string  | no                                        | The complete human-readable message of the event, e.g. the check output.                                                                                                                                                                                                         |
+| `incident`           | boolean | one of `incident` and `muted`             | Selects what the event does, see [Event Kinds](#event-kinds) and [Rule Evaluation](#rule-evaluation). Either `true` or `false`; omit it for events which only change the muted state.                                                                                             |
+| `type`               | string  | if `incident` is `false`, otherwise never | The kind of a notification-only event, e.g. `downtime_start`. The value is free-form and chosen by the source. Entries of notification rules and subscribers or managers of an incident can restrict the events they are notified about by it.                                                                       |
+| `close`              | boolean | no                                        | Closes the incident of the object. Requires `incident: true`. Can only be `true` or omitted, not `false`.                                                                                                                                                                        |
+| `notify`             | boolean | no                                        | Notifies the incident's recipients even if the severity didn't change, e.g. for a repeated problem state. Requires `incident: true` and can't be combined with `close`. Can only be `true` or omitted, not `false`.                                                              |
+| `muted`              | boolean | one of `incident` and `muted`             | Whether the object is muted, e.g. due to a downtime or an acknowledgement. Muting silences the notifications of the object's incident, unmuting lifts that. Can't be combined with `incident: false`, and `true` can't be combined with `close`. Requires `muted_reason`.                      |
+| `muted_reason`       | string  | if `muted` is set                         | The reason for (un)muting. It is recorded in the incident's history. Ignored if `muted` is omitted.                                                                                                                                                                              |
+| `complete_relations` | array   | no                                        | A list of relations in `relations` that are complete, see [Incomplete Relations](#incomplete-relations).                                                                                                                                                                         |
+| `relations`          | object  | no                                        | Arbitrary additional information about the object, such as its host, services or groups, that the object filters of event rules are evaluated against. It isn't passed on to channels.                                                                           |
+
+Events violating any of the following rules are rejected with a `400`:
+
+- `tags` and `summary` are always required, and `summary` must be a single line.
+- `incident` and `muted` must not both be omitted.
+- `severity` has to be set if and only if `incident` is `true`.
+- `type` has to be set if and only if `incident` is `false`.
+- `muted_reason` must not be empty if `muted` is set.
+- `close` and `notify` require `incident: true` and are mutually exclusive.
+- `muted` can't be combined with `incident: false`, and `muted: true` can't be combined with `close`.
+
+#### Event Kinds <a id="event-kinds"></a>
+
+The combination of fields results in the following kinds of events:
+
+| Kind              | Fields                                                    | Effect                                                                                                                                                                   |
+|-------------------|-----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| State change      | `incident: true`, `severity`                              | Opens an incident if there is none, otherwise it updates its severity, message and summary. Notifications are sent if the severity changed or an escalation triggered.  |
+| Repeated state    | `incident: true`, `severity`, `notify: true`              | Like a state change, but recipients are notified even if the severity stays the same.                                                                                    |
+| Recovery          | `incident: true`, `severity`, `close: true`               | Closes the incident, typically with severity `ok`. Without an open incident, one is opened and closed right away.                                                       |
+| Notification      | `incident: false`, `type`                                 | Notifies the recipients of matching notification rules and the open incident, if any. Nothing about the incident changes.                                                |
+| Mute change       | `muted`, `muted_reason`                                   | Mutes or unmutes the open incident. Dropped without an open incident. Can be combined with `incident: true` to open, update or close an incident in a (un)muted state.  |
+
+The muted state is remembered for the incident. An event that doesn't carry `muted` neither mutes nor unmutes it, so a
+source only has to set it if the state changes. A new incident starts unmuted unless the event opening it sets
+`muted: true`.
+
+#### Event IDs <a id="event-ids"></a>
+
+The `id` is what lets Icinga Notifications tell a resubmitted event from a new one that looks the same. If a source
+submits an event again, e.g. because it never received the response, the event is identified as duplicate by its `id`
+and ignored. Icinga Notifications remembers the `id` of a processed event for about five minutes, so only retries within
+that time are recognized. Therefore, a source should generate a new UUID for every new event, but keep it for retries of
+that event.
+
+If `id` is omitted, Icinga Notifications derives one from the event's content and the submitting source. Identical
+events without an `id` are thus deduplicated as well, even if they're meant to be distinct. Set an `id`, if the source
+can submit identical events.
 
 ### Rule Evaluation
 
@@ -54,7 +117,7 @@ and the event's `incident` field decides which of them, if any, are evaluated:
 |------------|--------------------|--------------------------------------------------------------------------------------------------------------|
 | `true`     | Escalation rules   | Opens a new incident or updates the open one, triggers escalations and notifies recipients.                  |
 | `false`    | Notification rules | Notifies the recipients of matching notification rules right away. No incident is opened, closed or changed. |
-| omitted    | None               | Only updates an already open incident (e.g. its message). Without an open incident, the event is dropped.    |
+| omitted    | None               | Only updates the muted state of an already open incident. Without an open incident, the event is dropped.    |
 
 A rule's object filter is evaluated against the event's `relations`, so rules should be designed to match the
 relations the source submits. Each entry of a notification rule may additionally restrict its recipients by the
@@ -108,7 +171,7 @@ The `/v1/process-event` endpoint returns the following HTTP status codes:
 | Status | Meaning                                                                                                 |
 |--------|---------------------------------------------------------------------------------------------------------|
 | 204    | The event was accepted and queued for processing.                                                       |
-| 400    | The body isn't valid JSON, contains unknown fields, or fails validation (e.g. no tags, relative `url`). |
+| 400    | The body isn't valid JSON, contains unknown fields, or violates the [Event Fields](#event-fields) rules. |
 | 401    | Authentication failed, see [Authentication](#authentication).                                           |
 | 405    | The request method isn't `POST`.                                                                        |
 | 422    | Required relations are missing, see [Incomplete Relations](#incomplete-relations).                      |
@@ -119,16 +182,18 @@ The `url` field of an event is optional. If set, it must be an absolute URL such
 source's web interface. Icinga Notifications doesn't know where that interface lives and can't resolve a relative
 URL, so such events are rejected with `400`.
 
-A `204` HTTP code means the event was accepted and successfully queued. Events that turn out to be invalid during
-processing, such as a severity change without the `incident` field, are dropped and only logged.
+A `204` HTTP code means the event was accepted and successfully queued. The response body of a `400` contains the
+validation error, e.g. `invalid event: at least one of 'incident' or 'muted' must be set`. Events that turn out to be
+unprocessable later on are dropped and only logged.
 
 ### Example Request
 
-An example request to submit an event looks like this:
+An example request to submit a state change, which opens an incident or updates the open one, looks like this:
 
 ```
 curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomplete: true' -d '@-' 'http://localhost:5680/v1/process-event' <<EOF
 {
+  "id": "6f1b3c0e-5a0e-4a53-9b8e-2f2d1c6d7a11",
   "incident": true,
   "name": "example-809: disk /",
   "url": "http://localhost/icingaweb2/icingadb/service?name=disk%20%2F&host.name=example-809",
@@ -136,9 +201,9 @@ curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomple
     "host": "example-809",
     "service": "disk /"
   },
-  "severity": "ok",
-  "summary": "[OK] - Filesystem checks succeeded",
-  "message": "[OK] - Filesystem checks succeeded\n        \\_[OK] - / (ffs)\n                \\_[OK] - Free space absolute: 242 MiB (of 985 MiB)\n                \\_[OK] - Free space percentage: 24.649%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=727183360B;826918502.400000;930283315.200000;0;1033648128",
+  "severity": "critical",
+  "summary": "[CRITICAL] - Filesystem checks failed",
+  "message": "[CRITICAL] - Filesystem checks failed\n        \\_[CRITICAL] - / (ffs)\n                \\_[CRITICAL] - Free space absolute: 24 MiB (of 985 MiB)\n                \\_[CRITICAL] - Free space percentage: 2.436%\n                \\_[OK] - Inodes free: 97.4923% (151618 of 155518)|'/'=1007681536B;826918502.400000;930283315.200000;0;1033648128",
   "complete_relations": [
     "host",
     "services",
@@ -176,6 +241,51 @@ curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomple
       }
     ]
   }
+}
+EOF
+```
+
+The following examples show the other [kinds of events](#event-kinds) for the same object. For brevity, they omit
+the optional fields.
+
+A recovery closes the incident again:
+
+```
+curl -u 'icingadb:insecureinsecure' -d '@-' 'http://localhost:5680/v1/process-event' <<EOF
+{
+  "incident": true,
+  "close": true,
+  "tags": {"host": "example-809", "service": "disk /"},
+  "severity": "ok",
+  "summary": "[OK] - Filesystem checks succeeded"
+}
+EOF
+```
+
+A notification-only event, here for the start of a downtime, notifies the recipients of matching notification rules
+without touching the incident:
+
+```
+curl -u 'icingadb:insecureinsecure' -d '@-' 'http://localhost:5680/v1/process-event' <<EOF
+{
+  "incident": false,
+  "type": "downtime_start",
+  "tags": {"host": "example-809", "service": "disk /"},
+  "summary": "Downtime started",
+  "message": "Downtime for example-809: disk / started"
+}
+EOF
+```
+
+A mute change mutes the open incident. Sending `"muted": false` with a `muted_reason` unmutes it again:
+
+```
+curl -u 'icingadb:insecureinsecure' -d '@-' 'http://localhost:5680/v1/process-event' <<EOF
+{
+  "muted": true,
+  "muted_reason": "Checkable is muted due to currently active downtime.",
+  "tags": {"host": "example-809", "service": "disk /"},
+  "summary": "Downtime started"
 }
 EOF
 ```
