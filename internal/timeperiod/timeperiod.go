@@ -3,12 +3,13 @@ package timeperiod
 import (
 	"database/sql"
 	"fmt"
+	"time"
+
 	"github.com/icinga/icinga-go-library/types"
 	"github.com/icinga/icinga-notifications/internal/config/baseconf"
 	"github.com/pkg/errors"
 	"github.com/teambition/rrule-go"
 	"go.uber.org/zap/zapcore"
-	"time"
 )
 
 type TimePeriod struct {

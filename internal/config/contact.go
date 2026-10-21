@@ -2,8 +2,9 @@ package config
 
 import (
 	"fmt"
-	"github.com/icinga/icinga-notifications/internal/recipient"
 	"slices"
+
+	"github.com/icinga/icinga-notifications/internal/recipient"
 )
 
 // applyPendingContacts synchronizes changed contacts

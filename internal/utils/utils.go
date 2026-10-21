@@ -4,11 +4,12 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"reflect"
+	"strings"
+
 	"github.com/icinga/icinga-go-library/database"
 	"github.com/jmoiron/sqlx"
 	"github.com/pkg/errors"
-	"reflect"
-	"strings"
 )
 
 // ExecAndApply applies the provided restoreFunc callback for each successfully retrieved row of the specified type.
