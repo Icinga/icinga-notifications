@@ -12,12 +12,16 @@ sysconfdir ?= /etc
 
 all: pkg = github.com/icinga/icinga-notifications/internal
 all:
-	mkdir -p build
+	mkdir -p build/channels
 	go build \
 		-o build/ \
+		-trimpath \
 		-ldflags "-X '$(pkg).LibExecDir=$(libexecdir)' -X '$(pkg).SysConfDir=$(sysconfdir)'" \
 		./cmd/icinga-notifications
-	go build -o build/channels/ ./cmd/channels/...
+	go build \
+		-o build/channels \
+		-trimpath \
+		$$(go list ./cmd/channels/... | grep -v '/sleep$$')
 
 test:
 	go test ./...
