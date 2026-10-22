@@ -228,6 +228,19 @@ ICINGA_NOTIFICATIONS_LOGGING_OPTIONS=database:error,listener:debug
 | retention       | Data retention and cleanup.                                               |
 | runtime-updates | Configuration changes through Icinga Notifications Web from the database. |
 
+## Command Line Flags
+
+Icinga Notifications supports the following command line flags.
+
+| Flag                     | Description                                                                                                                                   |
+|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| `-c`, `--config`         | Path to the configuration file.                                                                                                               |
+| `-h`, `--help`           | Print a help message listing all flags and exit.                                                                                              |
+| `--version`              | Print version information and exit.                                                                                                           |
+| `--database-auto-import` | Import the database schema on startup if none exists. Has no effect if a schema already exists.                                               |
+| `--database-schema-dir`  | Directory with `mysql/schema.sql` and `pgsql/schema.sql` for `--database-auto-import`. Defaults to `/usr/share/icinga-notifications/schema/`. |
+| `--database-schema-only` | Exit after checking or importing the database schema, without starting the daemon.                                                            |
+
 ## Appendix
 
 ### Duration String

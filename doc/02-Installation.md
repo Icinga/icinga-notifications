@@ -22,8 +22,9 @@ or install [from source](02-Installation.md.d/From-Source.md).
 ## Setting up the Database
 
 A MySQL (≥8.0), MariaDB (≥10.5.0), or PostgreSQL (≥9.6) database is required to run Icinga Notifications.
-Please follow the steps listed for your target database,
-which guide you through setting up the database and user and importing the schema.
+Please follow the steps listed for your target database, which guide you through setting up the database and user.
+The schema can either be imported manually as described below or
+[automatically by Icinga Notifications](#importing-the-database-schema).
 
 ### Setting up a MySQL or MariaDB Database
 
@@ -37,7 +38,8 @@ CREATE USER 'notifications'@'localhost' IDENTIFIED BY 'CHANGEME';
 GRANT ALL ON notifications.* TO 'notifications'@'localhost';
 ```
 
-After creating the database, import the Icinga Notifications schema using the following command:
+After creating the database, import the Icinga Notifications schema using the following command,
+or skip this step to let Icinga Notifications [import the schema](#importing-the-database-schema) itself:
 
 ```
 mysql -u root -p notifications < /usr/share/icinga-notifications/schema/mysql/schema.sql
@@ -67,7 +69,8 @@ host  all notifications      ::/0 md5
 
 To apply these changes, run `systemctl reload postgresql`.
 
-After creating the database, import the Icinga Notifications schema using the following command:
+After creating the database, import the Icinga Notifications schema using the following command,
+or skip this step to let Icinga Notifications [import the schema](#importing-the-database-schema) itself:
 
 ```
 psql -v ON_ERROR_STOP=1 -U notifications notifications < /usr/share/icinga-notifications/schema/pgsql/schema.sql
@@ -80,6 +83,29 @@ pre-populating most of the settings for a local setup. Before running Icinga Not
 adjust the database credentials and the Icinga Web 2 URL.
 The configuration file explains general settings.
 All available settings can be found under [Configuration](03-Configuration.md).
+
+## Importing the Database Schema
+
+If you have not imported the schema manually while setting up the database, Icinga Notifications can import it
+for you. After configuring the database connection, run the following command once. It imports the schema
+and exits without starting the daemon:
+
+```
+icinga-notifications --database-auto-import --database-schema-only
+```
+
+If the database already contains the schema, the command only verifies its version, so it is safe to run it
+either way.
+
+The schema is imported with the database user from the configuration. On PostgreSQL, this user then owns all
+tables, which later [schema upgrades](04-Upgrading.md#database-schema-upgrades) require. The `citext` extension
+must still be created as described in [Setting up a PostgreSQL Database](#setting-up-a-postgresql-database),
+as creating it may require superuser privileges.
+
+!!! info
+
+    `--database-auto-import` only imports the initial schema into an empty database.
+    Schema upgrades must still be applied as described in [Upgrading](04-Upgrading.md).
 
 ## Running Icinga Notifications
 

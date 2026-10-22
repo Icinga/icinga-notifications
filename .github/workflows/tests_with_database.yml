@@ -64,11 +64,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Importing Schema
-        run: >
-          mysql -h$ICINGA_NOTIFICATIONS_DATABASE_HOST -u$ICINGA_NOTIFICATIONS_DATABASE_USER -p$ICINGA_NOTIFICATIONS_DATABASE_PASSWORD
-          $ICINGA_NOTIFICATIONS_DATABASE_DATABASE < ${{ github.workspace }}/schema/mysql/schema.sql
-
       - name: Download dependencies
         run: go get -v -t -d ./...
 
@@ -76,6 +71,13 @@ jobs:
         run: |
           mkdir -p ${{ github.workspace }}/channels
           go build -o ${{ github.workspace }}/channels './cmd/channels/...'
+
+      - name: Build Icinga Notifications
+        run: go build -o ${{ github.workspace }}/icinga-notifications ./cmd/icinga-notifications
+
+        # Use Icinga Notifications binary to import the schema, as it handles both MySQL and PostgreSQL.
+      - name: Importing Schema
+        run: ${{ github.workspace }}/icinga-notifications --database-auto-import --database-schema-only --database-schema-dir schema
 
       - name: Run tests
         timeout-minutes: 10
@@ -119,12 +121,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Importing Schema
-        env:
-          PGPASSWORD: ${{ env.ICINGA_NOTIFICATIONS_DATABASE_PASSWORD }}
-        run: |
-          psql -v ON_ERROR_STOP=1 -U postgres -w -h$ICINGA_NOTIFICATIONS_DATABASE_HOST -d $ICINGA_NOTIFICATIONS_DATABASE_DATABASE < ${{ github.workspace }}/schema/pgsql/schema.sql
-
       - name: Download dependencies
         run: go get -v -t -d ./...
 
@@ -132,6 +128,13 @@ jobs:
         run: |
           mkdir -p ${{ github.workspace }}/channels
           go build -o ${{ github.workspace }}/channels './cmd/channels/...'
+
+      - name: Build Icinga Notifications
+        run: go build -o ${{ github.workspace }}/icinga-notifications ./cmd/icinga-notifications
+
+        # Use Icinga Notifications binary to import the schema, as it handles both MySQL and PostgreSQL.
+      - name: Importing Schema
+        run: ${{ github.workspace }}/icinga-notifications --database-auto-import --database-schema-only --database-schema-dir schema
 
       - name: Run tests
         timeout-minutes: 10
