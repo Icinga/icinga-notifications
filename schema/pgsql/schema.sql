@@ -550,6 +550,7 @@ CREATE TABLE notification_history (
     channel_id bigint NOT NULL,
     incident_id bigint,
     event_message text NOT NULL,
+    event_summary text NOT NULL,
     state notification_history_state_type NOT NULL,
     triggered_at bigint NOT NULL,
     incident_closed boolenum NOT NULL DEFAULT 'n', -- Indicates whether the incident was closed at the time of the notification.
@@ -624,4 +625,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 );
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-28', EXTRACT(EPOCH from NOW()) * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-29', EXTRACT(EPOCH from NOW()) * 1000);

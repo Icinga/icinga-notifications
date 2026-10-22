@@ -22,6 +22,7 @@ type NotificationHistory struct {
 	ChannelID      int64             `db:"channel_id"`
 	IncidentID     types.Int         `db:"incident_id"`
 	EventMessage   string            `db:"event_message"`
+	EventSummary   string            `db:"event_summary"`
 	State          NotificationState `db:"state"`
 	TriggeredAt    types.UnixMilli   `db:"triggered_at"`
 	IncidentClosed types.Bool        `db:"incident_closed"`
@@ -58,6 +59,7 @@ func YieldNotificationHistory(
 		s.name AS schedule_name,
 		ch.name AS channel_name,
 		nh.event_message,
+		nh.event_summary,
 		nh.incident_closed,
 		nh.object_id
     FROM notification_history nh

@@ -496,6 +496,7 @@ CREATE TABLE notification_history (
     channel_id bigint NOT NULL,
     incident_id bigint,
     event_message longtext NOT NULL,
+    event_summary longtext NOT NULL,
     state enum('sent', 'failed'),
     triggered_at bigint NOT NULL,
     incident_closed enum('n', 'y') NOT NULL DEFAULT 'n',  -- Indicates whether the incident was closed at the time of the notification.
@@ -565,4 +566,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-28', UNIX_TIMESTAMP() * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v0.2.0-29', UNIX_TIMESTAMP() * 1000);

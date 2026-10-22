@@ -819,8 +819,8 @@ func TestIncidents(t *testing.T) {
 		t.Parallel()
 
 		tags := map[string]string{"notification_history_test": "true"}
-		msg := testutils.MakeRandomString(t)
-		ev := makeEvent(t, source.ID, withIncident(true), withTime(time.Now()), withSeverity(baseEv.SeverityOK), withTags(tags), withMsg(msg))
+		ev := makeEvent(t, source.ID, withIncident(true), withTime(time.Now()), withSeverity(baseEv.SeverityOK), withTags(tags))
+		msg, summary := ev.Message, ev.Summary
 		assert.NotZero(t, ev.ID)
 		i := makeIncident(db, logs, runtimeConfig, t, ev)
 		assert.NotZero(t, i.Id)
@@ -843,6 +843,7 @@ func TestIncidents(t *testing.T) {
 				assert.Equal(t, ch.Name, entry.ChannelName)
 				assert.Equal(t, types.MakeString(contact.FullName), entry.ContactName)
 				assert.Equal(t, msg, entry.EventMessage)
+				assert.Equal(t, summary, entry.EventSummary)
 				assert.False(t, entry.ContactgroupName.Valid, "contactgroup_name must be an empty string, not null, when there's no contactgroup")
 				assert.False(t, entry.ScheduleName.Valid, "schedule_name must be an empty string, not null, when there's no schedule")
 			}
@@ -885,8 +886,8 @@ func TestIncidents(t *testing.T) {
 
 			tags := map[string]string{"generate_notification_test": "without-incident"}
 			relations := map[string]any{"host": map[string]string{"name": "notifications_rule"}}
-			msg := testutils.MakeRandomString(t)
-			ev := makeEvent(t, source.ID, withIncident(false), withEventType("test-type"), withRelations(relations), withTags(tags), withMsg(msg))
+			ev := makeEvent(t, source.ID, withIncident(false), withEventType("test-type"), withRelations(relations), withTags(tags))
+			msg, summary := ev.Message, ev.Summary
 
 			var notifications []*NotificationEntry
 			err := db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
@@ -910,6 +911,7 @@ func TestIncidents(t *testing.T) {
 				assertNotificationEntry(notification, false)
 				assert.False(t, notification.IsIncidentRelated)
 				assert.Equal(t, msg, notification.HistoryEntry.EventMessage)
+				assert.Equal(t, summary, notification.HistoryEntry.EventSummary)
 			}
 		})
 
@@ -1029,6 +1031,7 @@ func makeEventNoValidate(t *testing.T, sourceID int64, opts ...eventOption) *eve
 		ID:       types.MakeUUID(uuid.New()),
 		Name:     testutils.MakeRandomString(t),
 		Summary:  testutils.MakeRandomString(t),
+		Message:  testutils.MakeRandomString(t),
 	}
 	for _, opt := range opts {
 		opt(ev)
