@@ -38,7 +38,7 @@ func main() {
 
 func run() int {
 	unix.Umask(0077) // Ensure Unix sockets are created with 0600 by default, denying group/other access.
-	daemon.ParseFlagsAndConfig()
+	flags := daemon.ParseFlagsAndConfig()
 	conf := daemon.Config()
 
 	logs, err := logging.NewLoggingFromConfig("icinga-notifications", conf.Logging)
@@ -50,22 +50,58 @@ func run() int {
 	defer func() { _ = logger.Sync() }()
 
 	logger.Infof("Starting Icinga Notifications daemon (%s)", internal.Version.Version)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	{
+		// Use a dedicated database connection for the schema check and import, so that any session settings changed
+		// by the schema don't leak into the main database pool. It also holds the schema lock until it is closed.
+		tmpDb, err := database.NewDbFromConfig(&conf.Database, logs.GetChildLogger("database"), database.RetryConnectorCallbacks{})
+		if err != nil {
+			logger.Fatalf("Cannot create database connection from config: %+v", err)
+		}
+		tmpDb.SetMaxOpenConns(1)
+
+		if err := internal.AcquireSchemaLock(ctx, tmpDb); err != nil {
+			logger.Fatalf("%+v", err)
+		}
+
+		switch err := internal.CheckSchema(ctx, tmpDb); {
+		case errors.Is(err, internal.ErrSchemaNotExists):
+			if !flags.DatabaseAutoImport {
+				logger.Fatal("Missing database schema. Please import the schema first or use the --database-auto-import flag to automatically import it.")
+			}
+
+			logger.Info("Missing database schema. Attempting to import the schema...")
+
+			if err := internal.ImportSchema(ctx, tmpDb, flags.DatabaseSchemaDir); err != nil {
+				logger.Fatalf("Cannot import schema: %+v", err)
+			}
+
+			logger.Infof("Successfully imported database schema")
+		case err != nil:
+			logger.Fatalf("%+v", err)
+		}
+
+		// This will close the connection and release the named lock, allowing other processes to acquire it.
+		_ = tmpDb.Close()
+
+		// If the --database-schema-only flag is set, exit successfully after checking/importing the schema.
+		if flags.DBSchemaOnly {
+			return ExitSuccess
+		}
+	}
+
 	db, err := database.NewDbFromConfig(&conf.Database, logs.GetChildLogger("database"), database.RetryConnectorCallbacks{})
 	if err != nil {
 		logger.Fatalf("Cannot create database connection from config: %+v", err)
 	}
 	defer func() { _ = db.Close() }()
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
 	logger.Infof("Connecting to database at '%s'", db.GetAddr())
 	if err := db.PingContext(ctx); err != nil {
 		logger.Fatalf("Cannot connect to the database: %+v", err)
-	}
-
-	if err := internal.CheckSchema(ctx, db); err != nil {
-		logger.Fatalf("%+v", err)
 	}
 
 	channel.UpsertPlugins(ctx, conf.ChannelsDir, logs.GetChildLogger("channel"), db)
