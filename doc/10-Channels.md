@@ -18,7 +18,6 @@ which are then started, configured, and finally used to send notification events
 Icinga Notifications comes with multiple channels out of the box:
 
 * _email_: Email submission via SMTP
-* _rocketchat_: Rocket.Chat
 * _telegram_: Telegram
 * _webhook_: Configurable HTTP/HTTPS queries for your backend
 
