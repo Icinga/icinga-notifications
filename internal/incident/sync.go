@@ -184,6 +184,11 @@ func (i *Incident) generateNotifications(
 	var notifications []*NotificationEntry
 	suppress := i.IsMuted()
 
+	summary := ev.Summary
+	if summary == "" {
+		summary = i.Summary
+	}
+
 	for contact, channelOrigins := range contactChannels {
 		slices.SortStableFunc(channelOrigins, func(a, b rule.ChannelOrigin) int {
 			// Within the same channel, origins that bypass the suppression come first, so that the
@@ -258,7 +263,7 @@ func (i *Incident) generateNotifications(
 					ChannelID:      origin.ChannelID,
 					IncidentID:     types.MakeInt(i.Id, types.TransformZeroIntToNull),
 					EventMessage:   ev.Message,
-					EventSummary:   ev.Summary,
+					EventSummary:   summary,
 					IncidentClosed: types.MakeBool(ev.CloseIncident()),
 				}
 
