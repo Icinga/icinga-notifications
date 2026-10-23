@@ -28,8 +28,9 @@ func (c *ContactRow) TableName() string {
 // Upsert implements the contracts.Upserter interface.
 func (c *ContactRow) Upsert() any {
 	return &struct {
-		Role      recipient.Role  `db:"role"`
-		ChangedAt types.UnixMilli `db:"changed_at"`
+		Role       recipient.Role   `db:"role"`
+		EventTypes types.StringList `db:"event_types"`
+		ChangedAt  types.UnixMilli  `db:"changed_at"`
 	}{}
 }
 
