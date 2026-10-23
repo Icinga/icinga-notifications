@@ -628,6 +628,45 @@ func TestIncidents(t *testing.T) {
 		}
 	})
 
+	t.Run("SubscribeExistingRecipient", func(t *testing.T) {
+		t.Parallel()
+
+		ev := makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityError), withMsg("Something went wrong!"))
+		i := makeIncident(db, logs, runtimeConfig, t, ev)
+
+		roleChanges := func() int64 {
+			var count int64
+			require.NoError(t, db.GetContext(
+				t.Context(), &count,
+				db.Rebind(`SELECT COUNT(*) FROM incident_history WHERE incident_id = ? AND type = 'recipient_role_changed'`),
+				i.Id))
+			return count
+		}
+
+		// The contact is already a plain recipient of the incident due to the triggered escalation.
+		i = reloadIncidentRecursive(t, db, i)
+		key := recipient.ToKey(contact)
+		require.Equal(t, recipient.RoleRecipient, i.Recipients[key].Role)
+		assert.Empty(t, i.Recipients[key].EventTypes.List)
+		before := roleChanges()
+
+		qa := &event.QuickAction{
+			ID:         types.MakeUUID(uuid.New()),
+			Time:       time.Now(),
+			Kind:       event.ActionSubscribe,
+			ContactID:  contact.ID,
+			ObjectTags: ev.Tags,
+			EventTypes: types.MakeStringList([]string{"DowntimeStart"}),
+		}
+
+		// Subscribing an existing recipient promotes them and stores the chosen event types.
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+		i = reloadIncidentRecursive(t, db, i)
+		assert.Equal(t, recipient.RoleSubscriber, i.Recipients[key].Role)
+		assert.Equal(t, qa.EventTypes, i.Recipients[key].EventTypes)
+		assert.Equal(t, before+1, roleChanges())
+	})
+
 	// This test mustn't run in parallel with any other test, as ReevaluateEscalations reevaluates the escalations
 	// of all due incidents, not only of the one created here, and would thus interfere with other tests relying
 	// on time-based escalations being reached at well-defined incident ages.
