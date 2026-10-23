@@ -541,6 +541,11 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 				return fmt.Errorf("cannot unmanage incident where recipient %s is not the manager", r.String())
 			}
 
+			// Subscribing must not implicitly demote a manager, as this would bypass the unmanage notifications.
+			if qa.Kind == event.ActionSubscribe && i.Recipients[recipientKey].Role == recipient.RoleManager {
+				return fmt.Errorf("cannot subscribe recipient %q, as they are the manager of the incident", r)
+			}
+
 			if err := i.addRecipient(ctx, tx, r, recipient.RoleSubscriber, qa.EventTypes); err != nil {
 				return fmt.Errorf("cannot add recipient %q as subscriber: %w", r, err)
 			}
@@ -571,6 +576,12 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			state, exists := i.Recipients[recipientKey]
 			if !exists {
 				return fmt.Errorf("recipient %q is not subscribed to the incident", r)
+			}
+
+			// Unsubscribing must not implicitly remove a manager, as this would leave the incident unmanaged
+			// without any unmanage notifications.
+			if state.Role == recipient.RoleManager {
+				return fmt.Errorf("cannot unsubscribe recipient %q, as they are the manager of the incident", r)
 			}
 
 			query := `DELETE FROM incident_contact WHERE incident_id = :incident_id AND contact_id = :contact_id`
