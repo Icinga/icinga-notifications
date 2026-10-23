@@ -214,6 +214,23 @@ type Flags struct {
 	Version bool `long:"version" description:"print version and exit"`
 	// Config is the path to the config file
 	Config string `short:"c" long:"config" description:"path to config file"`
+
+	// DatabaseAutoImport imports the initial database schema on startup if none exists; mostly for containerized setups.
+	DatabaseAutoImport bool `long:"database-auto-import" description:"import database schema on startup if none exists"`
+
+	// DatabaseSchemaDir is the root directory for schema files to be used when DatabaseAutoImport is requested.
+	//
+	// The directory structure must mimic the git repo's schema dir, containing ./mysql/schema.sql and ./pgsql/schema.sql.
+	DatabaseSchemaDir string `long:"database-schema-dir" description:"directory for --database-auto-import, expects ./{my,pg}sql/schema.sql files" default:"/usr/share/icinga-notifications/schema/"`
+
+	// DBSchemaOnly makes the daemon exit successfully right after it has verified that the database schema exists,
+	// without starting any other components.
+	//
+	// It is only meaningful in combination with the other schema related flags, i.e., --database-auto-import and
+	// optionally --database-schema-dir, to perform a one-shot schema import (e.g., in an init container or CI).
+	//
+	// Without --database-auto-import, it merely checks for the schema and exits with an error if it is missing.
+	DBSchemaOnly bool `long:"database-schema-only" description:"exit after checking/importing the database schema, use with --database-auto-import and --database-schema-dir"`
 }
 
 // GetConfigPath implements [config.Flags].
@@ -248,8 +265,11 @@ func Config() *ConfigFile {
 }
 
 // ParseFlagsAndConfig parses the CLI flags provided to the executable and tries to load the config from the YAML file.
+//
+// On success, it returns a pointer to the parsed [Flags] struct.
+//
 // Prints any error during parsing or config loading to os.Stderr and exits.
-func ParseFlagsAndConfig() {
+func ParseFlagsAndConfig() *Flags {
 	var flags Flags
 	if err := config.ParseFlags(&flags); err != nil {
 		if errors.Is(err, config.ErrInvalidArgument) {
@@ -276,6 +296,8 @@ func ParseFlagsAndConfig() {
 		utils.PrintErrorThenExit(err, ExitFailure)
 	}
 	initConfigOnce.Do(func() { daemonConfig = conf })
+
+	return &flags
 }
 
 // InjectTestConfig allows tests to modify the daemon configuration before it is used.
