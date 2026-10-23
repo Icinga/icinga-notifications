@@ -1,6 +1,6 @@
 # Icinga Notifications | (c) 2023 Icinga GmbH | GPLv2+
 
-FROM docker.io/library/golang AS base
+FROM --platform=$BUILDPLATFORM docker.io/library/golang AS base
 
 WORKDIR /icinga-notifications
 
@@ -10,12 +10,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM base AS build
 
+ARG TARGETOS
+ARG TARGETARCH
+
 # The source code is mounted read-only, so all build artifacts are written to a separate build directory,
 # which is cleaned up once the binaries have been installed into /target.
 RUN --mount=type=bind,source=.,target=.,ro \
 	--mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 make builddir=/icinga-notifications-build all && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH make builddir=/icinga-notifications-build all && \
     make test && \
     make builddir=/icinga-notifications-build DESTDIR=/target install && \
     make builddir=/icinga-notifications-build clean
