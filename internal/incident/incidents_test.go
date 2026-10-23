@@ -577,6 +577,18 @@ func TestIncidents(t *testing.T) {
 				// notification caused by the quick action.
 				assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSent}, notifiedStates(t, db, i, contact, ch.ID))
 
+				// A manager can neither subscribe nor unsubscribe, as this would implicitly demote or remove them
+				// without unmanage notifications.
+				for _, kind := range []event.Action{event.ActionSubscribe, event.ActionUnsubscribe} {
+					qa.Kind = kind
+					require.Error(t, Process(t.Context(), db, logs, runtimeConfig, qa))
+					i = reloadIncidentRecursive(t, db, i)
+					assert.True(t, i.HasManager())
+					assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].Role, recipient.RoleManager)
+					assert.Equal(t, i.Recipients[recipient.ToKey(incidentManager)].EventTypes, qa.EventTypes)
+					assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSent}, notifiedStates(t, db, i, contact, ch.ID))
+				}
+
 				qa.Kind = event.ActionUnmanage
 			} else {
 				assert.False(t, i.HasManager())
