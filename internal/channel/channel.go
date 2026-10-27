@@ -318,7 +318,7 @@ func (c *Channel) Notify(
 		payload, err = json.Marshal(&plugin.PayloadV1{
 			Contact: pc,
 			Object: &plugin.Object{
-				Name:    o.DisplayName(),
+				Name:    o.Name,
 				Url:     ev.URL,
 				Sources: o.Sources,
 				Tags:    o.Tags,

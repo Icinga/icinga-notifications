@@ -3,7 +3,6 @@ package object
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 
 	"github.com/icinga/icinga-go-library/database"
@@ -96,18 +95,6 @@ func SyncFromEvent(ctx context.Context, db *database.DB, tx *sqlx.Tx, ev *event.
 	}
 
 	return o, nil
-}
-
-func (o *Object) DisplayName() string {
-	if o.Name != "" {
-		return o.Name
-	}
-
-	j, err := json.Marshal(o.Tags)
-	if err != nil {
-		panic(err)
-	}
-	return string(j)
 }
 
 // ID generates a stable identifier based on the given ID tags.
