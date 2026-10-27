@@ -124,7 +124,7 @@ func yield(
 				errCh <- fmt.Errorf("cannot load object for incident %s: %w", i, err)
 				return
 			}
-			i.initializeFields(db, rc, logger.With(zap.String("incident", i.String()), zap.String("object", obj.DisplayName())))
+			i.initializeFields(db, rc, logger.With(zap.String("incident", i.String()), zap.String("object", obj.Name)))
 			if restoreAll {
 				if err := i.restoreRelatedState(ctx, db); err != nil {
 					errCh <- fmt.Errorf("cannot restore related state for incident %s: %w", i, err)

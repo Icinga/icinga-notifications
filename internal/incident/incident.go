@@ -191,7 +191,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 		i.logger.Errorw("Cannot sync event object", zap.Error(err))
 		return fmt.Errorf("cannot sync event object: %w", err)
 	}
-	i.logger = i.logger.With(zap.String("object", obj.DisplayName()))
+	i.logger = i.logger.With(zap.String("object", obj.Name))
 
 	triggerNotifications := ev.NotificationOnly()
 	var reason notifyReason
@@ -919,7 +919,7 @@ func (i *Incident) notifyContacts(
 
 	managerName, _ := i.Manager()
 	rctx := &renderCtx{
-		ObjectName:      obj.DisplayName(),
+		ObjectName:      obj.Name,
 		ObjectURL:       cmp.Or(ev.URL, obj.URL.String),
 		Severity:        i.Severity,
 		IncidentMessage: i.Message.String,
