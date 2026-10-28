@@ -36,6 +36,136 @@ These rules apply to the [Process Event](#process-event), [Incidents](#incidents
 transport-independent authentication scheme: the `debug-password` must be supplied via HTTP Basic Authentication next
 to an arbitrary username, regardless of transport.
 
+## Response Format
+
+All responses from the Icinga Notifications HTTP API endpoints are JSON-encoded and follow a consistent structure.
+The only exception to this is the [`/v1/process-event`](#process-event) endpoint, which returns a `204 No Content` status
+code with an empty body in the successful case, see [Responses](#process-event-responses) and a proper HTTP error
+status code in the error case.
+
+The general structure of the response for all other endpoints consists of the following attributes:
+
+| Attribute | Description                                                                   |
+|-----------|-------------------------------------------------------------------------------|
+| status    | A string indicating the overall status of the response object being streamed. |
+| result    | A JSON object containing the result of the request.                           |
+
+The `status` attribute can be a `success` or `error` string, indicating that the response result is either a successful
+or failed response. The `result` attribute contains the actual result and varies depending on the request type and also
+endpoint being used. For detailed information on the structure of the `result` attribute for each endpoint, please
+refer to the respective sections below.
+
+All responses are streamed as a series of JSON objects, one per line, in [JSON Lines/NDJSON](https://jsonlines.org/)
+format. This allows for efficient processing of large datasets without requiring the entire response to be loaded into
+memory at once. Each line in the response represents a single JSON object, and can be read and processed independently.
+As a consequence, the general HTTP status code for those endpoints will always be 202 in the successful case, even if
+the response contains no results at all. If some error occurs mid-stream after Icinga Notifications has already started
+streaming the response, it will send a final JSON object with the `status` attribute set to `error` and the `result`
+attribute containing a JSON object that describes the error.
+
+## API Filtering
+
+Some of the Icinga Notifications API endpoints require to explicitly specify which objects the request should be
+filtered for. For instance, the `/v1/incidents` endpoint requires a `filter` query parameter to specify which incidents
+it should either retrieve or modify. The `filter` query parameter is a JSON-encoded object that describes the
+filtering criteria. The filter syntax and semantics are as follows:
+
+The `filter` parameter can either be a [JSON object](#json-object-filter) or a [JSON array](#json-array-filter) of objects.
+The filter is evaluated against the object tags of the incidents, and only incidents that satisfy the specified criteria
+are eligible for modification or retrieval. Please refer to the [JSON Object Filter](#json-object-filter) and
+[JSON Array Filter](#json-array-filter) sections for more details on how they work.
+
+### JSON Object Filter
+
+Each object represents a set of filtering criteria that must be satisfied for an incident to be modified or included in
+the response. All the key value pairs in the object are combined with a logical **AND**, meaning that all the specified
+criteria must be met. In other words, for each key value pair in the JSON object filter, the incident's object tags must
+contain the key and have the corresponding value for the filter to be satisfied.
+
+For instance, given the following filter:
+
+```json
+{
+  "host": "mailserver",
+  "service": "filesystem"
+}
+```
+
+The endpoint will return or modify only incidents that have the `host` tag set to `mailserver` **and** the `service`
+tag set to `filesystem`. If either of the tags is missing or has a different value, the filter is not satisfied, and
+the incident will not be included in the response. To express a **NOT EXISTS** condition, please use the `null` JSON
+value. For example, given the following filter:
+
+```json
+{
+  "host": "mailserver",
+  "service": null
+}
+```
+
+This filter will match incidents that have the `host` object ID tag set to `mailserver` and do **not** have a `service`
+object ID tag at all. In other words, the `service` tag must not exist in the incident's object tags for the filter to
+be satisfied when all other key value pairs in the filter are satisfied.
+
+!!! important
+
+    The **NOT EXISTS** condition can only be used in conjunction with other key value pairs in the filter. It cannot
+    be used on its own, as this would result in an ambiguous filter that could potentially match all objects based
+    on the absence of a single tag without any other postive criteria to narrow down the selection, posing a risk of
+    unintended modifications or retrievals.
+
+### JSON Array Filter
+
+JSON array of [objects](#json-object-filter) can be used to express logical **OR** conditions. Each object in the
+array represents a separate set of filtering criteria, and an incident is considered to match the filter if it
+satisfies at least one of the objects in the array.
+
+!!! info
+
+    If the empty array `[]` is used as a filter, it will not match any incidents, and the endpoint will always return
+    an empty list. In other words, the endpoint always requires at least one object in the array to match any incidents.
+
+For example, given the following filter:
+
+```json
+[
+  {
+    "host": "mailserver",
+    "service": "filesystem"
+  },
+  {
+    "host": "database",
+    "service": null
+  }
+]
+```
+
+This filter will match incidents that either have the `host` tag set to `mailserver` **and** the `service` tag set to
+`filesystem`, **or** have the `host` tag set to `database` and do **not** have a `service` tag at all. In other words,
+the filter will match incidents that satisfy either of the two sets of criteria, allowing for more complex filtering
+scenarios. These filtering capabilities enable to precisely target the incidents one want to retrieve or modify based
+on their object tags, providing flexibility and control over the incident management process. However, the filter
+syntax does not support more complex logical expressions, such as nested conditions or combinations of `AND` and `OR`
+within a single object. Any attempt to use such expressions will result in a `400 Bad Request` response, indicating
+that the filter is invalid.
+
+When constructing filters, it is important to ensure that the filter is properly URL-encoded when included in the query
+string of the HTTP request. This is necessary because certain characters in the JSON representation of the filter, such
+as curly braces, quotes, and commas, have special meanings in URLs and must be encoded to avoid ambiguity. For example,
+the filter `{"host":"mailserver","service":"filesystem"}` should be URL-encoded as
+`%7B%22host%22%3A%22mailserver%22%2C%22service%22%3A%22filesystem%22%7D` when included in the query string.
+
+## Available Endpoints
+
+The following table lists the available HTTP API endpoints and links to their respective sections.
+
+| Endpoint                                            | Method | Description                                                      |
+|-----------------------------------------------------|--------|------------------------------------------------------------------|
+| [`/v1/process-event`](#process-event)               | `POST` | Submit events from a source.                                     |
+| [`/v1/incidents`](#incidents)                       | `GET`  | [Retrieve](#getting-incidents) open incidents matching a filter. |
+| [`/v1/incidents`](#incidents)                       | `POST` | [Modify](#modifying-incidents) open incidents matching a filter. |
+| [`/v1/notification-history`](#notification-history) | `GET`  | Retrieve the notification history of matching objects.           |
+
 ## Process Event
 
 Events can be submitted to Icinga Notifications using the `/v1/process-event` HTTP API endpoint.
@@ -313,33 +443,6 @@ curl -u 'icingadb:insecureinsecure' -d '@-' 'http://localhost:5680/v1/process-ev
 EOF
 ```
 
-## Response Format
-
-All responses from the Icinga Notifications HTTP API endpoints are JSON-encoded and follow a consistent structure.
-The only exception to this is the [`/v1/process-event`](#process-event) endpoint, which returns a `204 No Content` status
-code with an empty body in the successful case, see [Responses](#process-event-responses) and a proper HTTP error
-status code in the error case.
-
-The general structure of the response for all other endpoints consists of the following attributes:
-
-| Attribute | Description                                                                   |
-|-----------|-------------------------------------------------------------------------------|
-| status    | A string indicating the overall status of the response object being streamed. |
-| result    | A JSON object containing the result of the request.                           |
-
-The `status` attribute can be a `success` or `error` string, indicating that the response result is either a successful
-or failed response. The `result` attribute contains the actual result and varies depending on the request type and also
-endpoint being used. For detailed information on the structure of the `result` attribute for each endpoint, please
-refer to the respective sections below.
-
-All responses are streamed as a series of JSON objects, one per line, in [JSON Lines/NDJSON](https://jsonlines.org/)
-format. This allows for efficient processing of large datasets without requiring the entire response to be loaded into
-memory at once. Each line in the response represents a single JSON object, and can be read and processed independently.
-As a consequence, the general HTTP status code for those endpoints will always be 202 in the successful case, even if
-the response contains no results at all. If some error occurs mid-stream after Icinga Notifications has already started
-streaming the response, it will send a final JSON object with the `status` attribute set to `error` and the `result`
-attribute containing a JSON object that describes the error.
-
 ## Incidents
 
 The `/v1/incidents` Icinga Notifications HTTP API endpoint allows sources to query and modify a list of open incidents.
@@ -487,98 +590,6 @@ $ curl -u 'example:insecureinsecure' 'http://localhost:5680/v1/notification-hist
 {"status":"success","result":{"event_id":"b56665fc-70f1-48b9-a19c-b15beeb0152e","triggered_at":1788518901863,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"PING OK - Packet loss = 0%, RTA = 0.09 ms","event_summary":"PING OK - Packet loss = 0%, RTA = 0.09 ms","incident_closed":false}}
 {"status":"success","result":{"event_id":"48bb1a43-4066-4b69-a14f-7d3d1fd76927","triggered_at":1788518901865,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"LOAD OK - total load average: 1.93, 0.98, 0.66","event_summary":"LOAD OK - total load average: 1.93, 0.98, 0.66","incident_closed":false}}
 ```
-
-## API Filtering
-
-Some of the Icinga Notifications API endpoints require to explicitly specify which objects the request should be
-filtered for. For instance, the `/v1/incidents` endpoint requires a `filter` query parameter to specify which incidents
-it should either retrieve or modify. The `filter` query parameter is a JSON-encoded object that describes the
-filtering criteria. The filter syntax and semantics are as follows:
-
-The `filter` parameter can either be a [JSON object](#json-object-filter) or a [JSON array](#json-array-filter) of objects.
-The filter is evaluated against the object tags of the incidents, and only incidents that satisfy the specified criteria
-are eligible for modification or retrieval. Please refer to the [JSON Object Filter](#json-object-filter) and
-[JSON Array Filter](#json-array-filter) sections for more details on how they work.
-
-### JSON Object Filter
-
-Each object represents a set of filtering criteria that must be satisfied for an incident to be modified or included in
-the response. All the key value pairs in the object are combined with a logical **AND**, meaning that all the specified
-criteria must be met. In other words, for each key value pair in the JSON object filter, the incident's object tags must
-contain the key and have the corresponding value for the filter to be satisfied.
-
-For instance, given the following filter:
-
-```json
-{
-  "host": "mailserver",
-  "service": "filesystem"
-}
-```
-
-The endpoint will return or modify only incidents that have the `host` tag set to `mailserver` **and** the `service`
-tag set to `filesystem`. If either of the tags is missing or has a different value, the filter is not satisfied, and
-the incident will not be included in the response. To express a **NOT EXISTS** condition, please use the `null` JSON
-value. For example, given the following filter:
-
-```json
-{
-  "host": "mailserver",
-  "service": null
-}
-```
-
-This filter will match incidents that have the `host` object ID tag set to `mailserver` and do **not** have a `service`
-object ID tag at all. In other words, the `service` tag must not exist in the incident's object tags for the filter to
-be satisfied when all other key value pairs in the filter are satisfied.
-
-!!! important
-
-    The **NOT EXISTS** condition can only be used in conjunction with other key value pairs in the filter. It cannot
-    be used on its own, as this would result in an ambiguous filter that could potentially match all objects based
-    on the absence of a single tag without any other postive criteria to narrow down the selection, posing a risk of
-    unintended modifications or retrievals.
-
-### JSON Array Filter
-
-JSON array of [objects](#json-object-filter) can be used to express logical **OR** conditions. Each object in the
-array represents a separate set of filtering criteria, and an incident is considered to match the filter if it
-satisfies at least one of the objects in the array.
-
-!!! info
-
-    If the empty array `[]` is used as a filter, it will not match any incidents, and the endpoint will always return
-    an empty list. In other words, the endpoint always requires at least one object in the array to match any incidents.
-
-For example, given the following filter:
-
-```json
-[
-  {
-    "host": "mailserver",
-    "service": "filesystem"
-  },
-  {
-    "host": "database",
-    "service": null
-  }
-]
-```
-
-This filter will match incidents that either have the `host` tag set to `mailserver` **and** the `service` tag set to
-`filesystem`, **or** have the `host` tag set to `database` and do **not** have a `service` tag at all. In other words,
-the filter will match incidents that satisfy either of the two sets of criteria, allowing for more complex filtering
-scenarios. These filtering capabilities enable to precisely target the incidents one want to retrieve or modify based
-on their object tags, providing flexibility and control over the incident management process. However, the filter
-syntax does not support more complex logical expressions, such as nested conditions or combinations of `AND` and `OR`
-within a single object. Any attempt to use such expressions will result in a `400 Bad Request` response, indicating 
-that the filter is invalid.
-
-When constructing filters, it is important to ensure that the filter is properly URL-encoded when included in the query
-string of the HTTP request. This is necessary because certain characters in the JSON representation of the filter, such
-as curly braces, quotes, and commas, have special meanings in URLs and must be encoded to avoid ambiguity. For example,
-the filter `{"host":"mailserver","service":"filesystem"}` should be URL-encoded as
-`%7B%22host%22%3A%22mailserver%22%2C%22service%22%3A%22filesystem%22%7D` when included in the query string.
 
 ## Debugging Endpoints
 
