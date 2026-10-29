@@ -334,7 +334,7 @@ unprocessable later on are dropped and only logged.
 An example request to submit a state change, which opens an incident or updates the open one, looks like this:
 
 ```
-curl -v -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomplete: true' -d '@-' 'http://localhost:5680/v1/process-event' <<'EOF'
+$ curl -u 'icingadb:insecureinsecure' -H 'X-Icinga-Reject-If-Relations-Incomplete: true' -d '@-' 'http://localhost:5680/v1/process-event' <<'EOF'
 {
   "id": "6f1b3c0e-5a0e-4a53-9b8e-2f2d1c6d7a11",
   "incident": true,
@@ -401,7 +401,7 @@ the optional fields.
 A recovery closes the incident again:
 
 ```
-curl -u 'icingadb:insecureinsecure' -d '@-' 'http://localhost:5680/v1/process-event' <<EOF
+$ curl -u 'icingadb:insecureinsecure' -d '@-' 'http://localhost:5680/v1/process-event' <<EOF
 {
   "incident": true,
   "name": "example-809: disk /",
@@ -417,7 +417,7 @@ A notification-only event, here for the start of a downtime, notifies the recipi
 without touching the incident:
 
 ```
-curl -u 'icingadb:insecureinsecure' -d '@-' 'http://localhost:5680/v1/process-event' <<EOF
+$ curl -u 'icingadb:insecureinsecure' -d '@-' 'http://localhost:5680/v1/process-event' <<EOF
 {
   "incident": false,
   "name": "example-809: disk /",
@@ -432,7 +432,7 @@ EOF
 A mute change mutes the open incident. Sending `"muted": false` with a `muted_reason` unmutes it again:
 
 ```
-curl -u 'icingadb:insecureinsecure' -d '@-' 'http://localhost:5680/v1/process-event' <<EOF
+$ curl -u 'icingadb:insecureinsecure' -d '@-' 'http://localhost:5680/v1/process-event' <<EOF
 {
   "name": "example-809: disk /",
   "muted": true,
@@ -476,7 +476,7 @@ specific Icinga DB environment. The following example shows how to retrieve all 
 `08434a503ec43bb67cd380c5d0b6217a1ebf924b` environment:
 
 ```
-$ curl -u 'example:insecureinsecure' 'http://localhost:5680/v1/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b"}'
+$ curl -u 'example:insecureinsecure' --url-query 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b"}' 'http://localhost:5680/v1/incidents'
 ...
 {"status":"success","result":{"is_muted":false,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"},"severity":"critical"}}
 {"status":"success","result":{"is_muted":true,"object_tags":{"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"},"severity":"error"}}
@@ -515,7 +515,7 @@ The following example shows how to close the incident for the `mailserver` host 
 `08434a503ec43bb67cd380c5d0b6217a1ebf924b` environment:
 
 ```
-$ curl -u 'example:insecureinsecure' -X POST 'http://localhost:5680/v1/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"}' -d '@-' <<EOF
+$ curl -u 'example:insecureinsecure' --url-query 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"mailserver","service":"filesystem"}' -d '@-' 'http://localhost:5680/v1/incidents' <<EOF
 {
   "close": true
 }
@@ -527,7 +527,7 @@ attribute set to the new message. For instance, the following example shows how 
 for the `database` host and `load` service in the `08434a503ec43bb67cd380c5d0b6217a1ebf924b` environment:
 
 ```
-$ curl -u 'example:insecureinsecure' -X POST 'http://localhost:5680/v1/incidents' -G --data-urlencode 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"}' -d '@-' <<EOF
+$ curl -u 'example:insecureinsecure' --url-query 'filter={"environment":"08434a503ec43bb67cd380c5d0b6217a1ebf924b","host":"database","service":"load"}' -d '@-' 'http://localhost:5680/v1/incidents' <<EOF
 {
   "message": "The load on the database server has returned to normal."
 }
@@ -585,7 +585,7 @@ The following example shows how to retrieve all notification history entries rec
 2026-01-01T00:00:00Z (`1767225600000`):
 
 ```
-$ curl -u 'example:insecureinsecure' 'http://localhost:5680/v1/notification-history?since=1767225600000' -G --data-urlencode 'filter={"host":"test-host"}'
+$ curl -u 'example:insecureinsecure' 'http://localhost:5680/v1/notification-history?since=1767225600000' --url-query 'filter={"host":"test-host"}'
 ...
 {"status":"success","result":{"event_id":"b56665fc-70f1-48b9-a19c-b15beeb0152e","triggered_at":1788518901863,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"PING OK - Packet loss = 0%, RTA = 0.09 ms","event_summary":"PING OK - Packet loss = 0%, RTA = 0.09 ms","incident_closed":false}}
 {"status":"success","result":{"event_id":"48bb1a43-4066-4b69-a14f-7d3d1fd76927","triggered_at":1788518901865,"contact_name":"Jane Doe","contactgroup_name":null,"schedule_name":"On-Call","channel_name":"email","event_message":"LOAD OK - total load average: 1.93, 0.98, 0.66","event_summary":"LOAD OK - total load average: 1.93, 0.98, 0.66","incident_closed":false}}
@@ -604,7 +604,7 @@ Unix socket does not bypass this check.
 The database-stored configuration from Icinga Notifications current viewpoint can be dumped as JSON.
 
 ```
-curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-config'
+$ curl -u ':debug-password' 'http://localhost:5680/debug/dump-config'
 ```
 
 ### Dump Incidents
@@ -612,7 +612,7 @@ curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-config'
 The current incidents can be dumped as JSON.
 
 ```
-curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-incidents'
+$ curl -u ':debug-password' 'http://localhost:5680/debug/dump-incidents'
 ```
 
 
@@ -621,7 +621,7 @@ curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-incidents'
 The current rules can be dumped as JSON.
 
 ```
-curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-rules'
+$ curl -u ':debug-password' 'http://localhost:5680/debug/dump-rules'
 ```
 
 ### Dump Schedules
@@ -629,5 +629,5 @@ curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-rules'
 All schedules with their assignee can be dumped in a human-readable form.
 
 ```
-curl -v -u ':debug-password' 'http://localhost:5680/debug/dump-schedules'
+$ curl -u ':debug-password' 'http://localhost:5680/debug/dump-schedules'
 ```
