@@ -184,6 +184,12 @@ $$;
 SELECT upgrade_escalation_condition_to_json_object();
 DROP FUNCTION upgrade_escalation_condition_to_json_object();
 
+-- The web UI does not allow the escalation at position 0 to have a condition. Hence, all existing
+-- escalations are moved up by one position so that none of them occupies position 0. Since the unique constraint
+-- on (rule_id, position) is checked for each row immediately, the positions are negated first to avoid conflicts.
+UPDATE rule_escalation SET position = -(position + 1) WHERE position IS NOT NULL;
+UPDATE rule_escalation SET position = -position WHERE position IS NOT NULL;
+
 CREATE TYPE rule_type AS ENUM ('notification', 'escalation');
 ALTER TABLE rule ADD COLUMN type rule_type NOT NULL DEFAULT 'escalation';
 ALTER TABLE rule ALTER COLUMN type DROP DEFAULT;

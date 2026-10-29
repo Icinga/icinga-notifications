@@ -231,6 +231,11 @@ DELIMITER ;
 CALL upgrade_escalation_condition_to_json_object();
 DROP PROCEDURE upgrade_escalation_condition_to_json_object;
 
+-- The web UI does not allow the escalation at position 0 to have a condition. Hence, all existing
+-- escalations are moved up by one position so that none of them occupies position 0. Since the unique constraint
+-- on (rule_id, position) is checked for each row immediately, the rows are updated in descending order of position.
+UPDATE rule_escalation SET position = position + 1 WHERE position IS NOT NULL ORDER BY position DESC;
+
 ALTER TABLE rule ADD COLUMN type enum('notification', 'escalation') AFTER source_type; -- NOT NULL is enforced via CHECK not to default to 'notification'
 UPDATE rule SET type = 'escalation' WHERE type IS NULL;
 ALTER TABLE rule ADD CONSTRAINT ck_rule_type_notnull CHECK (type IS NOT NULL);
