@@ -61,60 +61,132 @@ Afterwards, restart Icinga Notifications.
 systemctl start icinga-notifications
 ```
 
-## Upgrading to Icinga Notifications v1.0
+## Upgrading to Icinga Notifications v1.0.0
 
-This Icinga Notifications release is the first stable release of this project. It includes a database schema upgrade,
-which is required to be applied before starting the new version. Please follow the steps in the previous section to
-apply the schema upgrade. Apart from the schema upgrade, there are also some configuration changes, which are described
-in the [configuration changes section](#configuration-changes) below.
+This Icinga Notifications release is the first stable release.
+Since the 0.2.0 preview, event rules are evaluated by Icinga Notifications again, the HTTP API is versioned,
+and the configuration was restructured.
+Thus, some manual changes are necessary, as described below.
+
+### Requirements
+
+Version 1.0.0 of Icinga Notifications is released alongside
+- Icinga Notifications Web 1.0.0,
+- Icinga DB 1.6.0,
+- Icinga DB Web 1.5.0, and
+- Icinga 2 2.16.6.
+
+If you are using Icinga DB as an Icinga Notifications source, start with upgrading Icinga DB and following its
+[upgrading documentation](https://icinga.com/docs/icinga-db/latest/doc/04-Upgrading/#upgrading-to-icinga-db-v160).
+Same goes for Icinga DB Web and its
+[upgrading documentation](https://icinga.com/docs/icinga-db-web/latest/doc/05-Upgrading/#upgrading-to-icinga-db-web-v15).
+
+For MySQL, at least version 8.0 is now required.
+The requirements for MariaDB and PostgreSQL remain unchanged.
+
+Ensure that the new requirements are met before updating Icinga Notifications.
 
 ### Schema
 
-Something about the schema upgrade.
+The upgrade script `1.0.0.sql` must be applied as described in the [schema upgrade section](#database-schema-upgrades).
 
 ### Configuration Changes
 
-Starting with version v1.0, the Icinga Notifications configuration options have been restructured.
-Specifically, the `listen`, `debug-password`, and `debug-password_file` global options have been moved under a new
-`listener` section. If you are upgrading to version v1.0 from an earlier version, you will need to update your existing
-configuration file to reflect this change. Also, the `debug-password`, `debug-password_file`, and `listen` options have
-been renamed to `debug_password`, `debug_password_file`, and `address` respectively. The `channels-dir` global option
-has been renamed to `channels_dir` as well.
+The Icinga Notifications configuration options have been restructured.
+The `listen` and `debug-password` options were moved into the new `listener` section and renamed to `address` and `debug_password`, respectively.
+The `channels-dir` option was renamed to `channels_dir`.
+In addition to `debug_password`, the `debug_password_file` field was introduced.
 
 The `icingaweb2-url` global option has been dropped without replacement and you will have to remove it from your config.
 Icinga Notifications no longer builds any URLs on its own and can therefore no longer complete an event's relative `url`.
 The field itself stays optional, but if an event carries one, `/v1/process-event` now rejects anything but an absolute URL.
-If you are running a source that submits relative URLs, upgrade it to the version that submits absolute ones before
-upgrading Icinga Notifications.
 
-!!! info
-
-    If you're using environment variables to set these options, you will need to update the environment variable names
-    accordingly. For example, `ICINGA_NOTIFICATIONS_LISTEN` should be changed to `ICINGA_NOTIFICATIONS_LISTENER_ADDRESS`.
+If you are using Icinga DB as a source, you have to configure
+Icinga DB's [`notifications.icingaweb2_url`](https://icinga.com/docs/icinga-db/latest/doc/03-Configuration/#notifications-configuration).
 
 Please make sure to update your configuration file accordingly to ensure that Icinga Notifications continues to
 function properly after the upgrade. Below is an example of how to update your configuration file usually located
 at `/etc/icinga-notifications/config.yml`.
 
 ```yaml
-# Before (pre-v1.0)
+# Before (v0.2.0)
 
 listen: "localhost:5680"
 debug-password: "my-debug-password"
-#debug-password_file: "/path/to/debug-password-file"
 
 icingaweb2-url: http://localhost/icingaweb2
 channels-dir: /usr/libexec/icinga-notifications/channels
 
-# After (v1.0 and later), note that icingaweb2-url is gone
+# After (v1.0.0), note that icingaweb2-url is gone
 
 channels_dir: /usr/libexec/icinga-notifications/channels
 
 listener:
   address: "localhost:5680"
   debug_password: "my-debug-password"
-  #debug_password_file: "/path/to/debug-password-file"
+  # debug_password_file: "/path/to/password/file"
 ```
+
+### Channels
+
+The Rocket.Chat channel was removed.
+
+Custom channel plugins must be adapted to the reworked
+[channel plugin protocol](10-Channels.md#technical-channel-description), which now follows JSON-RPC 2.0,
+sends versioned notification requests, and lets Icinga Notifications manage the plugin state.
+
+### Custom Sources
+
+If you are submitting events from another source than Icinga DB,
+adapt it to the [`/v1/process-event`](20-HTTP-API.md#process-event) endpoint.
+Event rules are no longer referenced by the source via `rule_ids` and `rules_version`.
+Instead, the source submits the object's `relations`, which are evaluated against the event rules' object filters.
+Furthermore, `name` and `summary` are now required, the `incident` field decides which event rules are evaluated,
+and a successfully queued event is answered with HTTP 204.
+
+### Icinga Notifications Web
+
+The Icinga Notifications Web module was developed alongside Icinga Notifications.
+This came with a few changes as well, as documented below.
+
+#### Permissions
+
+The `Notifications → Configuration` menu entry no longer exists. `Incidents`, `History`, `Event Rules`, `Schedules`,
+`Contacts` and `Contact Groups` are now separate entries under `Notifications`. Channels, sources and the database
+connection remain available as tabs under `Configuration → Modules → notifications`.
+
+The new permissions `notifications/view/incidents` and `notifications/view/history` control access to incidents and
+the notification history. Existing roles do not have them. Add them to all roles whose users need to keep seeing
+incidents in Icinga Notifications Web.
+
+!!! warning
+
+    Restricting users to certain objects is not supported. Only grant these permissions to users who are allowed to
+    see **all** events and incidents. Regular users should work with incidents in the web integration of the source.
+    See [Access Control](https://icinga.com/docs/icinga-notifications-web/latest/doc/03-Configuration/#access-control).
+
+#### Removed Features
+
+- The `Events` list and the event detail view have been removed. The daemon no longer stores events. Use the incident
+  history and the notification history to analyze its behavior.
+- The channel type Rocket.Chat has been removed. Make sure no contact uses it as default channel and no event rule
+  notifies through it.
+
+#### Event Rules
+
+Event rules are now bound to a **source type** instead of an individual source. A rule applies to all sources of that
+type. Deleting a source only deletes its event rules if it is the last source of its type.
+
+If your event rules still contain filters in the format used before v1.0, they are marked in
+`Notifications → Event Rules` as outdated. Click on the rule to migrate its filter. Review the converted filter and
+save it. This is only possible if the integration of the source supports it.
+
+Event rules can now be of the type _escalation rule_ or _notification rule_. Existing rules are escalation rules.
+
+#### Sources
+
+Source integrations are now able to provide assistance as part of their own configuration UI to set up their own
+source. A source maintained this way is shown as locked and read-only in Icinga Notifications Web.
 
 ## Upgrading to Icinga Notifications v0.2.0
 
