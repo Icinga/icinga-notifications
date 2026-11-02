@@ -490,7 +490,7 @@ JSON objects according to the
 |-------------|--------|-------------------------------------------------------------------------------|
 | type        | String | **Required.** The type of the detail, e.g., `"text"` or `"url"`.              |
 | label       | String | **Required.** Describes the detail, e.g., `"Ticket"`.                         |
-| value       | String | **Required.** The actual value of the detail, e.g., `"#123"`.                 |
+| value       | Any    | **Required.** The actual value of the detail, e.g., `"#123"`.                 |
 | anchor_text | String | **Optional.** The text to display for a clickable link, if `type` is `"url"`. |
 
 In order Icinga Notifications Web to interpret the details correctly, the detail `type` must be provided.
@@ -520,7 +520,7 @@ might return the following details, where the ticket is linked and the queue it 
     {
       "type": "text",
       "label": "Queue",
-      "text": "Operations"
+      "value": "Operations"
     }
   ]
 }
