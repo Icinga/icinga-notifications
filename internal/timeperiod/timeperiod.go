@@ -1,7 +1,6 @@
 package timeperiod
 
 import (
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -74,8 +73,8 @@ type Entry struct {
 	StartTime        types.UnixMilli `db:"start_time"`
 	EndTime          types.UnixMilli `db:"end_time"`
 	Timezone         string          `db:"timezone"`
-	RRule            sql.NullString  `db:"rrule"` // RFC5545 RRULE
-	RotationMemberID sql.NullInt64   `db:"rotation_member_id"`
+	RRule            types.String    `db:"rrule"` // RFC5545 RRULE
+	RotationMemberID types.Int       `db:"rotation_member_id"`
 
 	initialized bool
 	rrule       *rrule.RRule

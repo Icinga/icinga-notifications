@@ -1,7 +1,6 @@
 package timeperiod_test
 
 import (
-	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -26,10 +25,7 @@ func TestEntry(t *testing.T) {
 			StartTime: types.UnixMilli(start),
 			EndTime:   types.UnixMilli(end),
 			Timezone:  berlin,
-			RRule: sql.NullString{
-				String: fmt.Sprintf("FREQ=DAILY;UNTIL=%s", until.UTC().Format(rrule.DateTimeFormat)),
-				Valid:  true,
-			},
+			RRule:     types.MakeString(fmt.Sprintf("FREQ=DAILY;UNTIL=%s", until.UTC().Format(rrule.DateTimeFormat))),
 		}
 
 		require.NoError(t, e.Init())
@@ -86,7 +82,7 @@ func TestEntry(t *testing.T) {
 				StartTime: types.UnixMilli(start),
 				EndTime:   types.UnixMilli(end),
 				Timezone:  berlin,
-				RRule:     sql.NullString{String: "FREQ=DAILY", Valid: true},
+				RRule:     types.MakeString("FREQ=DAILY"),
 			}
 
 			require.NoError(t, e.Init())
@@ -111,7 +107,7 @@ func TestEntry(t *testing.T) {
 			StartTime: types.UnixMilli(start),
 			EndTime:   types.UnixMilli(end),
 			Timezone:  berlin,
-			RRule:     sql.NullString{String: "FREQ=DAILY", Valid: true},
+			RRule:     types.MakeString("FREQ=DAILY"),
 		}
 
 		require.NoError(t, e.Init())
@@ -143,7 +139,7 @@ func TestEntry(t *testing.T) {
 				StartTime: types.UnixMilli(start),
 				EndTime:   types.UnixMilli(end),
 				Timezone:  berlin,
-				RRule:     sql.NullString{String: "FREQ=DAILY", Valid: true},
+				RRule:     types.MakeString("FREQ=DAILY"),
 			}
 			require.NoError(t, e.Init())
 
@@ -173,7 +169,7 @@ func TestTimePeriodTransitions(t *testing.T) {
 				StartTime: types.UnixMilli(start),
 				EndTime:   types.UnixMilli(end),
 				Timezone:  berlin,
-				RRule:     sql.NullString{String: "FREQ=DAILY", Valid: true},
+				RRule:     types.MakeString("FREQ=DAILY"),
 			}},
 		}
 
@@ -196,13 +192,13 @@ func TestTimePeriodTransitions(t *testing.T) {
 					StartTime: types.UnixMilli(start),
 					EndTime:   types.UnixMilli(end),
 					Timezone:  berlin,
-					RRule:     sql.NullString{String: "FREQ=HOURLY;BYHOUR=1,3,5,7,9,11,13,15", Valid: true},
+					RRule:     types.MakeString("FREQ=HOURLY;BYHOUR=1,3,5,7,9,11,13,15"),
 				},
 				{
 					StartTime: types.UnixMilli(berlinTime("2023-03-27 08:00:00")),
 					EndTime:   types.UnixMilli(berlinTime("2023-03-27 08:30:00")),
 					Timezone:  berlin,
-					RRule:     sql.NullString{String: "FREQ=HOURLY;BYHOUR=0,2,4,6,8,10,12,14", Valid: true},
+					RRule:     types.MakeString("FREQ=HOURLY;BYHOUR=0,2,4,6,8,10,12,14"),
 				},
 			},
 		}

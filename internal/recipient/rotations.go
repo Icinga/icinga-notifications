@@ -14,7 +14,7 @@ type rotationResolver struct {
 
 // rotationsWithPriority stores the different versions of the rotations with the same priority within a single schedule.
 type rotationsWithPriority struct {
-	priority int32
+	priority int64
 
 	// sortedByHandoff contains the different version of a specific rotation sorted by their ActualHandoff time.
 	// This allows using binary search to find the active version.
@@ -24,18 +24,18 @@ type rotationsWithPriority struct {
 // update initializes the rotationResolver with the given rotations, resetting any previously existing state.
 func (r *rotationResolver) update(rotations []*Rotation) {
 	// Group sortedByHandoff by priority using a temporary map with the priority as key.
-	prioMap := make(map[int32]*rotationsWithPriority)
+	prioMap := make(map[int64]*rotationsWithPriority)
 	for _, rotation := range rotations {
 		if !rotation.Priority.Valid {
 			continue
 		}
 
-		p := prioMap[rotation.Priority.Int32]
+		p := prioMap[rotation.Priority.Int64]
 		if p == nil {
 			p = &rotationsWithPriority{
-				priority: rotation.Priority.Int32,
+				priority: rotation.Priority.Int64,
 			}
-			prioMap[rotation.Priority.Int32] = p
+			prioMap[rotation.Priority.Int64] = p
 		}
 
 		p.sortedByHandoff = append(p.sortedByHandoff, rotation)

@@ -1,7 +1,6 @@
 package recipient
 
 import (
-	"database/sql"
 	"time"
 
 	"github.com/icinga/icinga-go-library/types"
@@ -39,7 +38,7 @@ type Rotation struct {
 
 	ScheduleID    int64             `db:"schedule_id"`
 	ActualHandoff types.UnixMilli   `db:"actual_handoff"`
-	Priority      sql.NullInt32     `db:"priority"`
+	Priority      types.Int         `db:"priority"`
 	Name          string            `db:"name"`
 	Members       []*RotationMember `db:"-"`
 }
@@ -49,7 +48,7 @@ func (r *Rotation) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 	encoder.AddInt64("id", r.ID)
 	encoder.AddInt64("schedule_id", r.ScheduleID)
 	if r.Priority.Valid {
-		encoder.AddInt32("priority", r.Priority.Int32)
+		encoder.AddInt64("priority", r.Priority.Int64)
 	}
 	encoder.AddString("name", r.Name)
 	return nil
@@ -60,9 +59,9 @@ type RotationMember struct {
 
 	RotationID        int64                       `db:"rotation_id"`
 	Contact           *Contact                    `db:"-"`
-	ContactID         sql.NullInt64               `db:"contact_id"`
+	ContactID         types.Int                   `db:"contact_id"`
 	ContactGroup      *Group                      `db:"-"`
-	ContactGroupID    sql.NullInt64               `db:"contactgroup_id"`
+	ContactGroupID    types.Int                   `db:"contactgroup_id"`
 	TimePeriodEntries map[int64]*timeperiod.Entry `db:"-"`
 }
 
