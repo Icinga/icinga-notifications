@@ -36,7 +36,9 @@ func TestEntry(t *testing.T) {
 
 		t.Run("TimeAtFirstRecurrenceEnd", func(t *testing.T) {
 			assert.True(t, e.Contains(end.Add(-1*time.Second)))
+
 			assert.True(t, e.Contains(end.Add(-1*time.Nanosecond)))
+
 			assert.False(t, e.Contains(end))
 		})
 
