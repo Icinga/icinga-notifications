@@ -76,25 +76,120 @@ func TestEntry(t *testing.T) {
 		})
 
 		t.Run("DST", func(t *testing.T) {
-			start := berlinTime("2023-03-25 01:00:00")
-			end := berlinTime("2023-03-25 02:30:00")
-			e := &timeperiod.Entry{
-				StartTime: types.UnixMilli(start),
-				EndTime:   types.UnixMilli(end),
-				Timezone:  berlin,
-				RRule:     types.MakeString("FREQ=DAILY"),
-			}
+			t.Parallel()
 
-			require.NoError(t, e.Init())
+			t.Run("SpringForward", func(t *testing.T) {
+				t.Parallel()
 
-			assert.True(t, e.Contains(start))
+				// 2023-03-26: 02:00 CET jumps to 03:00 CEST (01:00 UTC). The end is computed as start + duration
+				// (1h30m), so on the transition day the wall-clock end shifts from 02:30 to 03:30 CEST.
+				e := dailyBerlinEntry(t, "2023-03-25 01:00:00", "2023-03-25 02:30:00")
 
-			tz := time.FixedZone("CET", 60*60)
-			tm := time.Date(2023, time.March, 26, 1, 30, 0, 0, tz)
-			assert.True(t, e.Contains(tm))
-			assert.True(t, e.Contains(tm.Add(time.Hour/2)))
+				assert.False(t, e.Contains(mar(25, 23, 59, 59)), "00:59:59 CET, just before transition day start")
+				assert.True(t, e.Contains(mar(26, 0, 0, 0)), "01:00 CET, transition day start")
+				assert.True(t, e.Contains(mar(26, 0, 59, 59)), "01:59:59 CET, last second before the gap")
+				assert.True(t, e.Contains(mar(26, 1, 0, 0)), "03:00 CEST, right after the gap")
+				assert.True(t, e.Contains(mar(26, 1, 29, 59)), "03:29:59 CEST")
+				assert.False(t, e.Contains(mar(26, 1, 30, 0)), "03:30 CEST, exclusive end")
 
-			assert.False(t, e.Contains(tm.Add(time.Hour)))
+				assert.False(t, e.Contains(mar(26, 22, 59, 59)), "00:59:59 CEST, just before next start")
+				assert.True(t, e.Contains(mar(26, 23, 0, 0)), "next day's 01:00 CEST")
+				assert.True(t, e.Contains(mar(27, 0, 29, 59)), "next day's 02:29:59 CEST")
+				assert.False(t, e.Contains(mar(27, 0, 30, 0)), "next day's 02:30 CEST, exclusive end")
+			})
+
+			t.Run("SpringForwardStartInGap", func(t *testing.T) {
+				t.Parallel()
+
+				// 02:30 does not exist on 2023-03-26. Per RFC 5545 section 3.3.10 (as amended by Erratum 4271[^1]),
+				// such instances are handled as specified in section 3.3.5[^2], i.e. interpreted using the UTC
+				// offset before the gap: 02:30 CET == 03:30 CEST. The following day must resume at 02:30 and not
+				// drift to 03:30.
+				//
+				// [^1]: https://www.rfc-editor.org/errata/eid4271
+				// [^2]: https://datatracker.ietf.org/doc/html/rfc5545#section-3.3.5
+				e := dailyBerlinEntry(t, "2023-03-25 02:30:00", "2023-03-25 03:00:00")
+
+				assert.False(t, e.Contains(mar(26, 0, 30, 0)), "01:30 CET, must not be shifted backwards")
+				assert.False(t, e.Contains(mar(26, 1, 29, 59)), "03:29:59 CEST, before shifted start")
+				assert.True(t, e.Contains(mar(26, 1, 30, 0)), "03:30 CEST, shifted start")
+				assert.True(t, e.Contains(mar(26, 1, 59, 59)), "03:59:59 CEST")
+				assert.False(t, e.Contains(mar(26, 2, 0, 0)), "04:00 CEST, exclusive end")
+
+				assert.True(t, e.Contains(mar(27, 0, 30, 0)), "next day's 02:30 CEST, start")
+				assert.False(t, e.Contains(mar(27, 1, 0, 0)), "next day's 03:00 CEST, exclusive end")
+				assert.False(t, e.Contains(mar(27, 1, 30, 0)), "next day's 03:30 CEST, must not drift")
+
+				assert.WithinDuration(t, mar(26, 1, 30, 0), e.NextTransition(mar(25, 12, 0, 0)), 0, "start at 03:30 CEST")
+				assert.WithinDuration(t, mar(26, 2, 0, 0), e.NextTransition(mar(26, 1, 30, 0)), 0, "end at 04:00 CEST")
+				assert.WithinDuration(t, mar(27, 0, 30, 0), e.NextTransition(mar(26, 2, 0, 0)), 0, "next day's 02:30 CEST")
+				assert.WithinDuration(t, mar(27, 1, 0, 0), e.NextTransition(mar(27, 0, 30, 0)), 0, "next day's end at 03:00 CEST")
+			})
+
+			t.Run("FallBack", func(t *testing.T) {
+				t.Parallel()
+
+				// 2023-10-29: 03:00 CEST falls back to 02:00 CET (01:00 UTC), so 02:00-02:59 occurs twice.
+				// The transition day occurrence starts at 00:30 CEST and ends 2h later at the *first* 02:30.
+				e := dailyBerlinEntry(t, "2023-10-28 00:30:00", "2023-10-28 02:30:00")
+
+				assert.False(t, e.Contains(oct(28, 22, 29, 59)), "00:29:59 CEST, just before transition day start")
+				assert.True(t, e.Contains(oct(28, 22, 30, 0)), "00:30 CEST, transition day start")
+				assert.True(t, e.Contains(oct(29, 0, 29, 59)), "first 02:29:59 CEST")
+				assert.False(t, e.Contains(oct(29, 0, 30, 0)), "first 02:30 CEST, exclusive end")
+				assert.False(t, e.Contains(oct(29, 1, 0, 0)), "second 02:00 CET")
+				assert.False(t, e.Contains(oct(29, 1, 29, 59)), "second 02:29:59 CET")
+
+				assert.True(t, e.Contains(oct(29, 23, 30, 0)), "next day's 00:30 CET, start")
+				assert.True(t, e.Contains(oct(30, 1, 29, 59)), "next day's 02:29:59 CET")
+				assert.False(t, e.Contains(oct(30, 1, 30, 0)), "next day's 02:30 CET, exclusive end")
+			})
+
+			t.Run("FallBackSpanningRepeatedHour", func(t *testing.T) {
+				t.Parallel()
+
+				// Configured as 01:30-03:30 (2h). On the transition day the 02:00-03:00 hour repeats,
+				// so the fixed duration ends at 02:30 CET and 02:30-03:30 CET is NOT covered.
+				e := dailyBerlinEntry(t, "2023-10-28 01:30:00", "2023-10-28 03:30:00")
+
+				assert.True(t, e.Contains(oct(28, 23, 30, 0)), "01:30 CEST, start")
+				assert.True(t, e.Contains(oct(29, 0, 30, 0)), "first 02:30 CEST")
+				assert.True(t, e.Contains(oct(29, 1, 29, 59)), "second 02:29:59 CET")
+				assert.False(t, e.Contains(oct(29, 1, 30, 0)), "second 02:30 CET, exclusive end (start + 2h)")
+				assert.False(t, e.Contains(oct(29, 2, 0, 0)), "03:00 CET, beyond exclusive end")
+
+				assert.False(t, e.Contains(oct(30, 0, 29, 59)), "next day's 01:29:59 CET, just before start")
+				assert.True(t, e.Contains(oct(30, 0, 30, 0)), "next day's 01:30 CET, start")
+				assert.True(t, e.Contains(oct(30, 2, 29, 59)), "next day's 03:29:59 CET")
+				assert.False(t, e.Contains(oct(30, 2, 30, 0)), "next day's 03:30 CET, exclusive end")
+			})
+
+			t.Run("FallBackStartInRepeatedHour", func(t *testing.T) {
+				t.Parallel()
+
+				// 02:30 occurs twice on 2023-10-29. RFC 5545 3.3.5[^1] mandates the first (CEST) occurrence.
+				// Note that time.Date() does not guarantee which of the two it returns for ambiguous times,
+				// so the RRULE library has to disambiguate explicitly rather than rely on it.
+				//
+				// [^1]: https://datatracker.ietf.org/doc/html/rfc5545#section-3.3.5 (see FORM #3)
+				e := dailyBerlinEntry(t, "2023-10-28 02:30:00", "2023-10-28 03:00:00")
+
+				assert.False(t, e.Contains(oct(29, 0, 29, 59)), "first 02:29:59 CEST, just before start")
+				assert.True(t, e.Contains(oct(29, 0, 30, 0)), "first 02:30 CEST, should be actual start")
+				assert.True(t, e.Contains(oct(29, 0, 59, 59)), "first 02:59:59 CEST, before exclusive end")
+				assert.False(t, e.Contains(oct(29, 1, 0, 0)), "second 02:00 CET, exclusive end (start + 30m)")
+				assert.False(t, e.Contains(oct(29, 1, 30, 0)), "second 02:30 CET, must not drift")
+
+				// The interval recurs daily from 02:30 to 03:00 Berlin time. From noon the previous day, the next
+				// transition is its start at the first 02:30 (00:30 UTC, CEST). From that start, the next transition
+				// is 30 minutes later at 01:00 UTC, which is 02:00 CET after the clock falls back.
+				assert.WithinDuration(t, oct(29, 0, 30, 0), e.NextTransition(oct(28, 12, 0, 0)), 0, "first 02:30 CEST, should be the next transition")
+				assert.WithinDuration(t, oct(29, 1, 0, 0), e.NextTransition(oct(29, 0, 30, 0)), 0, "second 02:00 CET, is the end of the first transition")
+
+				assert.True(t, e.Contains(oct(30, 1, 30, 0)), "next day's 02:30 CET, actual start")
+				assert.True(t, e.Contains(oct(30, 1, 59, 59)), "next day's 02:59:59 CET")
+				assert.False(t, e.Contains(oct(30, 2, 0, 0)), "next day's 03:00 CET, exclusive end")
+			})
 		})
 	})
 
@@ -132,27 +227,37 @@ func TestEntry(t *testing.T) {
 			assert.Equal(t, berlinTime("2023-04-01 08:00:00"), e.NextTransition(berlinTime("2023-03-31 18:00:00")))
 		})
 
-		t.Run("DST", func(t *testing.T) {
-			start := berlinTime("2023-03-25 01:00:00")
-			end := berlinTime("2023-03-25 02:30:00")
-			e := &timeperiod.Entry{
-				StartTime: types.UnixMilli(start),
-				EndTime:   types.UnixMilli(end),
-				Timezone:  berlin,
-				RRule:     types.MakeString("FREQ=DAILY"),
-			}
-			require.NoError(t, e.Init())
+		t.Run("DSTSpringForward", func(t *testing.T) {
+			t.Parallel()
 
-			assert.Equal(t, end, e.NextTransition(start), "next transition should match the first recurrence end")
+			// 2023-03-26: 02:00 CET jumps to 03:00 CEST (01:00 UTC). The end is computed as start + duration
+			// (1h30m), so on the transition day the wall-clock end shifts from 02:30 to 03:30 CEST and the next
+			// transition should be shifted accordingly.
+			e := dailyBerlinEntry(t, "2023-03-25 01:00:00", "2023-03-25 02:30:00")
 
-			tz := time.FixedZone("CET", 60*60)
-			tm := time.Date(2023, time.March, 26, 1, 30, 0, 0, tz)
-			// 02:30 is skipped on this day, so end is shifted automatically to the next hour.
-			assert.Equal(t, berlinTime("2023-03-26 03:30:00"), e.NextTransition(tm))
-			assert.Equal(t, berlinTime("2023-03-26 03:30:00"), e.NextTransition(tm.Add(time.Hour/2)))
+			assert.WithinDuration(t, berlinTime("2023-03-25 02:30:00"), e.NextTransition(berlinTime("2023-03-25 01:00:00")), 0, "first recurrence end")
+			assert.WithinDuration(t, mar(26, 1, 30, 0), e.NextTransition(mar(26, 0, 30, 0)), 0, "from 01:30 CET, shifted end at 03:30 CEST")
+			assert.WithinDuration(t, mar(26, 1, 30, 0), e.NextTransition(mar(26, 1, 0, 0)), 0, "from 03:00 CEST, shifted end at 03:30 CEST")
+			// At the shifted end (03:30 CEST), the next transition is the start on the following day.
+			assert.WithinDuration(t, mar(26, 23, 0, 0), e.NextTransition(mar(26, 1, 30, 0)), 0, "next day's 01:00 CEST")
+		})
 
-			// valid transition next to "2023-03-26 02:30:00 +1" is the start event on the next day.
-			assert.Equal(t, berlinTime("2023-03-27 01:00:00"), e.NextTransition(tm.Add(time.Hour)))
+		t.Run("DSTFallBack", func(t *testing.T) {
+			t.Parallel()
+
+			// 2023-10-29: 03:00 CEST falls back to 02:00 CET (01:00 UTC), so 02:00-02:59 occurs twice.
+			// The transition day occurrence starts at 00:30 CEST and ends 2h later at the *first* 02:30.
+			//
+			// After the transition day end, the repeated hour must not produce another transition, so the
+			// next one is the start on the following day.
+			e := dailyBerlinEntry(t, "2023-10-28 00:30:00", "2023-10-28 02:30:00")
+
+			assert.WithinDuration(t, oct(28, 22, 30, 0), e.NextTransition(oct(28, 12, 0, 0)), 0, "from 14:00 CEST the day before, transition day start at 00:30 CEST")
+			assert.WithinDuration(t, oct(29, 0, 30, 0), e.NextTransition(oct(28, 22, 30, 0)), 0, "from 00:30 CEST, transition day end at first 02:30 CEST")
+			assert.WithinDuration(t, oct(29, 0, 30, 0), e.NextTransition(oct(29, 0, 29, 59)), 0, "from first 02:29:59 CEST, transition day end at first 02:30 CEST")
+
+			assert.WithinDuration(t, oct(29, 23, 30, 0), e.NextTransition(oct(29, 0, 30, 0)), 0, "from first 02:30 CEST, next day's start at 00:30 CET")
+			assert.WithinDuration(t, oct(29, 23, 30, 0), e.NextTransition(oct(29, 1, 30, 0)), 0, "from second 02:30 CET, next day's start at 00:30 CET")
 		})
 	})
 }
@@ -232,6 +337,29 @@ func TestTimePeriodTransitions(t *testing.T) {
 }
 
 const berlin = "Europe/Berlin"
+
+// dailyBerlinEntry returns an initialized FREQ=DAILY entry in Europe/Berlin with the given first start and end time.
+func dailyBerlinEntry(t *testing.T, start, end string) *timeperiod.Entry {
+	e := &timeperiod.Entry{
+		StartTime: types.UnixMilli(berlinTime(start)),
+		EndTime:   types.UnixMilli(berlinTime(end)),
+		Timezone:  berlin,
+		RRule:     types.MakeString("FREQ=DAILY"),
+	}
+	require.NoError(t, e.Init())
+
+	return e
+}
+
+// mar returns the given time on a day in March 2023 in UTC, i.e. around the Europe/Berlin spring-forward transition.
+func mar(day, hour, minute, second int) time.Time {
+	return time.Date(2023, time.March, day, hour, minute, second, 0, time.UTC)
+}
+
+// oct returns the given time on a day in October 2023 in UTC, i.e. around the Europe/Berlin fall-back transition.
+func oct(day, hour, minute, second int) time.Time {
+	return time.Date(2023, time.October, day, hour, minute, second, 0, time.UTC)
+}
 
 func berlinTime(value string) time.Time {
 	loc, err := time.LoadLocation(berlin)
