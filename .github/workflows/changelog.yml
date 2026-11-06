@@ -1,0 +1,42 @@
+name: Changelog
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - edited # Re-runs the check on description changes
+      # Required checks must report a result for each pushed commit.
+      - synchronize
+      # "labeled"/"unlabeled" on toggling the skip label.
+      - labeled
+      - unlabeled
+
+permissions: { }
+
+jobs:
+  changelog:
+    name: Changelog entry
+    runs-on: ubuntu-latest
+    # Trivial PRs can opt out by adding this label.
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+    steps:
+      - name: Check PR description for a changelog entry
+        env:
+          # Passed via env (not inlined into the script) so a crafted PR description cannot inject shell code.
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Requires a line starting with "Changelog:" followed by something resembling a word. The entry is
+          # collected into CHANGELOG.md at release time by .github/scripts/changelog.py.
+          if grep -q '^Changelog:.*\w' <<<"$PR_BODY"; then
+            exit 0
+          fi
+
+          echo "This PR's description has no changelog entry. Add a line like the following to it:"
+          echo
+          echo "    Changelog: Fix some bug triggered by something"
+          echo
+          echo "Describe the change for users. It's collected into CHANGELOG.md at release time,"
+          echo "together with the PR number, so don't add the number yourself."
+          echo "If this PR isn't relevant for the changelog, label it with 'no-changelog' instead."
+          exit 1
