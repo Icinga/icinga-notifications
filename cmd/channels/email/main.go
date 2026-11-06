@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -104,8 +103,8 @@ func (ch *Email) GetInfo() *plugin.Info {
 				"de_DE": "SMTP Port",
 			},
 			Required: true,
-			Min:      types.Int{NullInt64: sql.NullInt64{Int64: 1, Valid: true}},
-			Max:      types.Int{NullInt64: sql.NullInt64{Int64: 65535, Valid: true}},
+			Min:      types.MakeInt(1),
+			Max:      types.MakeInt(65535),
 		},
 		{
 			Name: "sender_name",

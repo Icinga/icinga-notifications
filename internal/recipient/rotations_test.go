@@ -1,7 +1,6 @@
 package recipient
 
 import (
-	"database/sql"
 	"testing"
 	"time"
 
@@ -42,7 +41,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 		// Weekend rotation starting 2024, alternating between contacts contactWeekend2024a and contactWeekend2024b
 		{
 			ActualHandoff: types.UnixMilli(parse("2024-01-01")),
-			Priority:      sql.NullInt32{Int32: 0, Valid: true},
+			Priority:      types.MakeInt(0),
 			Members: []*RotationMember{
 				{
 					Contact: contactWeekend2024a,
@@ -51,7 +50,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 							StartTime: types.UnixMilli(parse("2024-01-06")), // Saturday
 							EndTime:   types.UnixMilli(parse("2024-01-07")), // Sunday
 							Timezone:  "UTC",
-							RRule:     sql.NullString{String: "FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU", Valid: true},
+							RRule:     types.MakeString("FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU"),
 						},
 					},
 				}, {
@@ -61,7 +60,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 							StartTime: types.UnixMilli(parse("2024-01-13")), // Saturday
 							EndTime:   types.UnixMilli(parse("2024-01-14")), // Sunday
 							Timezone:  "UTC",
-							RRule:     sql.NullString{String: "FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU", Valid: true},
+							RRule:     types.MakeString("FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU"),
 						},
 					},
 				},
@@ -72,7 +71,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 		// alternating between contacts contactWeekend2025a and contactWeekend2025b
 		{
 			ActualHandoff: types.UnixMilli(parse("2025-01-01")),
-			Priority:      sql.NullInt32{Int32: 0, Valid: true},
+			Priority:      types.MakeInt(0),
 			Members: []*RotationMember{
 				{
 					Contact: contactWeekend2025a,
@@ -81,7 +80,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 							StartTime: types.UnixMilli(parse("2025-01-04")), // Saturday
 							EndTime:   types.UnixMilli(parse("2025-01-05")), // Sunday
 							Timezone:  "UTC",
-							RRule:     sql.NullString{String: "FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU", Valid: true},
+							RRule:     types.MakeString("FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU"),
 						},
 					},
 				}, {
@@ -91,7 +90,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 							StartTime: types.UnixMilli(parse("2025-01-11")), // Saturday
 							EndTime:   types.UnixMilli(parse("2025-01-12")), // Sunday
 							Timezone:  "UTC",
-							RRule:     sql.NullString{String: "FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU", Valid: true},
+							RRule:     types.MakeString("FREQ=WEEKLY;INTERVAL=2;BYDAY=SA,SU"),
 						},
 					},
 				},
@@ -102,7 +101,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 		// with an override for 12 to 14 o'clock with contactWeekdayNoon.
 		{
 			ActualHandoff: types.UnixMilli(parse("2024-01-01")),
-			Priority:      sql.NullInt32{Int32: 1, Valid: true},
+			Priority:      types.MakeInt(1),
 			Members: []*RotationMember{
 				{
 					Contact: contactWeekdayNoon,
@@ -111,14 +110,14 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 							StartTime: types.UnixMilli(parse("2024-01-01 12:00:00")), // Monday
 							EndTime:   types.UnixMilli(parse("2024-01-01 14:00:00")), // Monday
 							Timezone:  "UTC",
-							RRule:     sql.NullString{String: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", Valid: true},
+							RRule:     types.MakeString("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"),
 						},
 					},
 				},
 			},
 		}, {
 			ActualHandoff: types.UnixMilli(parse("2024-01-01")),
-			Priority:      sql.NullInt32{Int32: 2, Valid: true},
+			Priority:      types.MakeInt(2),
 			Members: []*RotationMember{
 				{
 					Contact: contactWeekday,
@@ -127,7 +126,7 @@ func Test_rotationResolver_getCurrentRotations(t *testing.T) {
 							StartTime: types.UnixMilli(parse("2024-01-01 08:00:00")), // Monday
 							EndTime:   types.UnixMilli(parse("2024-01-01 20:00:00")), // Monday
 							Timezone:  "UTC",
-							RRule:     sql.NullString{String: "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", Valid: true},
+							RRule:     types.MakeString("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"),
 						},
 					},
 				},
