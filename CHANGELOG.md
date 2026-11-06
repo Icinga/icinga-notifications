@@ -1,5 +1,7 @@
 # Icinga Notifications Changelog
 
+## Upcoming Release
+
 ## 1.0.0 (2026-10-29)
 
 This is the first stable Icinga Notifications release, published alongside [Icinga Notifications Web 1.0.0](https://icinga.com/docs/icinga-notifications-web/latest/).

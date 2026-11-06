@@ -1,0 +1,62 @@
+name: Changelog
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited # Re-runs the check on title changes
+      # "labeled"/"unlabeled" on toggling the skip label.
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changelog:
+    name: Changelog entry
+    runs-on: ubuntu-latest
+    # Trivial PRs can opt out by adding this label.
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+    steps:
+      - name: Check CHANGELOG.md for an entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Passed via env (not inlined into the script) so a crafted PR title cannot inject shell code.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Anchor error annotations to the line right below the "## Upcoming Release" heading
+          # of the PR's CHANGELOG.md, falling back to a file-level annotation if it's missing.
+          location="file=CHANGELOG.md"
+          heading_line="$(gh api -H "Accept: application/vnd.github.raw" \
+            "repos/$REPO/contents/CHANGELOG.md?ref=$HEAD_SHA" 2>/dev/null \
+            | grep -n -m1 '^## Upcoming Release' | cut -d: -f1 || true)"
+          if [ -n "$heading_line" ]; then
+            location="$location,line=$((heading_line + 1))"
+          fi
+
+          added="$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" \
+            --jq '.[] | select(.filename == "CHANGELOG.md") | .patch // ""' \
+            | grep '^+' | grep -v '^+++' || true)"
+
+          if [ -z "$added" ]; then
+            echo "::error ${location}::No lines were added to CHANGELOG.md. Add an entry or label the PR with 'no-changelog'."
+            exit 1
+          fi
+
+          # Require a single added line that contains the PR title verbatim (case-sensitive)
+          # and references the PR number, e.g. "* Fix timeperiod DST handling #604".
+          if grep -F -- "$PR_TITLE" <<<"$added" | grep -qE "#${PR_NUMBER}([^0-9]|\$)"; then
+            echo "Found changelog entry for #${PR_NUMBER}."
+          else
+            echo "::error ${location}::No added line in CHANGELOG.md contains the exact PR title \"${PR_TITLE}\" together with #${PR_NUMBER}."
+            echo "Added lines:"
+            echo "$added"
+            exit 1
+          fi
