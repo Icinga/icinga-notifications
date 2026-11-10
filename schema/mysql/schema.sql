@@ -384,9 +384,9 @@ CREATE TABLE incident (
     CONSTRAINT fk_incident_source FOREIGN KEY (source_id) REFERENCES source(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
+CREATE INDEX idx_incident_recovered_at_severity_started_at ON incident(recovered_at, severity DESC, started_at DESC);
 -- This index is explicitly referenced by name via FORCE INDEX in [Incident.RestoreState] in Icinga Notifications.
--- Without that hint, the optimizer may choose idx_incident_recovered_at for the SELECT ... FOR UPDATE query, locking
+-- Without that hint, the optimizer may use an index on recovered_at for the SELECT ... FOR UPDATE query, locking
 -- the open incidents of all objects and deadlocking with concurrent updates of recovered_at. Do not rename or drop it!
 -- Apparently, MariaDB uses this index to satisfy the foreign key constraint on incident(object_id) as well, so it is
 -- not redundant and can't easily be dropped without dropping the FK constraint first.
@@ -567,4 +567,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0.0-1', UNIX_TIMESTAMP() * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0.0-2', UNIX_TIMESTAMP() * 1000);
