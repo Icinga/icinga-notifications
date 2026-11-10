@@ -6,25 +6,8 @@ on:
   pull_request: {}
 
 permissions:
-  # https://docs.github.com/en/rest/overview/permissions-required-for-github-apps?apiVersion=2022-11-28#repository-permissions-for-contents
   contents: read
 
 jobs:
   go:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v7
-    - uses: actions/setup-go@v7
-      with:
-        go-version: stable
-    - name: Build
-      run: go build ./...
-    - name: Test
-      run: go test -v ./...
-    - name: Vet
-      run: go vet ./...
-    - name: golangci-lint
-      uses: golangci/golangci-lint-action@v9
-      with:
-        version: latest
-        skip-cache: true
+    uses: Icinga/github-actions/.github/workflows/go.yml@main
