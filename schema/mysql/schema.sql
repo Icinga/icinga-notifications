@@ -510,6 +510,7 @@ CREATE TABLE notification_history (
 
 CREATE INDEX idx_notification_history_triggered_at ON notification_history(triggered_at);
 CREATE INDEX idx_notification_history_state_triggered_at ON notification_history(state, triggered_at);
+CREATE INDEX idx_notification_history_incident_id_triggered_at ON notification_history(incident_id, triggered_at DESC);
 
 CREATE TABLE skipped_notification_history (
     id bigint NOT NULL AUTO_INCREMENT,
@@ -566,4 +567,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0.0', UNIX_TIMESTAMP() * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0.0-1', UNIX_TIMESTAMP() * 1000);
