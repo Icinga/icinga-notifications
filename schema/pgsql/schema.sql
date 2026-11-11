@@ -431,6 +431,7 @@ CREATE INDEX idx_incident_recovered_at ON incident(recovered_at);
 CREATE INDEX idx_incident_object_id_recovered_at ON incident(object_id, recovered_at);
 CREATE INDEX idx_incident_next_escalation_check_at ON incident(next_escalation_check_at);
 CREATE INDEX idx_incident_recovered_at_next_escalation_check_at ON incident(recovered_at, next_escalation_check_at);
+CREATE INDEX idx_incident_severity_started_at ON incident(severity DESC, started_at DESC) WHERE recovered_at IS NULL;
 
 CREATE TYPE incident_contact_role AS ENUM ('recipient', 'subscriber', 'manager');
 
@@ -563,6 +564,7 @@ CREATE TABLE notification_history (
 
 CREATE INDEX idx_notification_history_triggered_at ON notification_history(triggered_at);
 CREATE INDEX idx_notification_history_state_triggered_at ON notification_history(state, triggered_at);
+CREATE INDEX idx_notification_history_incident_id_triggered_at ON notification_history(incident_id, triggered_at DESC);
 -- This index is required for the "object" retention query, which becomes quite unusable without it.
 CREATE INDEX idx_notification_history_object_id ON notification_history(object_id);
 
@@ -625,4 +627,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 );
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0.0', EXTRACT(EPOCH from NOW()) * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0.0-2', EXTRACT(EPOCH from NOW()) * 1000);

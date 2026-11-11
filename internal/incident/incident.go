@@ -1190,7 +1190,7 @@ func (i *Incident) collectContactChannels(ev *event.Event, bypassOpt rule.LoadRe
 func (i *Incident) RestoreState(ctx context.Context, tx *sqlx.Tx, restoreAll bool) error {
 	var indexHint string
 	if i.db.DriverName() == database.MySQL {
-		// Force the composite index on MySQL/MariaDB. Otherwise, the optimizer may choose idx_incident_recovered_at,
+		// Force the composite index on MySQL/MariaDB. Otherwise, the optimizer may use an index on recovered_at,
 		// causing this locking read to X-lock the open incidents of all objects and deadlock with concurrent Sync()
 		// calls. See the schema comment on idx_incident_object_id_recovered_at.
 		indexHint = ` FORCE INDEX (idx_incident_object_id_recovered_at)`
