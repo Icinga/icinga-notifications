@@ -13,7 +13,7 @@ const (
 	Opened
 	Muted
 	Unmuted
-	IncidentSeverityChanged
+	SeverityChanged
 	RuleMatched
 	EscalationTriggered
 	RecipientRoleChanged
@@ -25,7 +25,7 @@ var historyTypeByName = map[string]HistoryEventType{
 	"opened":                    Opened,
 	"muted":                     Muted,
 	"unmuted":                   Unmuted,
-	"incident_severity_changed": IncidentSeverityChanged,
+	"incident_severity_changed": SeverityChanged,
 	"rule_matched":              RuleMatched,
 	"escalation_triggered":      EscalationTriggered,
 	"recipient_role_changed":    RecipientRoleChanged,

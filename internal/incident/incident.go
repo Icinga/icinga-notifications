@@ -630,7 +630,7 @@ func (i *Incident) processSeverityChangedEvent(ctx context.Context, tx *sqlx.Tx,
 		hr := &HistoryRow{
 			IncidentID:  i.Id,
 			Time:        types.UnixMilli(ev.Time),
-			Type:        IncidentSeverityChanged,
+			Type:        SeverityChanged,
 			NewSeverity: ev.Severity,
 			OldSeverity: i.Severity,
 			Message:     types.MakeString(ev.Message, types.TransformEmptyStringToNull),
