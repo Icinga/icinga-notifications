@@ -21,6 +21,8 @@ type NotificationHistory struct {
 	ScheduleID     types.Int         `db:"schedule_id"`
 	ChannelID      int64             `db:"channel_id"`
 	IncidentID     types.Int         `db:"incident_id"`
+	RuleID         types.Int         `db:"rule_id"`
+	RuleEntryID    types.Int         `db:"rule_entry_id"`
 	EventMessage   string            `db:"event_message"`
 	EventSummary   string            `db:"event_summary"`
 	State          NotificationState `db:"state"`
