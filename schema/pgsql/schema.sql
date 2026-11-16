@@ -550,6 +550,8 @@ CREATE TABLE notification_history (
     schedule_id bigint,
     channel_id bigint NOT NULL,
     incident_id bigint,
+    rule_id bigint, -- The event rule this notification is attributed to, if any.
+    rule_entry_id bigint, -- The specific rule entry this notification is attributed to, if any.
     event_message text NOT NULL,
     event_summary text NOT NULL,
     state notification_history_state_type NOT NULL,
@@ -627,4 +629,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 );
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0.0-2', EXTRACT(EPOCH from NOW()) * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0.0-3', EXTRACT(EPOCH from NOW()) * 1000);

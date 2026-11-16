@@ -18,8 +18,8 @@ import (
 const (
 	// The MySQL and PostgreSQL schema versions evolve independently, as each database
 	// has its own sequence of schema upgrades, so they can't be merged into a single constant.
-	expectedMysqlSchemaVersion    = "v1.0.0-2"
-	expectedPostgresSchemaVersion = "v1.0.0-2"
+	expectedMysqlSchemaVersion    = "v1.0.0-3"
+	expectedPostgresSchemaVersion = "v1.0.0-3"
 
 	// mysqlNamedLockKey is the key used for MySQL/MariaDB named locks to prevent concurrent schema imports.
 	//

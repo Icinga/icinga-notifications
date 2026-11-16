@@ -262,6 +262,8 @@ func (i *Incident) generateNotifications(
 					ScheduleID:     types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
 					ChannelID:      origin.ChannelID,
 					IncidentID:     types.MakeInt(i.Id, types.TransformZeroIntToNull),
+					RuleID:         types.MakeInt(origin.RuleID, types.TransformZeroIntToNull),
+					RuleEntryID:    types.MakeInt(origin.RuleEntryID, types.TransformZeroIntToNull),
 					EventMessage:   ev.Message,
 					EventSummary:   summary,
 					IncidentClosed: types.MakeBool(ev.CloseIncident()),
