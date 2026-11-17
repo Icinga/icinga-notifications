@@ -503,6 +503,11 @@ The supported types are:
 - url: The detail is a clickable link and will be displayed as such. The `value` field must be an absolute `http`
   or `https` URL. If the optional `anchor_text` field is set, it will be used as the link text instead of the URL.
 - datetime: The detail is a date and time in ISO 8601 format and will be displayed as such.
+- error: The detail is an error message and may be highlighted, e.g., with a red background or an error icon.
+  Icinga Notifications uses this type itself to record why a delivery failed. Plugins may use it to report
+  non-fatal problems of an otherwise successful delivery, such as a warning from an external system.
+  Icinga Notifications Web only treats such a detail as the reason for a failed delivery if the notification
+  state is failed, and it is the first detail in the list. Otherwise, it is displayed like any other detail.
 
 The serialized `details` must not exceed 1 MiB. Larger details are discarded with a logged warning, but the
 notification itself is still considered successful. For example, a channel creating tickets in an external system

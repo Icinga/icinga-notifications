@@ -1027,8 +1027,8 @@ func (i *Incident) notifyContact(
 			detail.Value = libutils.EllipsizeBytes(err.Error(), plugin.MaxDeliveryResultSize-1024)
 		}
 		if detail.Value != "" {
-			detail.Type = "text"
-			detail.Label = "Error"
+			detail.Type = "error"
+			detail.Label = "Transmission Error"
 			details = append(details, detail)
 		}
 	} else {

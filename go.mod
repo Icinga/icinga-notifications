@@ -7,7 +7,7 @@ require (
 	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6
 	github.com/emersion/go-smtp v0.26.0
 	github.com/google/uuid v1.6.0
-	github.com/icinga/icinga-go-library v0.10.0
+	github.com/icinga/icinga-go-library v0.10.1-0.20261117113235-42cfd1eb44da
 	github.com/jhillyerd/enmime v1.3.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/okzk/sdnotify v0.0.0-20180710141335-d9becc38acbd
@@ -23,7 +23,7 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
-	github.com/caarlos0/env/v11 v11.4.1 // indirect
+	github.com/caarlos0/env/v11 v11.4.2 // indirect
 	github.com/cention-sany/utf7 v0.0.0-20170124080048-26cad61bd60a // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
