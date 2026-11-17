@@ -1044,8 +1044,9 @@ func (i *Incident) notifyContact(
 		reason = &notifyReason{Kind: ReasonEvent}
 	}
 
-	var details []plugin.DeliveryDetail
-	summary, body := renderNotification(reason, rctx)
+	// The details rendered by Icinga Notifications itself and the transmission error are always stored.
+	// Only the details returned by the channel plugin are subject to plugin.MaxDeliveryResultSize.
+	summary, body, details := renderNotification(reason, rctx)
 	if result, err := ch.Notify(ctx, contact, incidentPlugin, obj, ev, summary, body, incidentID); err != nil {
 		i.logger.Errorw("Failed to send notification",
 			zap.String("type", ch.Type),
@@ -1055,37 +1056,43 @@ func (i *Incident) notifyContact(
 		notification.State = NotificationStateFailed
 		var detail plugin.DeliveryDetail
 		if rpcErr, ok := errors.AsType[*jsonrpc.Error](err); ok {
-			// Cut down the error message to avoid exceeding the maximum delivery result size, leaving some
-			// room for other details. The number 1024 is arbitrary and can be adjusted as needed.
+			// Cut down the error message to keep the delivery result at a reasonable size.
+			// The number 1024 is arbitrary and can be adjusted as needed.
 			detail.Value = libutils.EllipsizeBytes(rpcErr.Message, plugin.MaxDeliveryResultSize-1024)
 		} else {
-			// See above for the reason of the 1024 bytes reserved for other details.
+			// See above for the reason of the 1024 bytes reserved.
 			detail.Value = libutils.EllipsizeBytes(err.Error(), plugin.MaxDeliveryResultSize-1024)
 		}
 		if detail.Value != "" {
 			detail.Type = "error"
 			detail.Label = "Transmission Error"
-			details = append(details, detail)
+			// Prepend the error detail, so that it stays the most prominent entry in the delivery result.
+			details = append([]plugin.DeliveryDetail{detail}, details...)
 		}
 	} else {
 		i.logger.Infow("Successfully sent notification", zap.String("type", ch.Type), zap.Stringer("contact", contact))
 
 		notification.State = NotificationStateSent
 		if result != nil && len(result.Details) > 0 {
-			details = result.Details
+			if encoded, err := json.Marshal(result.Details); err != nil {
+				i.logger.Warnw("Failed to marshal plugin delivery details", zap.String("type", ch.Type), zap.Error(err))
+			} else if len(encoded) > plugin.MaxDeliveryResultSize {
+				i.logger.Warnw("Dropping plugin delivery details due to excessive size",
+					zap.String("type", ch.Type),
+					zap.Int("count", len(result.Details)),
+					zap.Int("size", len(encoded)),
+					zap.Int64("max_size", plugin.MaxDeliveryResultSize))
+			} else {
+				details = append(details, result.Details...)
+			}
 		}
 	}
 
 	if len(details) > 0 {
 		if deliveryResult, err := json.Marshal(details); err != nil {
 			i.logger.Warnw("Failed to marshal notification delivery result", zap.String("type", ch.Type), zap.Error(err))
-		} else if len(deliveryResult) <= plugin.MaxDeliveryResultSize {
-			notification.HistoryEntry.DeliveryResult = types.MakeString(string(deliveryResult), types.TransformEmptyStringToNull)
 		} else {
-			i.logger.Warnw("Dropping delivery result details due to excessive size",
-				zap.Int("count", len(details)),
-				zap.Int("size", len(deliveryResult)),
-				zap.Int64("max_size", plugin.MaxDeliveryResultSize))
+			notification.HistoryEntry.DeliveryResult = types.MakeString(string(deliveryResult), types.TransformEmptyStringToNull)
 		}
 	}
 
