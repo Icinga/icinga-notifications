@@ -232,7 +232,9 @@ func (i *Incident) generateNotifications(
 					}
 					hr = &HistoryRow{
 						IncidentID:        i.Id,
-						Key:               origin.RecipientKey(contact),
+						ContactID:         types.MakeInt(contact.ID),
+						GroupID:           types.MakeInt(origin.ContactGroupID, types.TransformZeroIntToNull),
+						ScheduleID:        types.MakeInt(origin.ScheduleID, types.TransformZeroIntToNull),
 						Time:              types.UnixMilli(time.Now()),
 						Type:              Notified,
 						ChannelID:         types.MakeInt(origin.ChannelID, types.TransformZeroIntToNull),
