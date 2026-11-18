@@ -52,6 +52,8 @@ func TestIncidents(t *testing.T) {
 		"rule_entry_recipient",
 		"rule_entry",
 		"rule",
+		"contactgroup_member",
+		"contactgroup",
 		"contact",
 		"channel",
 		"source",
@@ -137,9 +139,16 @@ func TestIncidents(t *testing.T) {
 	freshContact := makeContact(t, db, cleaner, "suppression_fresh_testuser", "suppression_fresh_testuser", ch.ID)
 	escalatedContact := makeContact(t, db, cleaner, "suppression_escalated_testuser", "suppression_escalated_testuser", ch.ID)
 
+	groupMembers := []*recipient.Contact{
+		makeContact(t, db, cleaner, "contactgroup_member_1", "contactgroup_member_1", ch.ID),
+		makeContact(t, db, cleaner, "contactgroup_member_2", "contactgroup_member_2", ch.ID),
+		makeContact(t, db, cleaner, "contactgroup_member_3", "contactgroup_member_3", ch.ID),
+	}
+	group := makeContactGroup(t, db, cleaner, "notified_contactgroup", groupMembers...)
+
 	var unmanagedEscalationID, managedEscalationID int64
 	var basicRule, managedRule, notificationRule, triggerNotificationsRule, escalationsPassivelyNotifiedRule,
-		suppressionBypassRule, suppressionBypassKnownRule *rule.Rule
+		suppressionBypassRule, suppressionBypassKnownRule, contactGroupRule *rule.Rule
 	err = db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
 		insertRule := func(name, filter string, ruleType rule.Type) *rule.Rule {
 			r := &rule.Rule{
@@ -164,7 +173,8 @@ func TestIncidents(t *testing.T) {
 			{"op":"!=","attributes":["$.host.name"],"regex":"trigger_notifications*"},
 			{"op":"!=","attributes":["$.host.name"],"value":"notification_rule"},
 			{"op":"!=","attributes":["$.host.name"],"regex":"passive_notifications*"},
-			{"op":"!=","attributes":["$.host.name"],"regex":"suppression_bypass*"}
+			{"op":"!=","attributes":["$.host.name"],"regex":"suppression_bypass*"},
+			{"op":"!=","attributes":["$.host.name"],"value":"contactgroup_notifications"}
 		]
 	}
 }`, rule.TypeEscalation)
@@ -174,6 +184,7 @@ func TestIncidents(t *testing.T) {
 		notificationRule = insertRule("Notification Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"notifications_rule*"}}`, rule.TypeNotification)
 		suppressionBypassRule = insertRule("Suppression Bypass Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"suppression_bypass"}}`, rule.TypeEscalation)
 		suppressionBypassKnownRule = insertRule("Suppression Bypass Known Recipients Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"suppression_bypass_known_recipients"}}`, rule.TypeEscalation)
+		contactGroupRule = insertRule("Contact Group Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"contactgroup_notifications"}}`, rule.TypeEscalation)
 
 		insertEntryVia := func(c *recipient.Contact, channelID types.Int, position, ruleID int64, condition string) int64 {
 			escalation := &rule.Entry{
@@ -234,6 +245,26 @@ func TestIncidents(t *testing.T) {
 		insertEntry(freshContact, 4, suppressionBypassKnownRule.ID, `{"ast":{"op":">=","attributes":["incident_age"],"value":"30m"}}`)
 		insertEntry(escalatedContact, 5, suppressionBypassKnownRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"critical"}}`)
 
+		// See the "Contact Group Notified" test case that makes use of this entry.
+		groupEntry := &rule.Entry{
+			RuleID:        contactGroupRule.ID,
+			Position:      types.MakeInt(1),
+			ConditionExpr: types.MakeString(`{"ast":{"op":">=","attributes":["incident_severity"],"value":"ok"}}`),
+			ChangedAt:     types.UnixMilli(time.Now()),
+			Deleted:       types.MakeBool(false),
+		}
+		groupEntryID, err := database.InsertObtainID(ctx, tx, database.BuildInsertStmtWithout(db, groupEntry, "id"), groupEntry)
+		require.NoError(t, err, "populating rule_entry table should not fail")
+
+		groupRecipient := &rule.EntryRecipient{
+			EntryID:   groupEntryID,
+			GroupID:   types.MakeInt(group.ID),
+			ChangedAt: types.UnixMilli(time.Now()),
+			Deleted:   types.MakeBool(false),
+		}
+		_, err = tx.NamedExecContext(ctx, database.BuildInsertStmtWithout(db, groupRecipient, "id"), groupRecipient)
+		require.NoError(t, err, "populating rule_entry_recipient table should not fail")
+
 		return nil
 	})
 	require.NoError(t, err)
@@ -245,6 +276,7 @@ func TestIncidents(t *testing.T) {
 		escalationsPassivelyNotifiedRule,
 		suppressionBypassRule,
 		suppressionBypassKnownRule,
+		contactGroupRule,
 	} {
 		cleaner.Add("rule", fmt.Sprintf("id = %d", r.ID))
 		cleaner.Add("rule_entry", fmt.Sprintf("rule_id = %d", r.ID))
@@ -258,7 +290,8 @@ func TestIncidents(t *testing.T) {
 	require.NotNil(t, runtimeConfig.Rules[managedRule.ID])
 	require.NotNil(t, runtimeConfig.Rules[notificationRule.ID])
 	require.NotNil(t, runtimeConfig.Rules[triggerNotificationsRule.ID])
-	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 7)
+	require.NotNil(t, runtimeConfig.Rules[contactGroupRule.ID])
+	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 8)
 
 	t.Run("YieldIncidents", func(t *testing.T) {
 		t.Parallel()
@@ -866,6 +899,42 @@ func TestIncidents(t *testing.T) {
 		assert.True(t, i.HasManager())
 	})
 
+	t.Run("Contact Group Notified", func(t *testing.T) {
+		t.Parallel()
+
+		relations := map[string]any{"host": map[string]string{"name": "contactgroup_notifications"}}
+		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+			withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityCritical)))
+		require.NotNil(t, i)
+
+		// The group is the only incident recipient, and all its members are notified via the same channel.
+		verifyIncident(t, db, i, 1, 1, 1, len(groupMembers), baseEv.SeverityCritical)
+
+		var rows []HistoryRow
+		require.NoError(t, db.SelectContext(t.Context(), &rows, db.Rebind(
+			`SELECT contact_id, contactgroup_id, schedule_id, channel_id, notification_state, sent_at
+			FROM incident_history WHERE incident_id = ? AND type = 'notified' ORDER BY contact_id`),
+			i.Id))
+
+		notifiedContactIDs := make([]int64, 0, len(groupMembers))
+		for _, row := range rows {
+			notifiedContactIDs = append(notifiedContactIDs, row.ContactID.Int64)
+			assert.False(t, row.ScheduleID.Valid)
+			assert.True(t, row.ContactID.Valid)
+			assert.Equal(t, types.MakeInt(group.ID), row.GroupID)
+			assert.Equal(t, types.MakeInt(ch.ID), row.ChannelID)
+			assert.Equal(t, NotificationStateSent, row.NotificationState)
+			assert.False(t, row.SentAt.Time().IsZero(), "sent_at must be set once the members are notified")
+		}
+
+		var memberIDs []int64
+		for _, member := range groupMembers {
+			memberIDs = append(memberIDs, member.ID)
+		}
+		slices.Sort(memberIDs)
+		assert.Equal(t, memberIDs, notifiedContactIDs)
+	})
+
 	t.Run("Notification History", func(t *testing.T) {
 		t.Parallel()
 
@@ -1067,6 +1136,31 @@ func makeContact(t *testing.T, db *database.DB, cleaner *testutils.DBCleaner, fu
 	contact.ID = contactID
 	cleaner.Add("contact", fmt.Sprintf("id = %d", contact.ID))
 	return contact
+}
+
+// makeContactGroup creates a contact group with the given members, syncs it to the database and returns it.
+func makeContactGroup(t *testing.T, db *database.DB, cleaner *testutils.DBCleaner, name string, members ...*recipient.Contact) *recipient.Group {
+	group := &recipient.Group{
+		Name:         name,
+		ExternalUUID: types.MakeUUID(uuid.New()),
+		Members:      members,
+	}
+	group.ChangedAt = types.UnixMilli(time.Now())
+	group.Deleted = types.MakeBool(false)
+
+	groupID, err := database.InsertObtainID(t.Context(), db, database.BuildInsertStmtWithout(db, group, "id"), group)
+	require.NoError(t, err)
+	group.ID = groupID
+	cleaner.Add("contactgroup", fmt.Sprintf("id = %d", group.ID))
+	cleaner.Add("contactgroup_member", fmt.Sprintf("contactgroup_id = %d", group.ID))
+
+	stmt := db.Rebind(`INSERT INTO contactgroup_member (contactgroup_id, contact_id, changed_at, deleted) VALUES (?, ?, ?, 'n')`)
+	for _, member := range members {
+		_, err := db.ExecContext(t.Context(), stmt, group.ID, member.ID, time.Now().UnixMilli())
+		require.NoError(t, err)
+	}
+
+	return group
 }
 
 // makeEvent returns a fully initialized event based on the given parameters.
