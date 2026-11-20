@@ -497,6 +497,78 @@ func TestIncidents(t *testing.T) {
 		assert.Equal(t, baseEv.SeverityWarning, i.Severity)
 	})
 
+	t.Run("Close Flag Without Incident Flag", func(t *testing.T) {
+		t.Parallel()
+
+		relations := map[string]any{"host": map[string]string{"name": "trigger_notifications_close_without_incident"}}
+
+		t.Run("No Open Incident", func(t *testing.T) {
+			t.Parallel()
+
+			ev := makeEvent(t, source.ID, withTime(time.Now()), withClose(), withRelations(relations))
+			require.Nil(t, makeIncident(db, logs, runtimeConfig, t, ev), "close-only event must not open an incident")
+
+			var incidents int64
+			require.NoError(t, db.GetContext(t.Context(), &incidents,
+				db.Rebind(`SELECT COUNT(*) FROM incident WHERE object_id = ?`), object.ID(ev.Tags)))
+			assert.Zero(t, incidents, "close-only event must not open and close an incident")
+		})
+
+		t.Run("Existing Incident", func(t *testing.T) {
+			t.Parallel()
+
+			i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+				withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityWarning)))
+			require.NotNil(t, i)
+			verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityWarning)
+
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				withTime(time.Now()), withClose(), withRelations(relations), withTags(mustIncidentObject(t, i).Tags))))
+
+			i = reloadIncident(t, db, i)
+			assert.NotZero(t, i.RecoveredAt, "incident must be closed")
+			assert.Equal(t, baseEv.SeverityWarning, i.Severity, "incident must be closed at its previous severity")
+			assert.Equal(t, int64(1), historyCount(t, db, i, Closed))
+			// Even though the severity didn't change, the recipient must be notified about the resolved incident.
+			assert.Equal(t, int64(2), historyCount(t, db, i, Notified))
+		})
+
+		t.Run("Muted Incident", func(t *testing.T) {
+			t.Parallel()
+
+			i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+				withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityWarning), withMuted(true)))
+			require.NotNil(t, i)
+			verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityWarning)
+
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				withTime(time.Now()), withClose(), withRelations(relations), withTags(mustIncidentObject(t, i).Tags))))
+
+			i = reloadIncident(t, db, i)
+			assert.NotZero(t, i.RecoveredAt, "muted incident must be closed as well")
+			assert.True(t, i.IsMuted(), "closing without 'muted: false' must not unmute the incident")
+			assert.Equal(t, int64(2), historyCount(t, db, i, Notified))
+		})
+
+		t.Run("Unmuted On Close", func(t *testing.T) {
+			t.Parallel()
+
+			i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+				withTime(time.Now()), withIncident(true), withRelations(relations), withSeverity(baseEv.SeverityWarning), withMuted(true)))
+			require.NotNil(t, i)
+			verifyIncident(t, db, i, 1, 1, 1, 1, baseEv.SeverityWarning)
+
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				withTime(time.Now()), withClose(), withMuted(false), withRelations(relations), withTags(mustIncidentObject(t, i).Tags))))
+
+			i = reloadIncident(t, db, i)
+			assert.NotZero(t, i.RecoveredAt, "incident must be closed")
+			assert.False(t, i.IsMuted(), "'muted: false' must unmute the incident while closing it")
+			assert.Equal(t, int64(1), historyCount(t, db, i, Unmuted))
+			assert.Equal(t, int64(2), historyCount(t, db, i, Notified))
+		})
+	})
+
 	t.Run("Notify Flag", func(t *testing.T) {
 		t.Parallel()
 
@@ -667,21 +739,12 @@ func TestIncidents(t *testing.T) {
 		ev := makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityError), withMsg("Something went wrong!"))
 		i := makeIncident(db, logs, runtimeConfig, t, ev)
 
-		roleChanges := func() int64 {
-			var count int64
-			require.NoError(t, db.GetContext(
-				t.Context(), &count,
-				db.Rebind(`SELECT COUNT(*) FROM incident_history WHERE incident_id = ? AND type = 'recipient_role_changed'`),
-				i.Id))
-			return count
-		}
-
 		// The contact is already a plain recipient of the incident due to the triggered escalation.
 		i = reloadIncidentRecursive(t, db, i)
 		key := recipient.ToKey(contact)
 		require.Equal(t, recipient.RoleRecipient, i.Recipients[key].Role)
 		assert.Empty(t, i.Recipients[key].EventTypes.List)
-		before := roleChanges()
+		before := historyCount(t, db, i, RecipientRoleChanged)
 
 		qa := &event.QuickAction{
 			ID:         types.MakeUUID(uuid.New()),
@@ -697,7 +760,7 @@ func TestIncidents(t *testing.T) {
 		i = reloadIncidentRecursive(t, db, i)
 		assert.Equal(t, recipient.RoleSubscriber, i.Recipients[key].Role)
 		assert.Equal(t, qa.EventTypes, i.Recipients[key].EventTypes)
-		assert.Equal(t, before+1, roleChanges())
+		assert.Equal(t, before+1, historyCount(t, db, i, RecipientRoleChanged))
 	})
 
 	// This test mustn't run in parallel with any other test, as ReevaluateEscalations reevaluates the escalations
@@ -1241,15 +1304,14 @@ func makeTestChannel(t *testing.T, db *database.DB, cleaner *testutils.DBCleaner
 	return ch
 }
 
-// assertHistoryNotified checks the incident history for the given incident and asserts that the number
-// of "notified" entries matches the expected count.
-func assertHistoryNotified(t *testing.T, db *database.DB, i *Incident, expected int) {
-	var notifiedCount int64
+// historyCount returns the number of incident history entries of the given type for the given incident.
+func historyCount(t *testing.T, db *database.DB, i *Incident, historyType HistoryEventType) int64 {
+	var count int64
 	require.NoError(t, db.GetContext(
-		t.Context(), &notifiedCount,
-		db.Rebind(`SELECT COUNT(*) FROM incident_history WHERE incident_id = ? AND type = 'notified'`),
-		i.Id))
-	assert.Equal(t, int64(expected), notifiedCount)
+		t.Context(), &count,
+		db.Rebind(`SELECT COUNT(*) FROM incident_history WHERE incident_id = ? AND type = ?`),
+		i.Id, historyType))
+	return count
 }
 
 // notifiedStates returns the notification states of all "notified" incident history entries of the given
@@ -1270,5 +1332,5 @@ func verifyIncident(t *testing.T, db *database.DB, i *Incident, ruleCount, recip
 	assert.Len(t, i.EscalationRules, ruleCount)
 	assert.Len(t, i.EscalationState, escalationCount)
 	assert.Len(t, i.Recipients, recipientCount)
-	assertHistoryNotified(t, db, i, notifiedCount)
+	assert.Equal(t, int64(notifiedCount), historyCount(t, db, i, Notified))
 }
