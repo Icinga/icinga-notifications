@@ -5,6 +5,7 @@ import (
 	"time"
 
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -27,6 +28,7 @@ func TestRenderNotification(t *testing.T) {
 		expectSummary   string
 		bodyContains    []string
 		bodyNotContains []string
+		expectDetails   []plugin.DeliveryDetail
 	}{
 		{
 			name: "opened",
@@ -43,6 +45,7 @@ func TestRenderNotification(t *testing.T) {
 				"Severity: Critical",
 				"Disk CRITICAL - no space left on device",
 			},
+			expectDetails: mkDetails(sevDetail(baseEv.SeverityCritical)),
 		},
 		{
 			name: "opened: muted",
@@ -59,6 +62,7 @@ func TestRenderNotification(t *testing.T) {
 				"Mute Reason: Maintenance window",
 				"Severity:    Critical",
 			},
+			expectDetails: mkDetails(sevDetail(baseEv.SeverityCritical), mutedDetails("Maintenance window")),
 		},
 		{
 			name: "opened: closed",
@@ -89,6 +93,7 @@ func TestRenderNotification(t *testing.T) {
 				"Severity:    Critical (was Warning)",
 				"Responsible: Unassigned",
 			},
+			expectDetails: sevChangeDetails(baseEv.SeverityCritical, baseEv.SeverityWarning),
 		},
 		{
 			name: "escalated: age only",
@@ -107,6 +112,7 @@ func TestRenderNotification(t *testing.T) {
 				"The incident has been open for",
 				"The last message received:",
 			},
+			expectDetails: mkDetails(sevDetail(baseEv.SeverityCritical), textDetail("Incident Age", "2h0m0s")),
 		},
 		{
 			name: "escalated: muted and severity",
@@ -124,6 +130,10 @@ func TestRenderNotification(t *testing.T) {
 				"Mute Reason:",
 				"Severity:    Critical (was Warning)",
 			},
+			expectDetails: mkDetails(
+				mutedDetails("Maintenance window"),
+				sevChangeDetails(baseEv.SeverityCritical, baseEv.SeverityWarning),
+			),
 		},
 		{
 			name: "escalated: muted and age",
@@ -144,6 +154,7 @@ func TestRenderNotification(t *testing.T) {
 				"The incident has been open for",
 				"The last message received:",
 			},
+			expectDetails: mkDetails(mutedDetails("Maintenance window"), sevDetail(baseEv.SeverityCritical)),
 		},
 		{
 			name: "escalated: unmuted",
@@ -164,6 +175,7 @@ func TestRenderNotification(t *testing.T) {
 				"The incident was muted until now",
 				"Unmute Reason: Maintenance over",
 			},
+			expectDetails: mkDetails(unmutedDetails("Maintenance over"), sevDetail(baseEv.SeverityCritical)),
 		},
 		{
 			name: "escalated: closed",
@@ -202,6 +214,7 @@ func TestRenderNotification(t *testing.T) {
 				"(was ",
 				"Unmute Reason: Maintenance over",
 			},
+			expectDetails: mkDetails(unmutedDetails("Maintenance over"), sevDetail(baseEv.SeverityCritical)),
 		},
 		{
 			name: "updated: improved",
@@ -216,6 +229,7 @@ func TestRenderNotification(t *testing.T) {
 				"has improved",
 				"Severity:    Critical (was Error)",
 			},
+			expectDetails: sevChangeDetails(baseEv.SeverityCritical, baseEv.SeverityError),
 		},
 		{
 			name: "updated: worsened",
@@ -231,6 +245,7 @@ func TestRenderNotification(t *testing.T) {
 				"Severity:    Critical (was Warning)",
 			},
 			bodyNotContains: []string{"The incident was muted until now"},
+			expectDetails:   sevChangeDetails(baseEv.SeverityCritical, baseEv.SeverityWarning),
 		},
 		{
 			name: "updated: improved and unmuted",
@@ -249,6 +264,10 @@ func TestRenderNotification(t *testing.T) {
 				"Unmute Reason: Maintenance over",
 				"Severity:    Critical (was OK)",
 			},
+			expectDetails: mkDetails(
+				unmutedDetails("Maintenance over"),
+				sevChangeDetails(baseEv.SeverityCritical, baseEv.SeverityOK),
+			),
 		},
 		{
 			name: "updated: worsened and unmuted",
@@ -267,6 +286,10 @@ func TestRenderNotification(t *testing.T) {
 				"Unmute Reason: Maintenance over",
 				"Severity:    Critical (was Warning)",
 			},
+			expectDetails: mkDetails(
+				unmutedDetails("Maintenance over"),
+				sevChangeDetails(baseEv.SeverityCritical, baseEv.SeverityWarning),
+			),
 		},
 		{
 			name: "updated: unchanged",
@@ -279,6 +302,7 @@ func TestRenderNotification(t *testing.T) {
 				"has been updated",
 				"Severity:    Critical",
 			},
+			expectDetails: mkDetails(sevDetail(baseEv.SeverityCritical)),
 		},
 		{
 			name: "resolved",
@@ -308,6 +332,7 @@ func TestRenderNotification(t *testing.T) {
 				"has been muted",
 				"Mute Reason: Maintenance window",
 			},
+			expectDetails: mkDetails(mutedDetails("Maintenance window"), sevDetail(baseEv.SeverityCritical)),
 		},
 		{
 			name: "unmuted",
@@ -326,6 +351,7 @@ func TestRenderNotification(t *testing.T) {
 				"has been unmuted",
 				"Unmute Reason: Maintenance over",
 			},
+			expectDetails: mkDetails(unmutedDetails("Maintenance over"), sevDetail(baseEv.SeverityCritical)),
 		},
 		{
 			name: "managed",
@@ -339,6 +365,7 @@ func TestRenderNotification(t *testing.T) {
 				"has been assigned to Alice",
 				"Responsible: Alice",
 			},
+			expectDetails: mkDetails(sevDetail(baseEv.SeverityCritical), textDetail("Responsible", "Alice")),
 		},
 		{
 			name: "unmanaged",
@@ -352,6 +379,7 @@ func TestRenderNotification(t *testing.T) {
 				"has been unassigned from Bob",
 				"Responsible: Unassigned",
 			},
+			expectDetails: mkDetails(sevDetail(baseEv.SeverityCritical), textDetail("Was Responsible", "Bob")),
 		},
 		{
 			name:   "event",
@@ -392,6 +420,7 @@ func TestRenderNotification(t *testing.T) {
 				"Looking into it",
 			},
 			bodyNotContains: []string{"Disk CRITICAL"},
+			expectDetails:   mkDetails(sevDetail(baseEv.SeverityCritical), textDetail("Responsible", "Alice")),
 		},
 		{
 			name:   "incident event: summary fallback to first message line",
@@ -403,13 +432,15 @@ func TestRenderNotification(t *testing.T) {
 			}(),
 			expectSummary: "[server01: disk /] Incident updated: Looking into it",
 			bodyContains:  []string{"Responsible: Unassigned", "Looking into it\nSecond line"},
+			expectDetails: mkDetails(sevDetail(baseEv.SeverityCritical)),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			summary, body := renderNotification(&tt.reason, &tt.ctx)
+			summary, body, details := renderNotification(&tt.reason, &tt.ctx)
 			assert.Equal(t, tt.expectSummary, summary)
+			assert.Equal(t, tt.expectDetails, details)
 			for _, phrase := range tt.bodyContains {
 				assert.Contains(t, body, phrase)
 			}
@@ -519,14 +550,14 @@ func TestRenderNotificationDetails(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, body := renderNotification(&tt.reason, &tt.ctx)
+			_, body, _ := renderNotification(&tt.reason, &tt.ctx)
 			assert.Equal(t, tt.expectBody, body)
 		})
 	}
 
 	for kind := ReasonUpdated; kind <= ReasonIncidentEvent; kind++ {
 		c := ctx
-		_, body := renderNotification(&notifyReason{Kind: kind}, &c)
+		_, body, _ := renderNotification(&notifyReason{Kind: kind}, &c)
 		assert.NotContains(t, body, "Details:", "kind %d", kind)
 		assert.NotContains(t, body, "\n\n\n", "kind %d", kind)
 	}
@@ -615,4 +646,49 @@ func TestReasonFor(t *testing.T) {
 			assert.Equal(t, tt.expectKind, effective.Kind)
 		})
 	}
+}
+
+func sevDetail(s baseEv.Severity) plugin.DeliveryDetail {
+	return plugin.DeliveryDetail{Type: "severity", Label: "Severity", Value: s}
+}
+
+func sevChangeDetails(cur, old baseEv.Severity) []plugin.DeliveryDetail {
+	return []plugin.DeliveryDetail{
+		{Type: "severity", Label: "New Severity", Value: cur},
+		{Type: "severity", Label: "Old Severity", Value: old},
+	}
+}
+
+func mutedDetails(reason string) []plugin.DeliveryDetail {
+	return []plugin.DeliveryDetail{
+		{Type: "boolean", Label: "Is Muted", Value: true},
+		{Type: "text", Label: "Mute Reason", Value: reason},
+	}
+}
+
+func unmutedDetails(reason string) []plugin.DeliveryDetail {
+	return []plugin.DeliveryDetail{
+		{Type: "boolean", Label: "Is Muted", Value: false},
+		{Type: "text", Label: "Unmute Reason", Value: reason},
+	}
+}
+
+func textDetail(label, value string) plugin.DeliveryDetail {
+	return plugin.DeliveryDetail{Type: "text", Label: label, Value: value}
+}
+
+// mkDetails flattens single details and detail slices into one slice, preserving their order.
+func mkDetails(groups ...any) []plugin.DeliveryDetail {
+	var out []plugin.DeliveryDetail
+	for _, g := range groups {
+		switch g := g.(type) {
+		case plugin.DeliveryDetail:
+			out = append(out, g)
+		case []plugin.DeliveryDetail:
+			out = append(out, g...)
+		default:
+			panic("mkDetails: unsupported argument type")
+		}
+	}
+	return out
 }
