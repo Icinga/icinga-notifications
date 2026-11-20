@@ -84,9 +84,19 @@ Actions taken in Icinga Notifications Web, such as managing or subscribing to an
 
 Each instance continuously checks this queue for pending events. The database ensures that only one instance picks up
 each event. Additionally, events belonging to the same object, for example the same host or service, are never 
-processed at the same time, not even by different instances. Events for different objects are processed in parallel,
-up to four at a time per instance. As a result, the instance that processes an event is not necessarily the one that
-received it.
+processed at the same time, not even by different instances. Events for different objects are processed in parallel.
+As a result, the instance that processes an event is not necessarily the one that received it.
+
+How many events an instance processes in parallel depends on the
+[`max_connections`](03-Configuration.md#database-options) database option, since every event being processed needs
+database connections. Each instance processes up to half of its `max_connections` at a time, but at least two, so that
+a single slow event, for example a notification to an unresponsive webhook, does not hold up all others. With the
+default of `16` connections, this results in up to eight events at a time. If `max_connections` is set to `-1`
+(unlimited), each instance processes up to 32 events at a time. On startup, each instance logs the resulting limit in a
+message containing `Starting job queue processing`.
+
+To process more events in parallel, increase `max_connections` and make sure that the database server allows enough
+connections for all instances combined.
 
 Every queued event has a unique ID. If a source submits the same event again, for example after a network timeout,
 the duplicate is ignored. Processed events are kept in the queue for a few minutes so that such late resubmissions

@@ -23,11 +23,17 @@ import (
 )
 
 const (
-	// claimBatchSize bounds how many pending job_queue entries are fetched from the database in a single batch for claiming.
-	claimBatchSize = 64
+	// minClaimBatchSize is the lower bound of how many pending job_queue entries are fetched from the database in a
+	// single batch for claiming. The actual batch size scales with the concurrency limit, see ProcessQueue.
+	minClaimBatchSize = 64
 
-	// maxConcurrentClaims bounds how many job_queue entries can be claimed and processed concurrently by a single node.
-	maxConcurrentClaims = 4
+	// minConcurrentClaims is the lower bound of concurrently processed job_queue entries per node, keeping a single
+	// slow job (e.g., a webhook running into the callback timeout) from stalling the entire queue.
+	minConcurrentClaims = 2
+
+	// unboundedPoolConcurrentClaims bounds the concurrently processed job_queue entries per node when the database
+	// connection pool is unlimited, as there is no pool size to derive the limit from, but the queue must still be bounded.
+	unboundedPoolConcurrentClaims = 32
 
 	// The following consts are valid values for Queue.State.
 	//
@@ -223,8 +229,18 @@ func Enqueue(ctx context.Context, db *database.DB, ev *Event) error {
 //
 // The callbacks are invoked with a context limited to one minute, and must honor that context.
 func ProcessQueue(ctx context.Context, db *database.DB, logger *logging.Logger, cbs QueueCallbacks) error {
+	concurrency := maxConcurrentClaims(db.Options.MaxConnections)
+	// Fetch at least twice as many candidates as can be processed concurrently, as some of
+	// them may be skipped because their target objects are locked, so that a node with a
+	// high concurrency limit doesn't re-query needlessly often.
+	batchSize := max(minClaimBatchSize, 2*concurrency)
+	logger.Infow("Starting job queue processing",
+		zap.Int64("max_concurrency", concurrency),
+		zap.Int64("claim_batch_size", batchSize),
+		zap.Int("db_max_connections", db.Options.MaxConnections))
+
 	selStmt := fmt.Sprintf(`SELECT * FROM job_queue WHERE state = %d ORDER BY last_update LIMIT %d`,
-		QueueStatePending, claimBatchSize)
+		QueueStatePending, batchSize)
 	// updStmt is used to update the state of a queue entry and its last_update after processing.
 	updStmt := `UPDATE job_queue SET last_update = :last_update, state = :state WHERE id = :id`
 	// casStmt is used to atomically transition a queue entry from QueueStatePending to QueueStateProcessing,
@@ -234,16 +250,21 @@ func ProcessQueue(ctx context.Context, db *database.DB, logger *logging.Logger, 
 	lockStmt := (jobProcessingLock{}).buildInsertIgnore(db)
 	unlockStmt := `DELETE FROM job_processing_lock WHERE job_queue_id = :id`
 
-	// Used to process claimed jobs in a separate goroutine to allow concurrent processing of multiple entries.
-	sem := semaphore.NewWeighted(maxConcurrentClaims)
+	sem := semaphore.NewWeighted(concurrency)
 	jobs, errs := startClaiming(ctx, db, logger, cbs, selStmt, updStmt, casStmt, lockStmt)
 
 	for {
+		if err := sem.Acquire(ctx, 1); err != nil {
+			return fmt.Errorf("cannot acquire semaphore for processing job queue entry: %w", err)
+		}
+
 		select {
 		case <-ctx.Done():
+			sem.Release(1)
 			return ctx.Err()
 
 		case err := <-errs:
+			sem.Release(1)
 			if err != nil {
 				return fmt.Errorf("cannot claim job queue: %w", err)
 			}
@@ -251,11 +272,8 @@ func ProcessQueue(ctx context.Context, db *database.DB, logger *logging.Logger, 
 
 		case j, ok := <-jobs:
 			if !ok {
+				sem.Release(1)
 				return <-errs
-			}
-
-			if err := sem.Acquire(ctx, 1); err != nil {
-				return fmt.Errorf("cannot acquire semaphore for processing job queue entry: %w", err)
 			}
 
 			var marshaler zapcore.ObjectMarshaler
@@ -548,4 +566,19 @@ func processAndFinalize(
 		retry.Retryable,
 		backoff.DefaultBackoff,
 		settings)
+}
+
+// maxConcurrentClaims returns how many claimed jobs a node processes concurrently.
+//
+// Processing is I/O-bound (DB transactions, channel plugins), so CPU count is not a useful signal.
+// Every worker needs DB connections to process/finalize claimed jobs, while other paths that enqueue
+// events share the same pool. The limit is half the pool size to reserve capacity for those paths,
+// but never lower than minConcurrentClaims.
+//
+// A non-positive dbMaxConns means the pool is unlimited, in which case unboundedPoolConcurrentClaims is used.
+func maxConcurrentClaims(dbMaxConns int) int64 {
+	if dbMaxConns <= 0 {
+		return unboundedPoolConcurrentClaims
+	}
+	return int64(max(dbMaxConns/2, minConcurrentClaims))
 }
