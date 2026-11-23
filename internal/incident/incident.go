@@ -277,9 +277,11 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 			}
 		}
 
-		if ev.OpenOrEscalate() {
+		// Escalations with an is_muted condition may only become triggerable by a change of the muted state, so they
+		// need to be evaluated even if the event doesn't open or escalate the incident.
+		if ev.OpenOrEscalate() || reason.JustMuted || reason.JustUnmuted {
 			// Re-evaluate escalations based on the newly evaluated rules.
-			escalations, err := i.evaluateEscalations(ev.Time)
+			escalations, err := i.evaluateEscalations(ev)
 			if err != nil {
 				return err
 			}
@@ -290,7 +292,7 @@ func (i *Incident) ProcessEvent(ctx context.Context, ev *event.Event) error {
 
 			triggerNotifications = triggerNotifications || len(escalations) > 0
 
-			if !isNew {
+			if ev.OpenOrEscalate() && !isNew {
 				// Even if the severity didn't change, we want to update the message nonetheless.
 				i.Message = types.MakeString(ev.Message, types.TransformEmptyStringToNull)
 				i.Summary = ev.Summary
@@ -379,7 +381,7 @@ func (i *Incident) RetriggerEscalations(ctx context.Context, o *object.Object, e
 		i.runtimeConfig.RLock()
 		defer i.runtimeConfig.RUnlock()
 
-		escalations, err := i.evaluateEscalations(ev.Time)
+		escalations, err := i.evaluateEscalations(ev)
 		if err != nil {
 			return fmt.Errorf("cannot reevaluate escalations: %w", err)
 		}
@@ -800,15 +802,24 @@ func (i *Incident) applyMatchingRules(ctx context.Context, tx *sqlx.Tx, ev *even
 
 // evaluateEscalations evaluates this incidents rule escalations to be triggered if they aren't already.
 // Returns the newly evaluated escalations to be triggered or an error on database failure.
-func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Entry, error) {
+//
+// The incident is considered muted according to ev if it sets the muted state, as the incident's own state
+// isn't updated until the event is fully processed.
+func (i *Incident) evaluateEscalations(ev *event.Event) ([]*rule.Entry, error) {
 	if i.EscalationState == nil {
 		i.EscalationState = make(map[int64]*EscalationState)
 	}
 
+	isMuted := i.IsMuted()
+	if ev.Muted.Valid {
+		isMuted = ev.IsMuted()
+	}
+
 	filterContext := &rule.EscalationFilter{
-		IncidentAge:      eventTime.Sub(i.StartedAt.Time()),
+		IncidentAge:      ev.Time.Sub(i.StartedAt.Time()),
 		IncidentSeverity: i.Severity,
 		IsManaged:        i.HasManager(),
+		IsMuted:          isMuted,
 	}
 
 	var escalations []*rule.Entry
@@ -845,7 +856,7 @@ func (i *Incident) evaluateEscalations(eventTime time.Time) ([]*rule.Entry, erro
 		// i.e. if an incident is 15m old and an escalation rule evaluates incident_age>=1h the retryAfter would
 		// contain 45m (1h - incident age (15m)). Therefore, we have to use the event time instead of the incident
 		// start time here.
-		nextEvalAt := eventTime.Add(retryAfter)
+		nextEvalAt := ev.Time.Add(retryAfter)
 
 		i.logger.Infow("Scheduling escalation reevaluation", zap.Duration("after", retryAfter), zap.Time("at", nextEvalAt))
 		i.NextEscalationCheckAt = types.UnixMilli(nextEvalAt)

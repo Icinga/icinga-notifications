@@ -99,7 +99,49 @@ func TestEscalationFilter(t *testing.T) {
 
 		// A bare "is_managed" only tests whether the escalation filter knows that attribute at all.
 		assert.True(t, unmanaged.EvalExists([]string{"is_managed"}))
-		assert.False(t, unmanaged.EvalExists([]string{"is_muted"}))
+		assert.False(t, unmanaged.EvalExists([]string{"is_unknown"}))
+	})
+
+	t.Run("IsMuted", func(t *testing.T) {
+		t.Parallel()
+
+		muted := &EscalationFilter{IsMuted: true}
+		unmuted := &EscalationFilter{}
+
+		tests := []struct {
+			expr        string
+			muted       bool // expected result for the muted incident
+			unmuted     bool // expected result for the unmuted incident
+			expectedErr bool
+		}{
+			{expr: `{"op":"=","attributes":["is_muted"],"value":"y"}`, muted: true, unmuted: false},
+			{expr: `{"op":"=","attributes":["is_muted"],"value":"n"}`, muted: false, unmuted: true},
+			{expr: `{"op":"!=","attributes":["is_muted"],"value":"y"}`, muted: false, unmuted: true},
+			{expr: `{"op":"!=","attributes":["is_muted"],"value":"n"}`, muted: true, unmuted: false},
+			{expr: `{"op":"&","rules":[{"op":">=","attributes":["incident_age"],"value":"0s"},{"op":"=","attributes":["is_muted"],"value":"n"}]}`, muted: false, unmuted: true},
+			// Everything but "y" and "n" is not a valid boolean value.
+			{expr: `{"op":"=","attributes":["is_muted"],"value":"yes"}`, expectedErr: true},
+			// Ordering booleans doesn't make any sense.
+			{expr: `{"op":">","attributes":["is_muted"],"value":"n"}`, expectedErr: true},
+		}
+
+		for _, tt := range tests {
+			f, err := filter.UnmarshalJSON([]byte(tt.expr))
+			require.NoError(t, err, "failed to unmarshal filter expression: %v", err)
+
+			for name, ctx := range map[string]*EscalationFilter{"muted": muted, "unmuted": unmuted} {
+				matched, err := f.Eval(ctx)
+				if tt.expectedErr {
+					assert.Error(t, err, "filter evaluation should have failed for expression: %s", tt.expr)
+				} else {
+					assert.NoError(t, err, "filter evaluation failed for expression: %s", tt.expr)
+					assert.Equal(t, map[string]bool{"muted": tt.muted, "unmuted": tt.unmuted}[name], matched,
+						"filter evaluation result mismatch for %s incident: %s", name, tt.expr)
+				}
+			}
+		}
+
+		assert.True(t, unmuted.EvalExists([]string{"is_muted"}))
 	})
 }
 
