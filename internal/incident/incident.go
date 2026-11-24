@@ -497,6 +497,22 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			return fmt.Errorf("cannot restore incident state: %w", err)
 		}
 
+		// Escalation conditions may depend on the incident having a manager, so quick actions changing it have to
+		// evaluate the escalations again and trigger the matching ones. The caller must hold the runtime config lock.
+		triggerEscalations := func(ev *event.Event) error {
+			escalations, err := i.evaluateEscalations(ev)
+			if err != nil {
+				return fmt.Errorf("cannot evaluate escalations: %w", err)
+			}
+
+			if err := i.triggerEscalations(ctx, tx, escalations); err != nil {
+				return fmt.Errorf("cannot trigger escalations: %w", err)
+			}
+
+			// evaluateEscalations updates the time of the next escalation check, so it has to be persisted.
+			return i.Sync(ctx, tx)
+		}
+
 		switch qa.Kind {
 		case event.ActionManage:
 			i.runtimeConfig.RLock()
@@ -509,12 +525,17 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			if err := i.addRecipient(ctx, tx, r, recipient.RoleManager, qa.EventTypes); err != nil {
 				return fmt.Errorf("cannot add recipient %q as manager: %w", r, err)
 			}
+
+			message := fmt.Sprintf("Recipient %s has been added as the new incident manager", r.String())
+			ev = &event.Event{ID: qa.ID, Time: qa.Time, Message: message}
+			// Evaluate the escalations while the manager is still part of the incident.
+			if err := triggerEscalations(ev); err != nil {
+				return err
+			}
 			// Remove the recipient from the incident's Recipients map, so the i.IsNotifiable check doesn't
 			// return false for all other existing recipients when generating notifications below.
 			delete(i.Recipients, recipientKey)
 
-			message := fmt.Sprintf("Recipient %s has been added as the new incident manager", r.String())
-			ev = &event.Event{ID: qa.ID, Time: qa.Time, Message: message}
 			reason := notifyReason{Kind: ReasonManaged, ManagerName: r.String()}
 			channels := i.collectContactChannels(ev, func(_ *rule.EntryRecipient, o *rule.ChannelOrigin) {
 				// Incident managed/unmanaged quick actions should always bypass suppression for the other recipient.
@@ -553,11 +574,15 @@ func (i *Incident) DoQuickAction(ctx context.Context, qa *event.QuickAction) err
 			}
 
 			if qa.Kind == event.ActionUnmanage {
+				message := fmt.Sprintf("Recipient %s has been removed as the incident manager", r.String())
+				ev = &event.Event{ID: qa.ID, Time: qa.Time, Message: message}
+				if err := triggerEscalations(ev); err != nil {
+					return err
+				}
+
 				// Remove the recipient for the same reasons as stated in event.ActionManage above.
 				delete(i.Recipients, recipientKey)
 
-				message := fmt.Sprintf("Recipient %s has been removed as the incident manager", r.String())
-				ev = &event.Event{ID: qa.ID, Time: qa.Time, Message: message}
 				reason := notifyReason{Kind: ReasonUnmanaged, ManagerName: r.String()}
 				channels := i.collectContactChannels(ev, func(_ *rule.EntryRecipient, o *rule.ChannelOrigin) {
 					// Incident managed/unmanaged quick actions should always bypass suppression for the other recipient.

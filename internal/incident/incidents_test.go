@@ -138,6 +138,8 @@ func TestIncidents(t *testing.T) {
 	knownSubscriber := makeContact(t, db, cleaner, "suppression_known_subscriber", "suppression_known_subscriber", ch.ID)
 	freshContact := makeContact(t, db, cleaner, "suppression_fresh_testuser", "suppression_fresh_testuser", ch.ID)
 	escalatedContact := makeContact(t, db, cleaner, "suppression_escalated_testuser", "suppression_escalated_testuser", ch.ID)
+	managedContact := makeContact(t, db, cleaner, "manager_escalation_managed_testuser", "manager_escalation_managed_testuser", ch.ID)
+	unmanagedContact := makeContact(t, db, cleaner, "manager_escalation_unmanaged_testuser", "manager_escalation_unmanaged_testuser", ch.ID)
 
 	groupMembers := []*recipient.Contact{
 		makeContact(t, db, cleaner, "contactgroup_member_1", "contactgroup_member_1", ch.ID),
@@ -146,7 +148,7 @@ func TestIncidents(t *testing.T) {
 	}
 	group := makeContactGroup(t, db, cleaner, "notified_contactgroup", groupMembers...)
 
-	var unmanagedEscalationID, managedEscalationID, unmutedEscalationID, mutedEscalationID int64
+	var managedEscalationID, agedUnmanagedEscalationID, unmutedEscalationID, mutedEscalationID int64
 	var basicRule, managedRule, notificationRule, triggerNotificationsRule, escalationsPassivelyNotifiedRule,
 		suppressionBypassRule, suppressionBypassKnownRule, contactGroupRule, mutedRule *rule.Rule
 	err = db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
@@ -224,8 +226,11 @@ func TestIncidents(t *testing.T) {
 		insertEntry(contact, 2, basicRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"ok"}}`)
 		insertEntry(contact, 1, basicRule.ID, `{"ast":{"op":">=","attributes":["incident_age"],"value":"1h"}}`)
 
-		unmanagedEscalationID = insertEntry(contact, 1, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"n"}}`)
-		managedEscalationID = insertEntry(contact, 2, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"y"}}`)
+		// The age of the last entry is only reached by the quick actions of the "Managed Escalation" test case,
+		// as makeEvent opens the incident with an event that is two hours old.
+		insertEntry(contact, 1, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"n"}}`)
+		managedEscalationID = insertEntry(managedContact, 2, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"y"}}`)
+		agedUnmanagedEscalationID = insertEntry(unmanagedContact, 3, managedRule.ID, `{"ast":{"op":"&","rules":[{"op":"=","attributes":["is_managed"],"value":"n"},{"op":">=","attributes":["incident_age"],"value":"1h"}]}}`)
 
 		unmutedEscalationID = insertEntry(contact, 1, mutedRule.ID, `{"ast":{"op":"=","attributes":["is_muted"],"value":"n"}}`)
 		mutedEscalationID = insertEntry(contact, 2, mutedRule.ID, `{"ast":{"op":"=","attributes":["is_muted"],"value":"y"}}`)
@@ -930,42 +935,40 @@ func TestIncidents(t *testing.T) {
 		t.Parallel()
 
 		relations := map[string]any{"host": map[string]string{"name": "managed_escalations"}}
-		ev := makeEvent(t, source.ID, withIncident(true), withSeverity(baseEv.SeverityCritical), withRelations(relations))
-		i := reloadIncidentRecursive(t, db, makeIncident(db, logs, runtimeConfig, t, ev))
-		require.NotNil(t, i)
+		i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID, withIncident(true), withRelations(relations)))
+		tags := mustIncidentObject(t, i).Tags
+		quickAction := func(kind event.Action) *event.QuickAction {
+			return &event.QuickAction{
+				ID:         types.MakeUUID(uuid.New()),
+				Time:       time.Now(),
+				Kind:       kind,
+				ContactID:  incidentManager.ID,
+				ObjectTags: tags,
+			}
+		}
 
-		// Nobody has taken over the responsibility for the incident yet, so only the first escalation is triggered.
-		require.Len(t, i.EscalationRules, 1)
-		_, exists := i.EscalationRules[managedRule.ID]
-		require.True(t, exists)
-		require.Len(t, i.EscalationState, 1)
-		assert.NotNil(t, i.EscalationState[unmanagedEscalationID])
-		assert.False(t, i.HasManager())
+		// Only the escalation for unmanaged incidents is reached yet, the other one needs a manager or a higher age.
+		require.Len(t, reloadIncidentRecursive(t, db, i).EscalationState, 1)
 
-		// As long as the incident remains unmanaged, the second escalation isn't reached.
-		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, ev))
-		i = reloadIncidentRecursive(t, db, i)
-		require.Len(t, i.EscalationState, 1)
-		assert.NotNil(t, i.EscalationState[unmanagedEscalationID])
-		assert.False(t, i.HasManager())
-
-		// Let someone take over the responsibility for the incident.
-		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, &event.QuickAction{
-			ID:         types.MakeUUID(uuid.New()),
-			Time:       time.Now(),
-			Kind:       event.ActionManage,
-			ContactID:  incidentManager.ID,
-			ObjectTags: ev.Tags,
-		}))
-
-		// The next event evaluates the escalations again, this time on a managed incident.
-		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, ev))
-
+		// Taking over the incident evaluates the escalations again, without any further event, and notifies the
+		// recipients of the escalation requiring a manager once, even though the incident has a manager now.
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, quickAction(event.ActionManage)))
 		i = reloadIncidentRecursive(t, db, i)
 		require.Len(t, i.EscalationState, 2)
-		assert.NotNil(t, i.EscalationState[unmanagedEscalationID])
 		assert.NotNil(t, i.EscalationState[managedEscalationID])
 		assert.True(t, i.HasManager())
+		assert.Equal(t, []NotificationState{NotificationStateSent}, notifiedStates(t, db, i, managedContact, ch.ID))
+		assert.Empty(t, notifiedStates(t, db, i, unmanagedContact, ch.ID))
+
+		// The same applies to giving up the incident, which makes the escalation for unmanaged incidents reachable.
+		// The recipient of the previous escalation is only notified about the change of the manager, i.e. once more.
+		require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, quickAction(event.ActionUnmanage)))
+		i = reloadIncidentRecursive(t, db, i)
+		require.Len(t, i.EscalationState, 3)
+		assert.NotNil(t, i.EscalationState[agedUnmanagedEscalationID])
+		assert.False(t, i.HasManager())
+		assert.Equal(t, []NotificationState{NotificationStateSent}, notifiedStates(t, db, i, unmanagedContact, ch.ID))
+		assert.Equal(t, []NotificationState{NotificationStateSent, NotificationStateSent}, notifiedStates(t, db, i, managedContact, ch.ID))
 	})
 
 	t.Run("Muted Escalation", func(t *testing.T) {

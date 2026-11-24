@@ -292,6 +292,12 @@ Escalations can use the `is_muted` condition to only trigger while the incident 
 incident either. Such an escalation is evaluated again whenever an event changes the incident's muted state, even
 without the `incident` field and even if it closes the incident, and triggers right away if its other conditions are met.
 
+Escalations can use the `is_managed` condition to only trigger while the incident has a manager (`is_managed = y`) or
+doesn't have one (`is_managed = n`). Escalations are evaluated again whenever someone takes over or gives up the
+incident, e.g. via the web interface, so they trigger right away if their other conditions are met as well. The
+recipients of an escalation triggered this way are notified once about the change, just like the other recipients of
+the incident, even though an incident with a manager otherwise only notifies the manager and the subscribers.
+
 ### Incomplete Relations
 
 Only events with the `incident` field set are checked for missing relations. If such an event lacks relations that
