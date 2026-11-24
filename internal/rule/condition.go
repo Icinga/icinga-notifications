@@ -16,6 +16,7 @@ type EscalationFilter struct {
 	IncidentAge      time.Duration
 	IncidentSeverity event.Severity
 	IsManaged        bool
+	IsMuted          bool
 }
 
 // ReevaluateAfter returns the duration after which escalationCond should be reevaluated the
@@ -44,7 +45,7 @@ func (e *EscalationFilter) ReevaluateAfter(escalationCond filter.Filter) time.Du
 }
 
 func (e *EscalationFilter) EvalEqual(key []string, value any) (bool, error) {
-	switch keyString(key) {
+	switch keyStr := keyString(key); keyStr {
 	case "incident_age":
 		age, err := time.ParseDuration(fmt.Sprint(value))
 		if err != nil {
@@ -60,12 +61,19 @@ func (e *EscalationFilter) EvalEqual(key []string, value any) (bool, error) {
 
 		return e.IncidentSeverity == severity, nil
 	case "is_managed":
-		managed, err := parseManagedValue(value)
+		managed, err := parseBoolValue(value, keyStr)
 		if err != nil {
 			return false, err
 		}
 
 		return e.IsManaged == managed, nil
+	case "is_muted":
+		muted, err := parseBoolValue(value, keyStr)
+		if err != nil {
+			return false, err
+		}
+
+		return e.IsMuted == muted, nil
 	default:
 		return false, nil
 	}
@@ -87,8 +95,8 @@ func (e *EscalationFilter) EvalLess(key []string, value any) (bool, error) {
 		}
 
 		return e.IncidentSeverity < severity, nil
-	case "is_managed":
-		return false, fmt.Errorf("is_managed only supports the equality operators (= and !=)")
+	case "is_managed", "is_muted":
+		return false, fmt.Errorf("%s only supports the equality operators (= and !=)", keyString(key))
 	default:
 		return false, nil
 	}
@@ -114,8 +122,8 @@ func (e *EscalationFilter) EvalLessOrEqual(key []string, value any) (bool, error
 		}
 
 		return e.IncidentSeverity <= severity, nil
-	case "is_managed":
-		return false, fmt.Errorf("is_managed only supports the equality operators (= and !=)")
+	case "is_managed", "is_muted":
+		return false, fmt.Errorf("%s only supports the equality operators (= and !=)", keyString(key))
 	default:
 		return false, nil
 	}
@@ -124,25 +132,24 @@ func (e *EscalationFilter) EvalLessOrEqual(key []string, value any) (bool, error
 func (e *EscalationFilter) EvalExists(key []string) bool {
 	switch keyString(key) {
 	case "incident_age":
-		fallthrough
 	case "incident_severity":
-		fallthrough
 	case "is_managed":
-		return true
+	case "is_muted":
 	default:
 		return false
 	}
+	return true
 }
 
-// parseManagedValue parses the value of the is_managed attribute, which is expected to be either "y" or "n".
-func parseManagedValue(value any) (bool, error) {
+// parseBoolValue parses the value of a boolean attribute, which is expected to be either "y" or "n".
+func parseBoolValue(value any, name string) (bool, error) {
 	switch v := fmt.Sprint(value); v {
 	case "y":
 		return true, nil
 	case "n":
 		return false, nil
 	default:
-		return false, fmt.Errorf(`invalid is_managed value %q, expected either "y" or "n"`, v)
+		return false, fmt.Errorf(`invalid %q value %q, expected either "y" or "n"`, name, v)
 	}
 }
 

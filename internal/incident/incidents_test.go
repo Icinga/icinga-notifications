@@ -146,9 +146,9 @@ func TestIncidents(t *testing.T) {
 	}
 	group := makeContactGroup(t, db, cleaner, "notified_contactgroup", groupMembers...)
 
-	var unmanagedEscalationID, managedEscalationID int64
+	var unmanagedEscalationID, managedEscalationID, unmutedEscalationID, mutedEscalationID int64
 	var basicRule, managedRule, notificationRule, triggerNotificationsRule, escalationsPassivelyNotifiedRule,
-		suppressionBypassRule, suppressionBypassKnownRule, contactGroupRule *rule.Rule
+		suppressionBypassRule, suppressionBypassKnownRule, contactGroupRule, mutedRule *rule.Rule
 	err = db.ExecTx(t.Context(), nil, func(ctx context.Context, tx *sqlx.Tx) error {
 		insertRule := func(name, filter string, ruleType rule.Type) *rule.Rule {
 			r := &rule.Rule{
@@ -170,6 +170,7 @@ func TestIncidents(t *testing.T) {
 		"op":"&",
 		"rules":[
 			{"op":"!=","attributes":["$.host.name"],"value":"managed_escalations"},
+			{"op":"!=","attributes":["$.host.name"],"value":"muted_escalations"},
 			{"op":"!=","attributes":["$.host.name"],"regex":"trigger_notifications*"},
 			{"op":"!=","attributes":["$.host.name"],"value":"notification_rule"},
 			{"op":"!=","attributes":["$.host.name"],"regex":"passive_notifications*"},
@@ -179,6 +180,7 @@ func TestIncidents(t *testing.T) {
 	}
 }`, rule.TypeEscalation)
 		managedRule = insertRule("Managed Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"managed_escalations"}}`, rule.TypeEscalation)
+		mutedRule = insertRule("Muted Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"value":"muted_escalations"}}`, rule.TypeEscalation)
 		triggerNotificationsRule = insertRule("Trigger Notifications Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"trigger_notifications*"}}`, rule.TypeEscalation)
 		escalationsPassivelyNotifiedRule = insertRule("Passively Notify Escalation Recipients Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"passive_notifications*"}}`, rule.TypeEscalation)
 		notificationRule = insertRule("Notification Test Rule", `{"ast":{"op":"=","attributes":["$.host.name"],"regex":"notifications_rule*"}}`, rule.TypeNotification)
@@ -224,6 +226,9 @@ func TestIncidents(t *testing.T) {
 
 		unmanagedEscalationID = insertEntry(contact, 1, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"n"}}`)
 		managedEscalationID = insertEntry(contact, 2, managedRule.ID, `{"ast":{"op":"=","attributes":["is_managed"],"value":"y"}}`)
+
+		unmutedEscalationID = insertEntry(contact, 1, mutedRule.ID, `{"ast":{"op":"=","attributes":["is_muted"],"value":"n"}}`)
+		mutedEscalationID = insertEntry(contact, 2, mutedRule.ID, `{"ast":{"op":"=","attributes":["is_muted"],"value":"y"}}`)
 
 		insertEntry(nil, 1, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"warning"}}`)
 		insertEntry(nil, 2, triggerNotificationsRule.ID, `{"ast":{"op":">=","attributes":["incident_severity"],"value":"error"}}`)
@@ -271,6 +276,7 @@ func TestIncidents(t *testing.T) {
 	for _, r := range []*rule.Rule{
 		basicRule,
 		managedRule,
+		mutedRule,
 		notificationRule,
 		triggerNotificationsRule,
 		escalationsPassivelyNotifiedRule,
@@ -291,7 +297,7 @@ func TestIncidents(t *testing.T) {
 	require.NotNil(t, runtimeConfig.Rules[notificationRule.ID])
 	require.NotNil(t, runtimeConfig.Rules[triggerNotificationsRule.ID])
 	require.NotNil(t, runtimeConfig.Rules[contactGroupRule.ID])
-	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 8)
+	require.Len(t, slices.Collect(runtimeConfig.Sources[source.ID].RuleIDs()), 9)
 
 	t.Run("YieldIncidents", func(t *testing.T) {
 		t.Parallel()
@@ -960,6 +966,87 @@ func TestIncidents(t *testing.T) {
 		assert.NotNil(t, i.EscalationState[unmanagedEscalationID])
 		assert.NotNil(t, i.EscalationState[managedEscalationID])
 		assert.True(t, i.HasManager())
+	})
+
+	t.Run("Muted Escalation", func(t *testing.T) {
+		t.Parallel()
+
+		relations := map[string]any{"host": map[string]string{"name": "muted_escalations"}}
+		escalated := func(i *Incident) (unmutedEscalationTriggered, mutedEscalationTriggered bool) {
+			state := reloadIncidentRecursive(t, db, i).EscalationState
+			return state[unmutedEscalationID] != nil, state[mutedEscalationID] != nil
+		}
+
+		t.Run("Unmute", func(t *testing.T) {
+			t.Parallel()
+
+			i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+				withIncident(true), withRelations(relations), withMuted(true)))
+			tags := mustIncidentObject(t, i).Tags
+
+			// Only the escalation requiring a muted incident is triggered.
+			unmutedEscalationTriggered, mutedEscalationTriggered := escalated(i)
+			assert.False(t, unmutedEscalationTriggered)
+			assert.True(t, mutedEscalationTriggered)
+
+			// Updating the muted incident doesn't change that.
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				withIncident(true), withRelations(relations), withTags(tags))))
+			unmutedEscalationTriggered, _ = escalated(i)
+			assert.False(t, unmutedEscalationTriggered)
+
+			// Unmuting it, even without the incident flag, immediately triggers the other escalation.
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				withMuted(false), withRelations(relations), withTags(tags))))
+			assert.False(t, reloadIncident(t, db, i).IsMuted())
+			unmutedEscalationTriggered, mutedEscalationTriggered = escalated(i)
+			assert.True(t, unmutedEscalationTriggered)
+			assert.True(t, mutedEscalationTriggered)
+		})
+
+		t.Run("Mute", func(t *testing.T) {
+			t.Parallel()
+
+			i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+				withIncident(true), withRelations(relations)))
+			tags := mustIncidentObject(t, i).Tags
+
+			// Only the escalation requiring an unmuted incident is triggered.
+			unmutedEscalationTriggered, mutedEscalationTriggered := escalated(i)
+			assert.True(t, unmutedEscalationTriggered)
+			assert.False(t, mutedEscalationTriggered)
+
+			// Muting it, even without the incident flag, immediately triggers the other escalation.
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				withMuted(true), withRelations(relations), withTags(tags))))
+			assert.True(t, reloadIncident(t, db, i).IsMuted())
+			unmutedEscalationTriggered, mutedEscalationTriggered = escalated(i)
+			assert.True(t, unmutedEscalationTriggered)
+			assert.True(t, mutedEscalationTriggered)
+		})
+
+		t.Run("Unmute And Close", func(t *testing.T) {
+			t.Parallel()
+
+			i := makeIncident(db, logs, runtimeConfig, t, makeEvent(t, source.ID,
+				withIncident(true), withRelations(relations), withMuted(true)))
+			tags := mustIncidentObject(t, i).Tags
+
+			unmutedEscalationTriggered, _ := escalated(i)
+			assert.False(t, unmutedEscalationTriggered)
+
+			// The unmute is a mute state change, so escalations are evaluated even though the incident is closed.
+			require.NoError(t, Process(t.Context(), db, logs, runtimeConfig, makeEvent(t, source.ID,
+				withClose(), withMuted(false), withRelations(relations), withTags(tags))))
+			i = reloadIncident(t, db, i)
+			assert.NotZero(t, i.RecoveredAt, "incident must be closed")
+
+			var triggered int
+			require.NoError(t, db.GetContext(t.Context(), &triggered, db.Rebind(
+				`SELECT COUNT(*) FROM incident_rule_escalation_state WHERE incident_id = ? AND rule_entry_id = ?`),
+				i.Id, unmutedEscalationID))
+			assert.Equal(t, 1, triggered)
+		})
 	})
 
 	t.Run("Contact Group Notified", func(t *testing.T) {

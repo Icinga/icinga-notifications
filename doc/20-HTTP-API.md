@@ -287,6 +287,11 @@ The mute only takes effect after the event that sets it has been processed. That
 sent, including those of an incident opened with `muted: true`. Furthermore, recipients of an escalation that triggers
 while the incident is muted are notified once, as the mute doesn't apply to them yet.
 
+Escalations can use the `is_muted` condition to only trigger while the incident is muted (`is_muted = y`) or not muted
+(`is_muted = n`). An escalation whose condition doesn't match isn't triggered, so its recipients aren't added to the
+incident either. Such an escalation is evaluated again whenever an event changes the incident's muted state, even
+without the `incident` field and even if it closes the incident, and triggers right away if its other conditions are met.
+
 ### Incomplete Relations
 
 Only events with the `incident` field set are checked for missing relations. If such an event lacks relations that
