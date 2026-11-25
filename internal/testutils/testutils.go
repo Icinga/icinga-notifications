@@ -130,7 +130,7 @@ func GetTestDB(ctx context.Context, t *testing.T, dbConfig *database.Config) *da
 //
 // It sets the logging level to Debug and uses a zaptest logger to capture logs during tests.
 func GetTestLogging(t *testing.T) *logging.Logging {
-	return logging.NewLoggingWithFactory("testing", zapcore.DebugLevel, time.Second, func(level zap.AtomicLevel) zapcore.Core {
+	return logging.NewLoggingWithFactory("testing", zapcore.DebugLevel, time.Second, true, func(level zap.AtomicLevel) zapcore.Core {
 		return zaptest.NewLogger(t, zaptest.Level(level.Level())).Core()
 	})
 }
