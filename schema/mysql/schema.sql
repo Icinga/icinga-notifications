@@ -495,6 +495,8 @@ CREATE TABLE notification_history (
     schedule_id bigint,
     channel_id bigint NOT NULL,
     incident_id bigint,
+    rule_id bigint, -- The event rule this notification is attributed to, if any.
+    rule_entry_id bigint, -- The specific rule entry this notification is attributed to, if any.
     event_message longtext NOT NULL,
     event_summary longtext NOT NULL,
     state enum('sent', 'failed'),
@@ -567,4 +569,4 @@ CREATE TABLE notifications_schema (
     CONSTRAINT uk_notifications_schema_version UNIQUE (version)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
-INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0.0-2', UNIX_TIMESTAMP() * 1000);
+INSERT INTO notifications_schema(version, timestamp) VALUES('v1.0.0-3', UNIX_TIMESTAMP() * 1000);
