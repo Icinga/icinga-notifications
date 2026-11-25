@@ -7,6 +7,7 @@ import (
 	"time"
 
 	baseEv "github.com/icinga/icinga-go-library/notifications/event"
+	"github.com/icinga/icinga-go-library/notifications/plugin"
 	"github.com/icinga/icinga-go-library/utils"
 )
 
@@ -88,7 +89,7 @@ func severityChangeDisplay(s baseEv.Severity, r *notifyReason) string {
 // renderNotification builds the default one-line summary and multi-line body for a notification.
 //
 // The text is based on <https://github.com/Icinga/icinga-notifications/issues/536>.
-func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) {
+func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string, details []plugin.DeliveryDetail) {
 	if ctx.IncidentSummary == "" {
 		summary, _, _ := strings.Cut(strings.TrimLeft(ctx.IncidentMessage, "\n\t "), "\n")
 		ctx.IncidentSummary = utils.EllipsizeRunes(summary, baseEv.MaxSummaryLen)
@@ -101,6 +102,9 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 	switch r.Kind {
 	case ReasonOpened:
 		summary = fmt.Sprintf("[%s] Incident opened: %s", ctx.ObjectName, ctx.IncidentSummary)
+		if !r.Closing {
+			addSeverityDetails(ctx, &details)
+		}
 
 		switch {
 		case r.Closing:
@@ -118,6 +122,7 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 				ctx.IncidentMessage)
 
 		case r.CurrentlyMuted:
+			addMutingDetails(r, ctx, true, &details)
 			body = fmt.Sprintf(
 				"A new incident has been opened by %s for %s.\n\n"+
 					"The incident is muted. You will not receive further notifications until it is unmuted.\n\n"+
@@ -153,6 +158,7 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 
 		switch {
 		case r.Closing:
+			addResponsibleDetails(r, ctx, &details)
 			body = fmt.Sprintf(
 				"An incident opened by %s for %s was escalated to you.\n\n"+
 					"This will remain the only notification as the incident has already been closed.\n\n"+
@@ -169,6 +175,10 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 				ctx.IncidentMessage)
 
 		case r.CurrentlyMuted && (r.SeverityImproved || r.SeverityWorsened):
+			addMutingDetails(r, ctx, true, &details)
+			addSeverityChangeDetails(r, ctx, &details)
+			addResponsibleDetails(r, ctx, &details)
+
 			body = fmt.Sprintf(
 				"An incident opened by %s for %s was escalated to you.\n\n"+
 					"The incident is muted. You will not receive further notifications until it is unmuted.\n\n"+
@@ -187,6 +197,10 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 				ctx.IncidentMessage)
 
 		case r.CurrentlyMuted:
+			addMutingDetails(r, ctx, true, &details)
+			addSeverityDetails(ctx, &details)
+			addResponsibleDetails(r, ctx, &details)
+
 			body = fmt.Sprintf(
 				"An incident opened by %s for %s was escalated to you.\n\n"+
 					"The incident is muted. You will not receive further notifications until it is unmuted.\n\n"+
@@ -207,6 +221,10 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 				ctx.IncidentMessage)
 
 		case r.JustUnmuted:
+			addMutingDetails(r, ctx, false, &details)
+			addSeverityDetails(ctx, &details)
+			addResponsibleDetails(r, ctx, &details)
+
 			body = fmt.Sprintf(
 				"An incident opened by %s for %s was escalated to you.\n\n"+
 					"Severity:      %s\n"+
@@ -222,6 +240,9 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 				ctx.IncidentMessage)
 
 		case r.SeverityImproved, r.SeverityWorsened:
+			addSeverityChangeDetails(r, ctx, &details)
+			addResponsibleDetails(r, ctx, &details)
+
 			body = fmt.Sprintf(
 				"An incident opened by %s for %s was escalated to you.\n\n"+
 					"Severity:    %s (was %s)\n"+
@@ -237,6 +258,14 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 				ctx.IncidentMessage)
 
 		default:
+			addSeverityDetails(ctx, &details)
+			addResponsibleDetails(r, ctx, &details)
+			details = append(details, plugin.DeliveryDetail{
+				Type:  "text",
+				Label: "Incident Age",
+				Value: formatDuration(ctx.Age),
+			})
+
 			body = fmt.Sprintf(
 				"An incident opened by %s for %s was escalated to you.\n\n"+
 					"Severity:    %s\n"+
@@ -259,6 +288,7 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 
 		var unmuted string
 		if r.JustUnmuted {
+			addMutingDetails(r, ctx, false, &details)
 			unmuted = fmt.Sprintf(
 				"The incident was muted until now. You will receive further notifications from now on.\n\n"+
 					"Unmute Reason: %s\n",
@@ -267,6 +297,9 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 
 		switch {
 		case r.SeverityImproved:
+			addSeverityChangeDetails(r, ctx, &details)
+			addResponsibleDetails(r, ctx, &details)
+
 			summary = fmt.Sprintf("[%s] Incident improved: %s", ctx.ObjectName, ctx.IncidentSummary)
 			body = fmt.Sprintf(
 				"An incident opened by %s for %s has improved.\n\n"+
@@ -285,6 +318,9 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 				ctx.IncidentMessage)
 
 		case r.SeverityWorsened:
+			addSeverityChangeDetails(r, ctx, &details)
+			addResponsibleDetails(r, ctx, &details)
+
 			summary = fmt.Sprintf("[%s] Incident worsened: %s", ctx.ObjectName, ctx.IncidentSummary)
 			body = fmt.Sprintf(
 				"An incident opened by %s for %s has worsened.\n\n"+
@@ -303,6 +339,9 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 				ctx.IncidentMessage)
 
 		default:
+			addSeverityDetails(ctx, &details)
+			addResponsibleDetails(r, ctx, &details)
+
 			summary = fmt.Sprintf("[%s] Incident updated: %s", ctx.ObjectName, ctx.IncidentSummary)
 			body = fmt.Sprintf(
 				"An incident opened by %s for %s has been updated.\n\n"+
@@ -320,6 +359,8 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 		}
 
 	case ReasonResolved:
+		addResponsibleDetails(r, ctx, &details)
+
 		summary = fmt.Sprintf("[%s] Incident resolved: %s", ctx.ObjectName, ctx.IncidentSummary)
 		body = fmt.Sprintf(
 			"An incident opened by %s for %s has been resolved.\n\n"+
@@ -336,6 +377,9 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 			ctx.IncidentMessage)
 
 	case ReasonMuted:
+		addMutingDetails(r, ctx, true, &details)
+		addSeverityDetails(ctx, &details)
+
 		summary = fmt.Sprintf("[%s] Incident muted: %s", ctx.ObjectName, ctx.IncidentSummary)
 		body = fmt.Sprintf(
 			"An incident opened by %s for %s has been muted.\n\n"+
@@ -352,6 +396,9 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 			ctx.IncidentMessage)
 
 	case ReasonUnmuted:
+		addMutingDetails(r, ctx, false, &details)
+		addSeverityDetails(ctx, &details)
+
 		summary = fmt.Sprintf("[%s] Incident unmuted: %s", ctx.ObjectName, ctx.IncidentSummary)
 		body = fmt.Sprintf(
 			"An incident opened by %s for %s has been unmuted.\n\n"+
@@ -368,6 +415,9 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 			ctx.IncidentMessage)
 
 	case ReasonManaged:
+		addSeverityDetails(ctx, &details)
+		addResponsibleDetails(r, ctx, &details)
+
 		summary = fmt.Sprintf("[%s] Incident assigned: %s", ctx.ObjectName, ctx.IncidentSummary)
 		body = fmt.Sprintf(
 			"An incident opened by %s for %s has been assigned to %s.\n\n"+
@@ -386,6 +436,9 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 			ctx.IncidentMessage)
 
 	case ReasonUnmanaged:
+		addSeverityDetails(ctx, &details)
+		addResponsibleDetails(r, ctx, &details)
+
 		summary = fmt.Sprintf("[%s] Incident unassigned: %s", ctx.ObjectName, ctx.IncidentSummary)
 		body = fmt.Sprintf(
 			"An incident opened by %s for %s has been unassigned from %s.\n\n"+
@@ -416,6 +469,9 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 			"\n\n")
 
 	case ReasonIncidentEvent:
+		addSeverityDetails(ctx, &details)
+		addResponsibleDetails(r, ctx, &details)
+
 		summary = fmt.Sprintf("[%s] Incident updated: %s", ctx.ObjectName, ctx.EventSummary)
 		body = fmt.Sprintf(
 			"An incident opened by %s for %s has been updated.\n\n"+
@@ -432,5 +488,81 @@ func renderNotification(r *notifyReason, ctx *renderCtx) (summary, body string) 
 			ctx.EventMessage)
 	}
 
-	return summary, body
+	return summary, body, details
+}
+
+// addSeverityChangeDetails appends the new and old severity to the details slice.
+func addSeverityChangeDetails(r *notifyReason, ctx *renderCtx, details *[]plugin.DeliveryDetail) {
+	*details = append(
+		*details,
+		plugin.DeliveryDetail{
+			Type:  "severity",
+			Label: "New Severity",
+			Value: ctx.Severity,
+		},
+		plugin.DeliveryDetail{
+			Type:  "severity",
+			Label: "Old Severity",
+			Value: r.OldSeverity,
+		},
+	)
+}
+
+// addSeverityDetails appends the current severity to the details slice.
+func addSeverityDetails(ctx *renderCtx, details *[]plugin.DeliveryDetail) {
+	*details = append(*details, plugin.DeliveryDetail{
+		Type:  "severity",
+		Label: "Severity",
+		Value: ctx.Severity,
+	})
+}
+
+// addMutingDetails appends the mute status and reason to the details slice.
+func addMutingDetails(r *notifyReason, ctx *renderCtx, v bool, details *[]plugin.DeliveryDetail) {
+	*details = append(*details, plugin.DeliveryDetail{
+		Type:  "boolean",
+		Label: "Is Muted",
+		Value: v,
+	})
+
+	if v {
+		*details = append(*details, plugin.DeliveryDetail{
+			Type:  "text",
+			Label: "Mute Reason",
+			Value: ctx.MuteReason,
+		})
+	} else {
+		*details = append(*details, plugin.DeliveryDetail{
+			Type:  "text",
+			Label: "Unmute Reason",
+			Value: r.UnmuteReason,
+		})
+	}
+}
+
+// addResponsibleDetails appends the responsible manager to the details slice, or the previous manager
+// if the incident is currently unmanaged.
+func addResponsibleDetails(r *notifyReason, ctx *renderCtx, details *[]plugin.DeliveryDetail) {
+	if ctx.ManagerName != "" || r.Kind == ReasonManaged {
+		var responsible string
+		if r.Kind == ReasonManaged {
+			responsible = r.ManagerName
+		} else {
+			responsible = ctx.ManagerName
+		}
+		*details = append(*details, plugin.DeliveryDetail{
+			Type:  "text",
+			Label: "Responsible",
+			Value: responsible,
+		})
+		return
+	}
+
+	if r.Kind == ReasonUnmanaged {
+		*details = append(*details, plugin.DeliveryDetail{
+			Type:  "text",
+			Label: "Was Responsible",
+			Value: r.ManagerName,
+		})
+	}
 }
